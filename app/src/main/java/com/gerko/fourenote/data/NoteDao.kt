@@ -19,6 +19,13 @@ interface NoteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(note: Note)
 
+    /**
+     * Updates only the Drive sync bookkeeping fields, deliberately leaving [Note.updatedAt]
+     * untouched so recording a successful upload doesn't itself mark the note as freshly edited.
+     */
+    @Query("UPDATE notes SET driveFileId = :driveFileId, lastSyncedAt = :syncedAt WHERE id = :id")
+    suspend fun updateSyncMetadata(id: String, driveFileId: String, syncedAt: Long)
+
     @Update
     suspend fun update(note: Note)
 

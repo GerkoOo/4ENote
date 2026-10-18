@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.gerko.fourenote.data.NoteRepository
+import com.gerko.fourenote.sync.DriveSyncManager
 import com.gerko.fourenote.ui.editor.NoteEditorScreen
 import com.gerko.fourenote.ui.notelist.NoteListScreen
 import com.gerko.fourenote.ui.notelist.NoteListViewModel
@@ -20,12 +21,13 @@ private object Routes {
 @Composable
 fun FourENoteNavGraph(
     repository: NoteRepository,
+    driveSyncManager: DriveSyncManager,
     navController: NavHostController = rememberNavController(),
 ) {
     NavHost(navController = navController, startDestination = Routes.NOTE_LIST) {
         composable(Routes.NOTE_LIST) {
             val viewModel: NoteListViewModel = viewModel(
-                factory = NoteListViewModel.Factory(repository),
+                factory = NoteListViewModel.Factory(repository, driveSyncManager),
             )
             NoteListScreen(
                 viewModel = viewModel,
