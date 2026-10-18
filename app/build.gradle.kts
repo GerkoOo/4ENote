@@ -63,6 +63,16 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
 
+    // androidx.ink: low-latency stylus/touch authoring + rendering for the handwriting canvas.
+    // 1.0.0 is the latest *stable* release (1.1.0 is alpha-only as of writing); see PR description.
+    implementation("androidx.ink:ink-authoring-compose:1.0.0")
+    implementation("androidx.ink:ink-authoring:1.0.0")
+    implementation("androidx.ink:ink-brush:1.0.0")
+    implementation("androidx.ink:ink-geometry:1.0.0")
+    implementation("androidx.ink:ink-rendering:1.0.0")
+    implementation("androidx.ink:ink-strokes:1.0.0")
+    implementation("androidx.ink:ink-storage:1.0.0")
+
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

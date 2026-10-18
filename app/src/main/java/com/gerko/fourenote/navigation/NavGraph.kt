@@ -34,7 +34,11 @@ fun FourENoteNavGraph(
         }
         composable(Routes.NOTE_EDITOR) { backStackEntry ->
             val noteId = backStackEntry.arguments?.getString("noteId") ?: return@composable
-            NoteEditorScreen(noteId = noteId)
+            NoteEditorScreen(
+                noteId = noteId,
+                repository = repository,
+                onNavigateBack = { navController.popBackStack() },
+            )
         }
     }
 }
