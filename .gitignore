@@ -16,3 +16,4 @@ app/release/
 *.jks
 google-services.json
 /drive-credentials*
+/.claude/
