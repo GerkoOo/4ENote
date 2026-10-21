@@ -1,7 +1,7 @@
 # 4ENote
 
 A native Android handwriting note-taking app with Google Drive sync, built for
-personal study use. Source available, free for noncommercial use (see [License](#license)).
+personal study use. Open source (GPL-3.0).
 
 ## Stack
 
@@ -28,11 +28,10 @@ and `local.properties` pointing `sdk.dir` at your SDK (not committed).
 
 ## License
 
-4ENote is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
-You may use, study, change and share it for any noncommercial purpose, such as
-personal use, study, hobby projects, schools and charities. Selling it, or using
-it for commercial purposes, is not allowed without written permission from the
-author.
+4ENote is licensed under the [GNU General Public License v3.0](LICENSE).
+You may use, study, change and share it. Anyone who shares 4ENote, or an app
+built from its code, must release their full source code under the same
+license.
 
 Versions published before this license change were released under the MIT
 License, and those copies remain under MIT.
