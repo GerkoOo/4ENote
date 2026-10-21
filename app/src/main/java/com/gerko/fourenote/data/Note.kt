@@ -1,13 +1,22 @@
 package com.gerko.fourenote.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.util.UUID
 
 /**
- * Shared contract between the handwriting canvas and Drive sync features.
- * [inkData] holds serialized stroke data (format owned by the canvas feature).
- * [driveFileId]/[lastSyncedAt] are null until the sync feature uploads the note.
+ * Shared contract between the handwriting canvas and cloud sync.
+ * [inkData] holds serialized stroke data (see InkSerializer).
+ *
+ * Sync bookkeeping:
+ * - [dirty]: changed on this device since the last successful sync.
+ * - [deleted]: a tombstone kept until the deletion has reached the cloud.
+ * - [remoteId]/[remotePdfId]: the note's files in the connected cloud.
+ * - [remoteVersion]: the cloud file's version when we last synced, so we can
+ *   tell whether another device has changed it since.
+ * - [syncedSnapshot]: the note file as of the last sync; the common ancestor
+ *   used to merge edits made on two devices.
  */
 @Entity(tableName = "notes")
 data class Note(
@@ -16,6 +25,12 @@ data class Note(
     val inkData: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val driveFileId: String? = null,
+    // Column keeps its original name so existing databases need no table rebuild.
+    @ColumnInfo(name = "driveFileId") val remoteId: String? = null,
     val lastSyncedAt: Long? = null,
+    @ColumnInfo(defaultValue = "0") val deleted: Boolean = false,
+    @ColumnInfo(defaultValue = "1") val dirty: Boolean = true,
+    val remoteVersion: String? = null,
+    val remotePdfId: String? = null,
+    @ColumnInfo(defaultValue = "") val syncedSnapshot: String = "",
 )

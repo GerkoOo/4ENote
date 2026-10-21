@@ -1,0 +1,287 @@
+package com.gerko.fourenote.data.sync
+
+import com.gerko.fourenote.data.Note
+import com.gerko.fourenote.data.ink.InkDocument
+import com.gerko.fourenote.data.ink.InkPage
+import com.gerko.fourenote.data.ink.InkSerializer
+import com.gerko.fourenote.data.ink.InkStroke
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+
+/** Two simulated tablets, A and B, syncing through one shared cloud folder. */
+class SyncEngineTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private var now = 1_000L
+    private val clock = { now++ }
+    private lateinit var cloudDir: java.io.File
+    private lateinit var a: Device
+    private lateinit var b: Device
+
+    /** Mirrors the Room-backed repository: saving marks a note dirty with a fresh timestamp. */
+    private inner class Device : SyncStore {
+        val notes = linkedMapOf<String, Note>()
+        val open = mutableSetOf<String>()
+        val engine = SyncEngine(
+            this,
+            LocalFolderCloudProvider(cloudDir),
+            pdfExporter = { note -> tmp.newFile().apply { writeText("PDF ${note.title}") } },
+            clock = clock,
+        )
+
+        fun save(note: Note) {
+            notes[note.id] = note.copy(updatedAt = clock(), dirty = true)
+        }
+
+        fun delete(id: String) {
+            notes[id] = notes.getValue(id).copy(deleted = true, dirty = true, updatedAt = clock())
+        }
+
+        fun strokeIds(id: String) = InkSerializer.decode(notes.getValue(id).inkData).pages.flatMap { it.strokes }.map { it.id }.toSet()
+
+        fun pageIds(id: String) = InkSerializer.decode(notes.getValue(id).inkData).pages.map { it.id }
+
+        fun sync() = runBlocking { engine.sync() }
+
+        override suspend fun notesForSync() = notes.values.toList()
+        override fun isOpen(noteId: String) = noteId in open
+        override suspend fun insertFromCloud(note: Note) {
+            notes[note.id] = note
+        }
+
+        override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean {
+            val current = notes[note.id] ?: return false
+            if (current.updatedAt != expectedUpdatedAt) return false
+            notes[note.id] = current.copy(
+                title = note.title, inkData = note.inkData, createdAt = note.createdAt,
+                updatedAt = note.updatedAt, dirty = dirty,
+            )
+            return true
+        }
+
+        override suspend fun markSynced(noteId: String, file: RemoteFile, pdfId: String?, snapshot: String, expectedUpdatedAt: Long) {
+            val current = notes[noteId] ?: return
+            notes[noteId] = current.copy(
+                remoteId = file.id, remotePdfId = pdfId, remoteVersion = file.version,
+                syncedSnapshot = snapshot, lastSyncedAt = clock(),
+                dirty = current.updatedAt != expectedUpdatedAt,
+            )
+        }
+
+        override suspend fun purge(noteId: String) {
+            notes.remove(noteId)
+        }
+    }
+
+    private fun stroke(id: String) = InkStroke(color = 0, width = 3f, highlighter = false, points = floatArrayOf(0f, 0f, 10f, 10f), id = id)
+
+    private fun ink(vararg ids: String) = InkSerializer.encode(InkDocument(listOf(InkPage(id = "p1", strokes = ids.map(::stroke)))))
+
+    private fun Device.addStrokes(noteId: String, vararg ids: String) {
+        val note = notes.getValue(noteId)
+        val doc = InkSerializer.decode(note.inkData)
+        val first = doc.pages.first()
+        val pages = listOf(first.copy(strokes = first.strokes + ids.map(::stroke))) + doc.pages.drop(1)
+        save(note.copy(inkData = InkSerializer.encode(doc.copy(pages = pages))))
+    }
+
+    private fun Device.removeStroke(noteId: String, id: String) {
+        val note = notes.getValue(noteId)
+        val doc = InkSerializer.decode(note.inkData)
+        val pages = doc.pages.map { page -> page.copy(strokes = page.strokes.filter { it.id != id }) }
+        save(note.copy(inkData = InkSerializer.encode(doc.copy(pages = pages))))
+    }
+
+    private fun cloudFiles() = cloudDir.listFiles().orEmpty().map { it.name }.sorted()
+
+    /** Creates a note with strokes s1, s2 on A and syncs it to B. */
+    private fun sharedNote(): String {
+        a.save(Note(id = "n1", title = "Biology", inkData = ink("s1", "s2")))
+        a.sync()
+        b.sync()
+        return "n1"
+    }
+
+    @Before
+    fun setUp() {
+        cloudDir = tmp.newFolder("cloud")
+        a = Device()
+        b = Device()
+    }
+
+    @Test
+    fun noteCreatedOnOneDeviceAppearsOnTheOther() {
+        sharedNote()
+        assertEquals("Biology", b.notes.getValue("n1").title)
+        assertEquals(setOf("s1", "s2"), b.strokeIds("n1"))
+        assertEquals(false, b.notes.getValue("n1").dirty)
+        assertEquals(listOf("Biology (n1).pdf", "n1.4enote"), cloudFiles())
+        assertEquals("PDF Biology", java.io.File(cloudDir, "Biology (n1).pdf").readText())
+    }
+
+    @Test
+    fun editOnOneDeviceUpdatesTheOther() {
+        sharedNote()
+        b.addStrokes("n1", "s3")
+        b.sync()
+        val result = a.sync()
+        assertEquals(1, result.downloaded)
+        assertEquals(setOf("s1", "s2", "s3"), a.strokeIds("n1"))
+    }
+
+    @Test
+    fun simultaneousEditsOnBothDevicesAreMerged() {
+        sharedNote()
+        a.addStrokes("n1", "fromA")
+        b.addStrokes("n1", "fromB")
+        a.sync()
+        assertEquals(1, b.sync().merged)
+        a.sync()
+        val expected = setOf("s1", "s2", "fromA", "fromB")
+        assertEquals(expected, a.strokeIds("n1"))
+        assertEquals(expected, b.strokeIds("n1"))
+    }
+
+    @Test
+    fun eraseOnOneDeviceAndAddOnTheOtherBothSurvive() {
+        sharedNote()
+        a.removeStroke("n1", "s1")
+        b.addStrokes("n1", "s3")
+        a.sync()
+        b.sync()
+        a.sync()
+        assertEquals(setOf("s2", "s3"), a.strokeIds("n1"))
+        assertEquals(setOf("s2", "s3"), b.strokeIds("n1"))
+    }
+
+    @Test
+    fun deleteOnOneDeviceRemovesItEverywhere() {
+        sharedNote()
+        a.delete("n1")
+        assertEquals(1, a.sync().deletedInCloud)
+        assertEquals(1, b.sync().deletedHere)
+        assertNull(b.notes["n1"])
+        assertTrue(cloudFiles().isEmpty())
+    }
+
+    @Test
+    fun editBeatsDeleteFromAnotherDevice() {
+        sharedNote()
+        a.delete("n1")
+        b.addStrokes("n1", "s3")
+        a.sync()
+        b.sync()
+        a.sync()
+        assertEquals(setOf("s1", "s2", "s3"), a.strokeIds("n1"))
+        assertEquals(setOf("s1", "s2", "s3"), b.strokeIds("n1"))
+    }
+
+    @Test
+    fun renameOnBothDevicesKeepsTheNewestTitle() {
+        sharedNote()
+        a.save(a.notes.getValue("n1").copy(title = "Bio (A)"))
+        b.save(b.notes.getValue("n1").copy(title = "Bio (B)"))
+        a.sync()
+        b.sync()
+        a.sync()
+        assertEquals("Bio (B)", a.notes.getValue("n1").title)
+        assertEquals("Bio (B)", b.notes.getValue("n1").title)
+    }
+
+    @Test
+    fun pdfCopyIsUpdatedInPlaceNotDuplicated() {
+        sharedNote()
+        b.save(b.notes.getValue("n1").copy(title = "Chemistry"))
+        b.sync()
+        assertEquals(listOf("Chemistry (n1).pdf", "n1.4enote"), cloudFiles())
+    }
+
+    private fun Device.addPage(noteId: String, pageId: String) {
+        val note = notes.getValue(noteId)
+        val doc = InkSerializer.decode(note.inkData)
+        save(note.copy(inkData = InkSerializer.encode(doc.copy(pages = doc.pages + InkPage(id = pageId)))))
+    }
+
+    @Test
+    fun pagesAddedOnBothDevicesAreAllKept() {
+        sharedNote()
+        a.addPage("n1", "pageA")
+        b.addPage("n1", "pageB")
+        a.sync()
+        b.sync()
+        a.sync()
+        // Both devices end up with every page, in the same order.
+        assertEquals(setOf("p1", "pageA", "pageB"), a.pageIds("n1").toSet())
+        assertEquals(a.pageIds("n1"), b.pageIds("n1"))
+    }
+
+    private fun Device.editImages(noteId: String, change: (List<com.gerko.fourenote.data.ink.PageImage>) -> List<com.gerko.fourenote.data.ink.PageImage>) {
+        val note = notes.getValue(noteId)
+        val doc = InkSerializer.decode(note.inkData)
+        val first = doc.pages.first()
+        save(note.copy(inkData = InkSerializer.encode(doc.copy(pages = listOf(first.copy(images = change(first.images))) + doc.pages.drop(1)))))
+    }
+
+    private fun Device.imageX(noteId: String) = InkSerializer.decode(notes.getValue(noteId).inkData).pages.first().images.single().x
+
+    @Test
+    fun pictureMovedOnOneDeviceWhileTheOtherWritesKeepsTheMove() {
+        sharedNote()
+        a.editImages("n1") { listOf(com.gerko.fourenote.data.ink.PageImage(id = "img", file = "a.png", x = 10f, y = 10f, width = 50f, height = 50f)) }
+        a.sync()
+        b.sync()
+        // B moves the picture while A writes on the same page.
+        b.editImages("n1") { images -> images.map { it.copy(x = 300f) } }
+        a.addStrokes("n1", "fromA")
+        b.sync()
+        a.sync()
+        b.sync()
+        assertEquals(300f, a.imageX("n1"))
+        assertEquals(300f, b.imageX("n1"))
+        assertTrue("fromA" in b.strokeIds("n1"))
+    }
+
+    @Test
+    fun noteTooLongForAPdfCopyStillSyncs() {
+        val engine = SyncEngine(a, LocalFolderCloudProvider(cloudDir), pdfExporter = { null }, clock = clock)
+        a.save(Note(id = "big", title = "Lecture", inkData = ink("s1")))
+        runBlocking { engine.sync() }
+        b.sync()
+        assertEquals(setOf("s1"), b.strokeIds("big"))
+        assertEquals(listOf("big.4enote"), cloudFiles())
+    }
+
+    @Test
+    fun missingPdfCopyIsAddedOnALaterSync() {
+        // First synced by a version that skipped the PDF copy...
+        val withoutPdf = SyncEngine(a, LocalFolderCloudProvider(cloudDir), pdfExporter = { null }, clock = clock)
+        a.save(Note(id = "big", title = "Lecture", inkData = ink("s1")))
+        runBlocking { withoutPdf.sync() }
+        assertEquals(listOf("big.4enote"), cloudFiles())
+        // ...then the next sync, with a working exporter, adds it without any edit.
+        assertEquals(1, a.sync().uploaded)
+        assertEquals(listOf("Lecture (big).pdf", "big.4enote"), cloudFiles())
+        // And once it is there, quiet syncs upload nothing.
+        assertEquals(0, a.sync().uploaded)
+    }
+
+    @Test
+    fun noteOpenInTheEditorIsLeftAloneUntilClosed() {
+        sharedNote()
+        b.addStrokes("n1", "s3")
+        b.sync()
+        a.open += "n1"
+        assertEquals(1, a.sync().skippedOpen)
+        assertEquals(setOf("s1", "s2"), a.strokeIds("n1"))
+        a.open -= "n1"
+        a.sync()
+        assertEquals(setOf("s1", "s2", "s3"), a.strokeIds("n1"))
+    }
+}

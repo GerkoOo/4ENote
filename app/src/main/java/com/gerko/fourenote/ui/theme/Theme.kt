@@ -1,6 +1,5 @@
 package com.gerko.fourenote.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -21,9 +20,10 @@ private val DarkColors = darkColorScheme(
     error = Error40,
 )
 
+/** 4ENote starts in dark mode; the note list has a switch for light mode. */
 @Composable
 fun FourENoteTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
