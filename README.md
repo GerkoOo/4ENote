@@ -1,7 +1,7 @@
 # 4ENote
 
 A native Android handwriting note-taking app with Google Drive sync, built for
-personal study use. Open source (MIT).
+personal study use. Source available, free for noncommercial use (see [License](#license)).
 
 ## Stack
 
@@ -25,3 +25,14 @@ export JAVA_HOME=/path/to/jdk-17-or-newer   # must be a full JDK, not a JRE
 
 Requires the Android SDK with platform 37 and build-tools 37.0.0 installed,
 and `local.properties` pointing `sdk.dir` at your SDK (not committed).
+
+## License
+
+4ENote is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+You may use, study, change and share it for any noncommercial purpose, such as
+personal use, study, hobby projects, schools and charities. Selling it, or using
+it for commercial purposes, is not allowed without written permission from the
+author.
+
+Versions published before this license change were released under the MIT
+License, and those copies remain under MIT.
