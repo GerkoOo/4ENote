@@ -554,8 +554,10 @@ private fun PageList(
     // turning paper to write. Only the page twisted turns; it is a way of looking, not saved.
     val pageRotations = remember { mutableStateMapOf<String, Float>() }
     var viewport by remember { mutableStateOf(Rect.Zero) }
-    // The width of the laid-out pages (layout pixels), from the layout.
+    // The width of the laid-out pages (layout pixels), from the layout, and how much of it can be
+    // panned to: the page's own width, or (once a page is turned) all of it.
     var contentWidthPx by remember { mutableFloatStateOf(0f) }
+    var reachWidthPx by remember { mutableFloatStateOf(0f) }
     val currentArranging by androidx.compose.runtime.rememberUpdatedState(arranging)
     fun viewZoom() = if (currentArranging) 1f else zoom
     // Arranging, the pages fill the width: no sideways position.
@@ -563,7 +565,10 @@ private fun PageList(
     // Sideways: pages narrower than the view stay centred; wider ones pan between their edges.
     fun clampPan(x: Float, z: Float = viewZoom()): Float {
         val visible = viewport.width / z
-        return if (contentWidthPx <= visible) (contentWidthPx - visible) / 2 else x.coerceIn(0f, contentWidthPx - visible)
+        val centre = (contentWidthPx - visible) / 2
+        if (reachWidthPx <= visible) return centre
+        val half = (reachWidthPx - visible) / 2
+        return x.coerceIn(centre - half, centre + half)
     }
     val panState = androidx.compose.foundation.gestures.rememberScrollableState { delta ->
         val before = panX
@@ -714,9 +719,18 @@ private fun PageList(
             onArranged()
             zoomedToPage = index
         }
-        val gridWidth = maxWidth
+        // The pages are laid out in a band as wide as a page's diagonal, so a page turned to any
+        // angle fits inside it and nothing of it is cut off; untouched pages sit in its middle.
+        val pageHeight = pageWidth / A4_ASPECT
+        val diagonal = androidx.compose.ui.unit.Dp(kotlin.math.hypot(pageWidth.value, pageHeight.value))
+        val gridWidth = if (arrange) maxWidth else maxOf(maxWidth, diagonal + 32.dp)
+        val anyTurned by remember { derivedStateOf { pageRotations.values.any { it != 0f } } }
+        val reachWidth = if (anyTurned) gridWidth else minOf(gridWidth, maxOf(maxWidth, pageWidth + 32.dp))
         val density = LocalDensity.current
-        SideEffect { contentWidthPx = with(density) { gridWidth.toPx() } }
+        SideEffect {
+            contentWidthPx = with(density) { gridWidth.toPx() }
+            reachWidthPx = with(density) { reachWidth.toPx() }
+        }
         // Where page [index] is on screen, in pixels from the top left of the view.
         fun pageRect(index: Int): Rect? {
             val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
@@ -803,7 +817,8 @@ private fun PageList(
                             .fillMaxWidth()
                             // Each page gets a whole screen in full screen, centered in it.
                             .then(if (fullScreen) Modifier.heightIn(min = this@BoxWithConstraints.maxHeight) else Modifier)
-                            .zIndex(if (dragged) 1f else 0f)
+                            // A turned page lies over its neighbours, so its corners aren't hidden under them.
+                            .zIndex(if (dragged) 1f else if ((pageRotations[page.id] ?: 0f) != 0f && !arrange) 0.5f else 0f)
                             // The other pages slide out of the way of a page being moved.
                             .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = if (dragged) null else spring()),
                         contentAlignment = if (fullScreen) Alignment.Center else Alignment.TopCenter,
