@@ -8,19 +8,24 @@ import kotlin.math.hypot
  * that ink instead of adding the scribble.
  */
 object Scribble {
-    private const val MIN_REVERSALS = 4
+    private const val MIN_REVERSALS = 3
     /** How much longer the scribble's path must be than its bounding box's diagonal. */
-    private const val MIN_DENSITY = 3f
+    private const val MIN_DENSITY = 2.5f
     /** Movement shorter than this (page units) never counts as a reversal, so jitter is ignored. */
     private const val MIN_SWING = 6f
 
     /**
      * A reversal only counts if the pass it ends spans at least this share of
-     * the scribble's extent. Scrubbing sweeps nearly edge to edge every pass;
-     * the backward loops of cursive letters (e, a, l) and a t crossed in one go
-     * reach back only a third of a short word or so.
+     * the scribble's extent, so jitter and small letter loops don't count.
      */
-    private const val MIN_PASS_FRACTION = 0.6f
+    private const val MIN_PASS_FRACTION = 0.3f
+
+    /**
+     * How far apart (as a share of the extent) the pen's turning points on each side may be.
+     * A scrub turns back at about the same place every pass; joined-up writing loops back
+     * too, but each loop turns further along the word.
+     */
+    private const val MAX_TURN_SPREAD = 0.3f
 
     /** True if [stroke] is a back-and-forth scrub rather than writing. */
     fun isScribble(stroke: InkStroke): Boolean {
@@ -42,15 +47,18 @@ object Scribble {
         // Count reversals along the scribble's main direction (usually sideways).
         val axis = if (maxX - minX >= maxY - minY) 0 else 1
         val extent = if (axis == 0) maxX - minX else maxY - minY
-        return reversals(p, axis, minSwing = maxOf(MIN_SWING, extent * MIN_PASS_FRACTION)) >= MIN_REVERSALS
+        val turns = turns(p, axis, minSwing = maxOf(MIN_SWING, extent * MIN_PASS_FRACTION))
+        if (turns.size < MIN_REVERSALS) return false
+        val spread = turns.groupBy { it.second }.values.maxOf { side -> side.maxOf { it.first } - side.minOf { it.first } }
+        return spread <= extent * MAX_TURN_SPREAD
     }
 
     /**
-     * Counts direction changes along [axis] where the pen swings back at least
-     * [minSwing] from the furthest point it reached.
+     * Where along [axis] the pen turned back after swinging at least [minSwing] from the
+     * furthest point it reached, and which way it was going then (1 forward, -1 back).
      */
-    private fun reversals(points: FloatArray, axis: Int, minSwing: Float): Int {
-        var count = 0
+    private fun turns(points: FloatArray, axis: Int, minSwing: Float): List<Pair<Float, Int>> {
+        val turns = ArrayList<Pair<Float, Int>>()
         var direction = 0
         var extreme = points[axis]
         for (i in 1 until points.size / 2) {
@@ -60,13 +68,13 @@ object Scribble {
                 direction >= 0 && delta > 0 -> { extreme = v; direction = 1 }
                 direction <= 0 && delta < 0 -> { extreme = v; direction = -1 }
                 abs(delta) >= minSwing -> {
-                    count++
+                    turns += extreme to direction
                     direction = -direction
                     extreme = v
                 }
             }
         }
-        return count
+        return turns
     }
 
     /**

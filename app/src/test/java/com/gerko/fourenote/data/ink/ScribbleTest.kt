@@ -54,6 +54,12 @@ class ScribbleTest {
     }
 
     @Test
+    fun threeQuickPassesAreEnough() {
+        // Right, left, right, left: three turns.
+        assertTrue(Scribble.isScribble(scrub(0f, 40f, 0f, passes = 3)))
+    }
+
+    @Test
     fun shortLoopyCursiveWordIsNotAScribble() {
         // Old-style joined writing of a short word like "eat": big loops that swing back a third
         // of the word, then the t crossed in one go, back across the word and forward again.
@@ -67,6 +73,15 @@ class ScribbleTest {
         val end = points[points.size - 2]
         points += listOf(end - 30f, -10f, end + 8f, -10f)
         assertFalse(Scribble.isScribble(stroke("eat", *points.toFloatArray())))
+        // Even with very big loops, each one turns back further along the word.
+        val bigLoops = ArrayList<Float>()
+        t = 0.0
+        while (t < 6 * Math.PI) {
+            bigLoops += (3.0 * t + 30.0 * Math.sin(t)).toFloat()
+            bigLoops += (20.0 * Math.cos(t)).toFloat()
+            t += 0.2
+        }
+        assertFalse(Scribble.isScribble(stroke("eat", *bigLoops.toFloatArray())))
     }
 
     @Test
