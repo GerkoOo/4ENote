@@ -801,7 +801,7 @@ private fun PageList(
                             stylusOnly = viewModel.stylusOnly,
                             smoothing = viewModel.smoothing,
                             nibDegrees = viewModel.nibDegrees,
-                            onStroke = { viewModel.addStroke(page.id, it) },
+                            onStroke = { stroke, held -> viewModel.addStroke(page.id, stroke, held) },
                             onEraseStart = viewModel::beginErase,
                             onErase = { x, y -> viewModel.eraseAt(page.id, x, y) },
                             onEraseEnd = viewModel::endErase,

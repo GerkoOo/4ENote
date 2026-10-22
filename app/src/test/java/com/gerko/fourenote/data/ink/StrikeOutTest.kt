@@ -25,12 +25,18 @@ class StrikeOutTest {
     }
 
     @Test
-    fun aLineThroughTheMiddleStrikesTheWordOut() {
+    fun aLineThroughTheMiddleStrikesTheWordsOut() {
         val hello = word("hello", 0f, 100f)
+        val world = word("world", 70f, 100f)
         val dot = stroke("dot", 30f, 92f, 31f, 92f) // an i dot just above
-        val other = word("other", 200f, 100f)
-        val struck = StrikeOut.struckBy(line(-5f, 115f, 65f, 116f), listOf(hello, dot, other))
-        assertEquals(setOf("hello", "dot"), struck.map { it.id }.toSet())
+        val other = word("other", 300f, 100f)
+        val struck = StrikeOut.struckBy(line(-5f, 115f, 135f, 116f), listOf(hello, world, dot, other))
+        assertEquals(setOf("hello", "world", "dot"), struck.map { it.id }.toSet())
+    }
+
+    @Test
+    fun aWordWrittenInOneStrokeNeedsMoreThanOneStrokeCrossed() {
+        assertTrue(StrikeOut.struckBy(line(-5f, 115f, 65f, 116f), listOf(word("hello", 0f, 100f))).isEmpty())
     }
 
     @Test

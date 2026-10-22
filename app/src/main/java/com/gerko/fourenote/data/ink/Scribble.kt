@@ -132,9 +132,10 @@ object Scribble {
 }
 
 /**
- * Strike out to erase: one straight, roughly level line drawn through the middle of words
- * deletes them (as on iPad), alongside scrubbing. A line under or over words (underlining) or
- * across empty paper stays as ink.
+ * Strike out to erase: one straight, roughly level line drawn through the middle of words and
+ * held still at its end deletes them, alongside scrubbing. It must cross at least two strokes,
+ * so the bar of a t or f never erases its letter. A line under or over words (underlining) or
+ * across empty paper stays as ink (held, it snaps straight as usual).
  */
 object StrikeOut {
     /** How much longer than straight the line may be; a hand-drawn straight line wobbles a little. */
@@ -147,12 +148,8 @@ object StrikeOut {
     private const val BAND_HIGH = 0.8f
     /** At least this share of a stroke's width must lie along the line for it to count as struck. */
     private const val MIN_COVER = 0.5f
-    /**
-     * A strike-out is long next to the writing it crosses, and that writing is word-shaped (wider
-     * than tall). The bar of a t or f is short next to its tall, narrow stem, so it stays a letter.
-     */
-    private const val MIN_LENGTH_TO_HEIGHT = 2f
-    private const val MIN_WORD_WIDTH_TO_HEIGHT = 1.2f
+    /** A strike-out crosses at least this many strokes; a letter's bar crosses just its own stem. */
+    private const val MIN_CROSSED = 2
 
     /** True if [stroke] is a straight, roughly level line: maybe a strike-out. */
     fun isLine(stroke: InkStroke): Boolean {
@@ -198,13 +195,10 @@ object StrikeOut {
             val high = b.top + b.height * BAND_HIGH + stroke.width / 2
             y in low..high
         }
-        if (crossed.isEmpty()) return emptyList()
+        if (crossed.size < MIN_CROSSED) return emptyList()
         // The words' height: anything along the line within it goes too (i dots, t bars, accents).
         val top = crossed.minOf { bounds.getValue(it).top }
         val bottom = crossed.maxOf { bounds.getValue(it).bottom }
-        val height = (bottom - top).coerceAtLeast(1f)
-        val wordWidth = crossed.maxOf { bounds.getValue(it).right } - crossed.minOf { bounds.getValue(it).left }
-        if (x1 - x0 < height * MIN_LENGTH_TO_HEIGHT || wordWidth < height * MIN_WORD_WIDTH_TO_HEIGHT) return emptyList()
         val slack = (bottom - top) * 0.3f
         return candidates.filter { stroke ->
             val b = bounds.getValue(stroke)

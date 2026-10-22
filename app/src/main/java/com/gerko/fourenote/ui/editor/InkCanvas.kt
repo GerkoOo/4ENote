@@ -123,7 +123,8 @@ fun InkCanvas(
     stylusOnly: Boolean,
     smoothing: Int,
     nibDegrees: Float,
-    onStroke: (InkStroke) -> Unit,
+    /** A finished stroke; [held] if the pen was held still before lifting (shapes, strike-out). */
+    onStroke: (stroke: InkStroke, held: Boolean) -> Unit,
     onEraseStart: () -> Unit,
     onErase: (x: Float, y: Float) -> Unit,
     onEraseEnd: () -> Unit,
@@ -793,7 +794,9 @@ fun InkCanvas(
                     var shape: FloatArray? = null
                     // The pen's path before smoothing, which would round off the corners of shapes.
                     val path = arrayListOf(start.x, start.y)
+                    var held = false
                     trackDrag(onHold = {
+                        held = true
                         Shapes.recognize(path.toFloatArray())?.let { clean ->
                             shape = clean
                             current.clear()
@@ -853,6 +856,7 @@ fun InkCanvas(
                             nibAngle = if (calligraphy && !currentPointedNib) Calligraphy.nibRadians(currentNibDegrees) else null,
                             squareEnds = calligraphy && currentPointedNib,
                         ),
+                        held,
                     )
                     current.clear()
                 }

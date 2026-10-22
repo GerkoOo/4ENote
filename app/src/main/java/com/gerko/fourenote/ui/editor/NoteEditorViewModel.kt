@@ -572,7 +572,8 @@ class NoteEditorViewModel(
         persist()
     }
 
-    fun addStroke(pageId: String, stroke: InkStroke) {
+    /** Adds a drawn stroke, or erases with it: a scrub, or a line held still through words ([held]). */
+    fun addStroke(pageId: String, stroke: InkStroke, held: Boolean = false) {
         val strokes = page(pageId)?.strokes ?: return
         if (scribbleToErase && !stroke.highlighter && Scribble.isScribble(stroke)) {
             val erased = Scribble.erasedBy(stroke, strokes.filter { it.layerId == activeLayerId }, ERASER_RADIUS_DP / 2)
@@ -586,8 +587,8 @@ class NoteEditorViewModel(
             }
             // Nothing underneath: it was a zigzag on purpose, so keep it as ink.
         }
-        // A straight line through the middle of words strikes them out.
-        if (scribbleToErase && !stroke.highlighter && StrikeOut.isLine(stroke)) {
+        // A straight line through the middle of words, held still at its end, strikes them out.
+        if (scribbleToErase && held && !stroke.highlighter && StrikeOut.isLine(stroke)) {
             val struck = StrikeOut.struckBy(stroke, strokes.filter { it.layerId == activeLayerId })
             if (struck.isNotEmpty()) {
                 recordUndo()
