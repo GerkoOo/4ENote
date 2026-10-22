@@ -3,6 +3,7 @@ package com.gerko.fourenote.data.sync
 import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.Note
+import com.gerko.fourenote.data.scan.ScanInbox
 import java.io.File
 
 /** The local side of sync; implemented over Room by NoteRepository. */
@@ -76,6 +77,8 @@ class SyncEngine(
     /** Writes the note's PDF copy to a temporary file (deleted after upload), or returns null to skip it. */
     private val pdfExporter: ((Note) -> File?)? = null,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Scans waiting for their photo frame, kept in the cloud too so any device can place them. */
+    private val inbox: ScanInbox? = null,
 ) {
     private var uploaded = 0
     private var downloaded = 0
@@ -130,6 +133,7 @@ class SyncEngine(
         }
 
         runCatching { syncAttachments() }.onFailure { errors += "Pictures: ${it.message}" }
+        inbox?.let { runCatching { syncInbox(it) }.onFailure { errors += "Scans: ${it.message}" } }
         for ((noteId, frames) in fills) store.deliverFilledFrames(noteId, frames)
 
         return SyncResult(uploaded, downloaded, merged, deletedHere, deletedInCloud, skippedOpen, errors)
@@ -163,6 +167,37 @@ class SyncEngine(
         for ((key, file) in inCloud) {
             val noteId = key.first
             if (noteId !in localIds && noteId !in cloudNoteIds) provider.delete(file.id)
+        }
+    }
+
+    /**
+     * Waiting scans travel as "scan-inbox_<name>". A scan placed in a frame on any device is
+     * deleted from the cloud; a device that uploaded it then sees it gone and drops it too.
+     */
+    private suspend fun syncInbox(inbox: ScanInbox) {
+        val cloud = provider.listFiles()
+            .filter { it.name.startsWith(ScanInbox.CLOUD_PREFIX) }
+            .associateBy { it.name.removePrefix(ScanInbox.CLOUD_PREFIX) }
+        val used = inbox.used()
+        for (name in used) {
+            cloud[name]?.let { provider.delete(it.id) }
+            inbox.forgetUsed(name)
+        }
+        val local = inbox.pending()
+        for (scan in local) {
+            when {
+                scan.name in cloud -> inbox.markSynced(scan.name)
+                inbox.isSynced(scan.name) -> inbox.removedElsewhere(scan.name)
+                else -> {
+                    provider.upload(ScanInbox.CLOUD_PREFIX + scan.name, "image/jpeg", UploadContent.of(scan.file), null)
+                    inbox.markSynced(scan.name)
+                }
+            }
+        }
+        val localNames = local.mapTo(HashSet()) { it.name }
+        for ((name, file) in cloud) {
+            if (name in localNames || name in used || !ScanInbox.isValidName(name)) continue
+            inbox.saveFromCloud(name, provider.download(file.id))
         }
     }
 

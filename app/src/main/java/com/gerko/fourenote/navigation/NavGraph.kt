@@ -38,7 +38,11 @@ fun FourENoteNavGraph(
     NavHost(navController = navController, startDestination = Routes.NOTE_LIST) {
         composable(Routes.NOTE_LIST) {
             val viewModel: NoteListViewModel = viewModel(
-                factory = NoteListViewModel.Factory(repository, syncManager::requestSync),
+                factory = NoteListViewModel.Factory(
+                    repository,
+                    syncManager::requestSync,
+                    (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.gerko.fourenote.FourENoteApp).scanInbox,
+                ),
             )
             NoteListScreen(
                 viewModel = viewModel,

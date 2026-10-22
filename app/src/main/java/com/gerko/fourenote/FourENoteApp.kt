@@ -6,6 +6,7 @@ import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.attachments.BackgroundLoader
 import com.gerko.fourenote.data.ink.InkStore
+import com.gerko.fourenote.data.scan.ScanInbox
 import com.gerko.fourenote.data.sync.SyncManager
 import com.gerko.fourenote.data.sync.google.GoogleAuth
 import com.gerko.fourenote.ui.editor.ToolPreferences
@@ -29,5 +30,8 @@ class FourENoteApp : Application() {
 
     val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }
 
-    val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, googleAuth, appScope) }
+    /** Scans taken from the home page, waiting for the note with their photo frame. */
+    val scanInbox: ScanInbox by lazy { ScanInbox(java.io.File(filesDir, "inbox")) }
+
+    val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, googleAuth, appScope, scanInbox) }
 }

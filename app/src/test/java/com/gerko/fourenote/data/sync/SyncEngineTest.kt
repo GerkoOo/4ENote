@@ -27,6 +27,7 @@ class SyncEngineTest {
 
     /** Mirrors the Room-backed repository: saving marks a note dirty with a fresh timestamp. */
     private inner class Device : SyncStore {
+        val inbox = com.gerko.fourenote.data.scan.ScanInbox(tmp.newFolder())
         val notes = linkedMapOf<String, Note>()
         val open = mutableSetOf<String>()
         val engine = SyncEngine(
@@ -34,6 +35,7 @@ class SyncEngineTest {
             LocalFolderCloudProvider(cloudDir),
             pdfExporter = { note -> tmp.newFile().apply { writeText("PDF ${note.title}") } },
             clock = clock,
+            inbox = inbox,
         )
 
         fun save(note: Note) {
@@ -382,5 +384,38 @@ class SyncEngineTest {
         b.sync()
         a.sync()
         assertEquals("Open here", a.notes.getValue("n1").title)
+    }
+
+    @Test
+    fun aScanForLaterReachesTheOtherDeviceAndLeavesEverywhereOnceUsed() {
+        val scan = b.inbox.add("JPEG".encodeToByteArray(), frame = 2)
+        b.sync()
+        a.sync()
+        val arrived = a.inbox.pending().single()
+        assertEquals(scan.name, arrived.name)
+        assertEquals(2, arrived.frame)
+        assertEquals("JPEG", arrived.file.readText())
+
+        // The tablet puts it into its frame: gone from the cloud, then from the phone too.
+        a.inbox.markUsed(arrived.name)
+        a.sync()
+        b.sync()
+        assertTrue(a.inbox.pending().isEmpty())
+        assertTrue(b.inbox.pending().isEmpty())
+        assertTrue(cloudDir.listFiles().orEmpty().none { it.name.startsWith(com.gerko.fourenote.data.scan.ScanInbox.CLOUD_PREFIX) })
+        // And it never comes back.
+        b.sync()
+        a.sync()
+        assertTrue(a.inbox.pending().isEmpty())
+    }
+
+    @Test
+    fun aDiscardedScanIsNotUploadedAgain() {
+        val scan = b.inbox.add("JPEG".encodeToByteArray(), frame = 0)
+        b.sync()
+        b.inbox.discard(scan.name)
+        b.sync()
+        a.sync()
+        assertTrue(a.inbox.pending().isEmpty())
     }
 }

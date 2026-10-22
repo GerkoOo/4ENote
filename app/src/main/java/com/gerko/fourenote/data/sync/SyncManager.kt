@@ -51,6 +51,7 @@ class SyncManager(
     private val attachments: AttachmentStore,
     val googleAuth: GoogleAuth,
     private val scope: CoroutineScope,
+    private val inbox: com.gerko.fourenote.data.scan.ScanInbox,
 ) {
     private val prefs = context.getSharedPreferences("sync", Context.MODE_PRIVATE)
     private val mutex = Mutex()
@@ -110,7 +111,10 @@ class SyncManager(
         return mutex.withLock {
             _status.value = SyncStatus.Syncing
             try {
-                val result = SyncEngine(repository, provider, ::exportPdf).sync()
+                val engine = SyncEngine(repository, provider, ::exportPdf, inbox = inbox)
+                var result = engine.sync()
+                // Scans that found their frame make notes to upload (and scans to remove from the cloud).
+                if (repository.placeInboxScans(inbox) > 0) result = engine.sync()
                 _status.value = SyncStatus.Done(result, System.currentTimeMillis())
                 true
             } catch (e: Exception) {

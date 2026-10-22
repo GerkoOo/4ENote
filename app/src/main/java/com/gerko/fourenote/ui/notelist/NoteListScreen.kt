@@ -2,6 +2,7 @@ package com.gerko.fourenote.ui.notelist
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Badge
 import com.gerko.fourenote.data.ink.InkDocument
@@ -96,6 +97,9 @@ fun NoteListScreen(
     var showingRequests by remember { mutableStateOf(false) }
     // The frame being filled with the scanner, if any.
     var filling by remember { mutableStateOf<com.gerko.fourenote.data.NoteRepository.PhotoRequest?>(null) }
+    var showingInbox by remember { mutableStateOf(false) }
+    // The frame number the next scans for later are for (0: the next empty frames); null when not scanning.
+    var scanningForLater by remember { mutableStateOf<Int?>(null) }
     val selecting = viewModel.selected.isNotEmpty()
     // Back leaves selecting before it leaves the app.
     BackHandler(enabled = selecting) { viewModel.clearSelection() }
@@ -131,6 +135,17 @@ fun NoteListScreen(
                             BadgedBox(badge = { Badge { Text("${photoRequests.size}") } }) {
                                 Icon(Icons.Filled.AddAPhoto, contentDescription = "Photos requested: ${photoRequests.size}")
                             }
+                        }
+                    }
+                    // Scan now, for a frame whose note hasn't reached this device yet.
+                    IconButton(onClick = { viewModel.refreshInbox(); showingInbox = true }) {
+                        val waiting = viewModel.inboxScans.size
+                        if (waiting > 0) {
+                            BadgedBox(badge = { Badge { Text("$waiting") } }) {
+                                Icon(Icons.Filled.DocumentScanner, contentDescription = "Scans for later: $waiting waiting")
+                            }
+                        } else {
+                            Icon(Icons.Filled.DocumentScanner, contentDescription = "Scan for later")
                         }
                     }
                     IconButton(onClick = onToggleTheme) {
@@ -212,6 +227,69 @@ fun NoteListScreen(
                 }
             },
             confirmButton = { TextButton(onClick = { showingRequests = false }) { Text("Close") } },
+        )
+    }
+    if (showingInbox) {
+        var frame by remember { mutableStateOf(0) }
+        AlertDialog(
+            onDismissRequest = { showingInbox = false },
+            title = { Text("Scan for later") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Scan now, even before the note with the frame is on this device. Scans wait here and in your " +
+                            "cloud; as soon as a device has the note, each one goes into its frame.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text("For frame", style = MaterialTheme.typography.labelLarge)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        (0..8).forEach { n ->
+                            androidx.compose.material3.FilterChip(
+                                selected = frame == n,
+                                onClick = { frame = n },
+                                label = { Text(if (n == 0) "Next empty" else "Photo $n") },
+                            )
+                        }
+                    }
+                    if (frame != 0) {
+                        Text(
+                            "More than one scan: they go into Photo $frame, Photo ${frame + 1}, …",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (viewModel.inboxScans.isNotEmpty()) {
+                        Text("Waiting", style = MaterialTheme.typography.labelLarge)
+                        viewModel.inboxScans.forEach { scan ->
+                            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    (if (scan.frame == 0) "Next empty frame" else "Photo ${scan.frame}") + " · " +
+                                        DateUtils.getRelativeTimeSpanString(scan.takenAt),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(onClick = { viewModel.discardInboxScan(scan) }) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "Delete this scan")
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showingInbox = false; scanningForLater = frame }) { Text("Scan") }
+            },
+            dismissButton = { TextButton(onClick = { showingInbox = false }) { Text("Close") } },
+        )
+    }
+    scanningForLater?.let { frame ->
+        com.gerko.fourenote.ui.scan.ScanDialog(
+            decode = viewModel::decodePhoto,
+            onDone = { files ->
+                viewModel.addInboxScans(files, frame)
+                scanningForLater = null
+            },
+            onCancel = { scanningForLater = null },
         )
     }
     filling?.let { request ->

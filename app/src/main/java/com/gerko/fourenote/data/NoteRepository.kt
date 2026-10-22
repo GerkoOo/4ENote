@@ -104,20 +104,52 @@ class NoteRepository(
     suspend fun fillPhotoRequest(noteId: String, frameId: String, photo: ByteArray) {
         legacyMoved.await()
         val note = dao.getById(noteId) ?: return
-        val doc = ink.load(noteId) ?: return
         val stored = attachments.storeImage(noteId, photo.inputStream())
         val aspect = stored.widthPx.toFloat() / stored.heightPx.coerceAtLeast(1)
-        val pages = doc.pages.map { page ->
-            page.copy(
-                images = page.images.map { frame ->
-                    if (frame.id != frameId) return@map frame
-                    val width = minOf(frame.width, frame.height * aspect)
-                    frame.copy(file = stored.file, width = width, height = width / aspect)
-                },
-            )
+        fun fill(frame: com.gerko.fourenote.data.ink.PageImage): com.gerko.fourenote.data.ink.PageImage {
+            val width = minOf(frame.width, frame.height * aspect)
+            return frame.copy(file = stored.file, width = width, height = width / aspect)
         }
+        // A note open in the editor is saved by the editor; it takes the photo into its frame itself.
+        if (noteId in openNotes) {
+            val frame = ink.loadOutline(noteId)?.pages?.flatMap { it.images }?.firstOrNull { it.id == frameId } ?: return
+            frameFills.emit(noteId to listOf(fill(frame)))
+            return
+        }
+        val doc = ink.load(noteId) ?: return
+        val pages = doc.pages.map { page -> page.copy(images = page.images.map { if (it.id == frameId) fill(it) else it }) }
         ink.save(noteId, doc.copy(pages = pages))
         dao.markEdited(noteId, note.title, System.currentTimeMillis())
+    }
+
+    /**
+     * Puts waiting inbox scans into their frames, in any note on this device: a scan for
+     * "Photo N" goes into the empty frame named Photo N, a scan for any frame into the first empty
+     * one (lowest number); the most recently edited note goes first. Returns how many were placed.
+     */
+    suspend fun placeInboxScans(inbox: com.gerko.fourenote.data.scan.ScanInbox): Int {
+        val scans = inbox.pending()
+        if (scans.isEmpty()) return 0
+        val notes = dao.getAllForSync().filterNot { it.deleted }.associateBy { it.id }
+        val open = photoRequests()
+            .sortedWith(
+                compareByDescending<PhotoRequest> { notes[it.noteId]?.updatedAt ?: 0L }
+                    .thenBy { com.gerko.fourenote.data.scan.ScanInbox.frameNumber(it.label) ?: Int.MAX_VALUE },
+            )
+            .toMutableList()
+        var placed = 0
+        // Scans for a named frame first, so a scan for any frame doesn't take their place.
+        for (scan in scans.sortedByDescending { it.frame != 0 }) {
+            val request = open.firstOrNull {
+                scan.frame == 0 || com.gerko.fourenote.data.scan.ScanInbox.frameNumber(it.label) == scan.frame
+            } ?: continue
+            val bytes = runCatching { scan.file.readBytes() }.getOrNull() ?: continue
+            fillPhotoRequest(request.noteId, request.frameId, bytes)
+            inbox.markUsed(scan.name)
+            open.remove(request)
+            placed++
+        }
+        return placed
     }
 
     /** A photo for the scanner, the right way up and at most 3000 pixels on its long side. */
