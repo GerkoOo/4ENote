@@ -689,6 +689,7 @@ private fun PageList(
                             onImageSelect = { viewModel.selectImage(page.id, it) },
                             onImageChange = { viewModel.updateImage(page.id, it) },
                             onTextTap = { x, y -> viewModel.tapWithText(page.id, x, y) },
+                            pointedNib = viewModel.pointedNib,
                             modifier = Modifier.matchParentSize(),
                         )
                         TextBoxLayer(
@@ -1333,6 +1334,12 @@ private fun ToolBar(
             } else if (viewModel.tool == Tool.TEXT) {
                 TextStyleBar(viewModel, darkPaper)
             } else if (viewModel.tool != Tool.ERASER) {
+                if (viewModel.tool == Tool.CALLIGRAPHY) {
+                    // Pointed: bold going down, thin going up (like a dip pen). Flat: a broad nib, angle on the dial.
+                    FilterChip(selected = viewModel.pointedNib, onClick = { viewModel.pointedNib = true }, label = { Text("Pointed") })
+                    FilterChip(selected = !viewModel.pointedNib, onClick = { viewModel.pointedNib = false }, label = { Text("Flat") })
+                    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
+                }
                 val highlighter = viewModel.tool == Tool.HIGHLIGHTER
                 val colors = if (highlighter) HighlighterColors else PenColors
                 val selectedColor = if (highlighter) viewModel.highlighterColor else viewModel.penColor

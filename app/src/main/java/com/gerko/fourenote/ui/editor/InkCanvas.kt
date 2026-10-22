@@ -156,6 +156,8 @@ fun InkCanvas(
     /** A loop just drawn on this page; long-pressing inside it with a finger calls [onLoopHold]. */
     loop: InkStroke? = null,
     onLoopHold: () -> Unit = {},
+    /** Calligraphy as a pointed pen (bold down-strokes) instead of a flat nib. */
+    pointedNib: Boolean = true,
     /** A tap with the text tool, in page units. */
     onTextTap: (x: Float, y: Float) -> Unit = { _, _ -> },
     /** Color and width of a tool, for strokes drawn with a tool other than the selected one (pen button). */
@@ -207,6 +209,7 @@ fun InkCanvas(
     val currentLoop by rememberUpdatedState(loop)
     val currentOnLoopHold by rememberUpdatedState(onLoopHold)
     val currentOnTextTap by rememberUpdatedState(onTextTap)
+    val currentPointedNib by rememberUpdatedState(pointedNib)
     val currentSmoothing by rememberUpdatedState(smoothing)
     val currentNibDegrees by rememberUpdatedState(nibDegrees)
     val currentScale by rememberUpdatedState(scale)
@@ -749,6 +752,11 @@ fun InkCanvas(
                             val factors = InkPen.widthFactors(raw, currentTimes.toLongArray(), currentPressures.toFloatArray())
                             InkPen.resampleWidths(raw, factors, points)
                         }
+                        calligraphy && currentPointedNib -> InkPen.resampleWidths(
+                            raw,
+                            pointedWidths(raw, currentPressures.toFloatArray()),
+                            points,
+                        )
                         calligraphy -> InkPen.resampleWidths(
                             raw,
                             Calligraphy.pressureFactors(currentPressures.toFloatArray()),
@@ -765,7 +773,7 @@ fun InkCanvas(
                             highlighter = highlighter,
                             points = points,
                             widths = widths,
-                            nibAngle = if (calligraphy) Calligraphy.nibRadians(currentNibDegrees) else null,
+                            nibAngle = if (calligraphy && !currentPointedNib) Calligraphy.nibRadians(currentNibDegrees) else null,
                         ),
                     )
                     current.clear()
@@ -898,6 +906,7 @@ fun InkCanvas(
                     currentTimes.size != current.size -> null
                     tool == Tool.INK_PEN ->
                         InkPen.widthFactors(livePoints, currentTimes.toLongArray(), currentPressures.toFloatArray())
+                    tool == Tool.CALLIGRAPHY && pointedNib -> pointedWidths(livePoints, currentPressures.toFloatArray())
                     tool == Tool.CALLIGRAPHY -> Calligraphy.pressureFactors(currentPressures.toFloatArray())
                     else -> null
                 }
@@ -907,7 +916,7 @@ fun InkCanvas(
                     highlighter = tool == Tool.HIGHLIGHTER,
                     points = livePoints,
                     widths = liveWidths,
-                    nibAngle = if (tool == Tool.CALLIGRAPHY) Calligraphy.nibRadians(nibDegrees) else null,
+                    nibAngle = if (tool == Tool.CALLIGRAPHY && !pointedNib) Calligraphy.nibRadians(nibDegrees) else null,
                 )
                 drawInkStroke(live, live.toPath(), dark)
             }
@@ -1208,4 +1217,11 @@ private fun describePenButtons(buttons: Int, type: PointerType, touching: Boolea
     val end = if (type == PointerType.Eraser) "Eraser end" else "Pen"
     val where = if (touching) "touching" else "hovering"
     return "$end $where: " + (names.joinToString(" + ").ifEmpty { "buttons released" })
+}
+
+/** The pointed pen's width at each point: bold going down, a hairline going up, scaled by pen pressure. */
+private fun pointedWidths(points: FloatArray, pressures: FloatArray): FloatArray {
+    val direction = Calligraphy.pointedFactors(points)
+    val pressure = Calligraphy.pressureFactors(pressures)
+    return FloatArray(direction.size) { i -> direction[i] * (pressure.getOrNull(i) ?: 1f).coerceIn(0.6f, 1.2f) }
 }

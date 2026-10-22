@@ -31,6 +31,8 @@ data class ToolSettings(
     val threeFingerDoubleTapRedo: Boolean,
     /** New text boxes typeset `$…$` as maths while typing. */
     val autoLatex: Boolean = true,
+    /** Calligraphy with a pointed pen (bold down-strokes, like Notewise) rather than a flat nib. */
+    val pointedNib: Boolean = true,
 )
 
 /**
@@ -76,6 +78,7 @@ class ToolPreferences(context: Context) {
             twoFingerDoubleTapUndo = prefs.getBoolean("twoFingerDoubleTapUndo", true),
             threeFingerDoubleTapRedo = prefs.getBoolean("threeFingerDoubleTapRedo", true),
             autoLatex = prefs.getBoolean("autoLatex", true),
+            pointedNib = prefs.getBoolean("pointedNib", true),
         )
     }
 
@@ -101,6 +104,7 @@ class ToolPreferences(context: Context) {
             .putBoolean("twoFingerDoubleTapUndo", settings.twoFingerDoubleTapUndo)
             .putBoolean("threeFingerDoubleTapRedo", settings.threeFingerDoubleTapRedo)
             .putBoolean("autoLatex", settings.autoLatex)
+            .putBoolean("pointedNib", settings.pointedNib)
             .apply()
     }
 

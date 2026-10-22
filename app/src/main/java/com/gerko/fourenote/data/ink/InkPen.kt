@@ -86,8 +86,8 @@ object InkPen {
  */
 object Calligraphy {
     /**
-     * Default nib angle from horizontal, in degrees. A flat (0 degree) nib, as in
-     * Notewise, makes up-and-down strokes thick and side-to-side strokes thin.
+     * Default nib angle from horizontal, in degrees, for the flat nib: a flat (0 degree) nib
+     * makes up-and-down strokes thick and side-to-side strokes thin.
      */
     const val DEFAULT_NIB_DEGREES = 0f
 
@@ -95,6 +95,43 @@ object Calligraphy {
     private const val THICKNESS = 0.25f
 
     fun nibRadians(degrees: Float) = Math.toRadians(degrees.toDouble()).toFloat()
+
+    /** Thinnest line of the pointed pen, as a share of its full width: the hairline of an up-stroke. */
+    private const val HAIRLINE = 0.16f
+
+    /** Points on each side used to judge which way the pen is moving, so jitter doesn't flicker the width. */
+    private const val DIRECTION_REACH = 3
+
+    /**
+     * Width factors for the pointed pen (like a dip pen or brush pen, and Notewise's calligraphy):
+     * full width while the pen moves down the page, a hairline while it moves up or sideways,
+     * blending smoothly in between. Unlike the flat nib, a stroke and the same stroke drawn the
+     * other way look different: only down-strokes are bold.
+     */
+    fun pointedFactors(points: FloatArray): FloatArray {
+        val n = points.size / 2
+        if (n == 0) return FloatArray(0)
+        val raw = FloatArray(n) { i ->
+            val a = maxOf(0, i - DIRECTION_REACH)
+            val b = minOf(n - 1, i + DIRECTION_REACH)
+            val dx = points[2 * b] - points[2 * a]
+            val dy = points[2 * b + 1] - points[2 * a + 1]
+            val length = kotlin.math.hypot(dx, dy)
+            // Screen y grows downwards, so a positive dy is a down-stroke.
+            val down = if (length < 0.01f) 0f else (dy / length).coerceIn(0f, 1f)
+            HAIRLINE + (1f - HAIRLINE) * down
+        }
+        // A short moving average keeps the swell from thin to thick gradual.
+        return FloatArray(n) { i ->
+            var sum = 0f
+            var count = 0
+            for (j in maxOf(0, i - 2)..minOf(n - 1, i + 2)) {
+                sum += raw[j]
+                count++
+            }
+            sum / count
+        }
+    }
 
     /** Per-point nib length factors from pen pressure; all 1 when pressure isn't reported. */
     fun pressureFactors(pressures: FloatArray): FloatArray = FloatArray(pressures.size) { i ->

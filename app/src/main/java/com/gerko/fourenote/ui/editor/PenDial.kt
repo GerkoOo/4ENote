@@ -159,8 +159,8 @@ private fun rings(viewModel: NoteEditorViewModel, scale: Float, onAddColor: () -
             holes = NIB_ANGLES.map { degrees ->
                 Hole(viewModel.nibDegrees == degrees, { viewModel.nibDegrees = degrees }) { NibGlyph(degrees, 18.dp * scale) }
             },
-            // The nib angle only shapes calligraphy strokes; elsewhere it's shown dimmed.
-            enabled = viewModel.tool == Tool.CALLIGRAPHY,
+            // The nib angle only shapes flat-nib calligraphy; elsewhere it's shown dimmed.
+            enabled = viewModel.tool == Tool.CALLIGRAPHY && !viewModel.pointedNib,
         ),
     )
 }

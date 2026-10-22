@@ -209,6 +209,9 @@ class NoteEditorViewModel(
 
     /** New text boxes typeset `$…$` as maths while typing; the text bar's Auto LaTeX switch. */
     var autoLatex by mutableStateOf(true)
+
+    /** Calligraphy style: pointed pen (bold only going down) or flat nib (bold both ways, angle set on the dial). */
+    var pointedNib by mutableStateOf(true)
     var threeFingerDoubleTapRedo by mutableStateOf(true)
 
     private val undoStack = ArrayDeque<Snapshot>()
@@ -294,6 +297,7 @@ class NoteEditorViewModel(
         twoFingerDoubleTapUndo = saved.twoFingerDoubleTapUndo
         threeFingerDoubleTapRedo = saved.threeFingerDoubleTapRedo
         autoLatex = saved.autoLatex
+        pointedNib = saved.pointedNib
         highlighterWidth = saved.highlighterWidth
         smoothing = saved.smoothing
         stylusOnly = saved.stylusOnly
@@ -306,7 +310,7 @@ class NoteEditorViewModel(
                     tool, penColor, highlighterColor, penWidth, inkPenWidth, calligraphyWidth, highlighterWidth,
                     smoothing, stylusOnly, scribbleToErase, eraseWholeStrokes, handwritingLanguage.tag, nibDegrees,
                     customColors.toList(), primaryButtonAction, secondaryButtonAction, twoFingerDoubleTapUndo, threeFingerDoubleTapRedo,
-                    autoLatex,
+                    autoLatex, pointedNib,
                 )
             }.drop(1).collect(toolPreferences::save)
         }
