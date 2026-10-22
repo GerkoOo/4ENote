@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.AddAPhoto
@@ -479,8 +480,11 @@ private fun PageList(
     val horizontal = rememberScrollState()
     // Full screen opens at the fitting size on the page being looked at, and gives the zoom back after.
     var zoomBeforeFullScreen by rememberSaveable { mutableFloatStateOf(1f) }
+    // The last zoom change came from a pinch (not the buttons or full screen).
+    var zoomByPinch by remember { mutableStateOf(false) }
     LaunchedEffect(fullScreen) {
         val page = gridState.firstVisibleItemIndex
+        zoomByPinch = false
         if (fullScreen) {
             zoomBeforeFullScreen = zoom
             zoom = 1f
@@ -490,8 +494,39 @@ private fun PageList(
         gridState.scrollToItem(page)
         horizontal.scrollTo(0)
     }
-    // Pages wider than the screen start centered rather than pinned to the left edge.
+    // Where a pinch wants the view once the pages are laid out at the new zoom: the horizontal
+    // scroll, and how far to scroll down, so the point between the fingers stays put.
+    var pinchScrollX by remember { mutableStateOf<Float?>(null) }
+    var pinchScrollY by remember { mutableFloatStateOf(0f) }
+    var viewport by remember { mutableStateOf(Rect.Zero) }
+    fun zoomAround(factor: Float, focus: Offset) {
+        val old = zoom
+        val new = (old * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val f = new / old
+        if (f == 1f) return
+        zoom = new
+        zoomByPinch = true
+        val fx = focus.x - viewport.left
+        val fy = focus.y - viewport.top
+        pinchScrollX = (((pinchScrollX ?: horizontal.value.toFloat()) + fx) * f - fx).coerceAtLeast(0f)
+        // The point's distance below the top of the first page on screen grows by f.
+        val above = gridState.firstVisibleItemScrollOffset + pinchScrollY + fy
+        pinchScrollY += above * (f - 1)
+    }
+    // During a pinch, every frame: keep the fingers' point in place.
+    LaunchedEffect(Unit) {
+        snapshotFlow { zoom }.collect {
+            withFrameNanos { } // once laid out at the new size
+            val x = pinchScrollX ?: return@collect
+            horizontal.scrollTo(x.roundToInt())
+            gridState.scrollBy(pinchScrollY)
+            pinchScrollX = null
+            pinchScrollY = 0f
+        }
+    }
+    // Zoom buttons and full screen: pages wider than the screen start centered rather than pinned to the left edge.
     LaunchedEffect(zoom, fullScreen) {
+        if (zoomByPinch) return@LaunchedEffect
         withFrameNanos { } // once laid out at the new size
         horizontal.scrollTo(horizontal.maxValue / 2)
     }
@@ -539,7 +574,9 @@ private fun PageList(
         zoomedToPage = null
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow).onGloballyPositioned { viewport = it.boundsInRoot() },
+    ) {
         // At 100% a page fills the width (up to a comfortable maximum). Zooming out fits
         // several pages per row; zooming in makes pages wider than the screen, panned sideways.
         // Full screen: one page per screen, as large as fits, centered, with no gaps or footers.
@@ -558,6 +595,7 @@ private fun PageList(
             lastPageTap = "" to 0L
             // Leave room for the page footer below the page.
             val fitHeight = (maxHeight - 32.dp - PAGE_FOOTER_HEIGHT) / (fullWidth / aspect)
+            zoomByPinch = false
             zoom = minOf(1f, fitHeight).coerceIn(MIN_ZOOM, MAX_ZOOM)
             zoomedToPage = index
         }
@@ -666,7 +704,7 @@ private fun PageList(
                                 horizontal.dispatchRawDelta(dx)
                             },
                             onScrollEnd = ::snapToNearestPage,
-                            onZoom = { factor -> zoom = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM) },
+                            onZoom = ::zoomAround,
                             onTwoFingerHold = onTwoFingerHold,
                             primaryButtonAction = viewModel.primaryButtonAction,
                             secondaryButtonAction = viewModel.secondaryButtonAction,
@@ -739,7 +777,7 @@ private fun PageList(
         if (!fullScreen) {
             ZoomControl(
                 zoom = zoom,
-                onZoom = { zoom = it.coerceIn(MIN_ZOOM, MAX_ZOOM) },
+                onZoom = { zoomByPinch = false; zoom = it.coerceIn(MIN_ZOOM, MAX_ZOOM) },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
             )
         }

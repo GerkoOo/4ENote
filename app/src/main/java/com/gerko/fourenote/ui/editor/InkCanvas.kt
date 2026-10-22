@@ -131,7 +131,8 @@ fun InkCanvas(
     onScroll: (dxPx: Float, dyPx: Float) -> Unit,
     /** Two fingers lifted after scrolling or zooming. */
     onScrollEnd: () -> Unit = {},
-    onZoom: (factor: Float) -> Unit,
+    /** A pinch: zoom by [factor] around [focus], the point between the fingers (root pixels). */
+    onZoom: (factor: Float, focus: Offset) -> Unit,
     onTwoFingerHold: (rootPx: Offset) -> Unit,
     modifier: Modifier = Modifier,
     placement: BackgroundPlacement = BackgroundPlacement(),
@@ -390,7 +391,10 @@ fun InkCanvas(
                             moved += abs(dx) + abs(dy)
                             if (lastSpan > 0f && span > 0f) moved += abs(span - lastSpan)
                             if (moved >= TWO_FINGER_SLOP_PX) decided = true
-                            if (lastSpan > 0f && span > 0f) currentOnZoom(span / lastSpan)
+                            if (lastSpan > 0f && span > 0f) {
+                                val between = (pressed[0].position + pressed[1].position) / 2f
+                                currentOnZoom(span / lastSpan, coordinates?.localToRoot(between) ?: between)
+                            }
                             currentOnScroll(-dx, -dy)
                         }
                         lastSpan = span
