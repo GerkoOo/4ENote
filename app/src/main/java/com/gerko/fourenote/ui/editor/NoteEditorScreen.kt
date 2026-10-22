@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Lock
@@ -373,18 +374,9 @@ fun NoteEditorScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (!fullScreen) {
-                ToolBar(
-                    viewModel,
-                    darkPaper,
-                    onOpenDial = {
-                        val metrics = context.resources.displayMetrics
-                        dialAt = Offset(metrics.widthPixels / 2f, metrics.heightPixels / 2f)
-                    },
-                    onAddColor = { pickingColor = true },
-                )
-            }
-            if (viewModel.importing || viewModel.exporting) LinearProgressIndicator(Modifier.fillMaxWidth()) else if (!fullScreen) HorizontalDivider()
+            if (viewModel.importing || viewModel.exporting) LinearProgressIndicator(Modifier.fillMaxWidth())
+            // The tools float over the pages (see ToolBar).
+            Box(Modifier.weight(1f)) {
             if (viewModel.loaded) {
                 PageList(
                     viewModel, backgrounds, gridState, darkPaper,
@@ -402,6 +394,19 @@ fun NoteEditorScreen(
                 )
             } else {
                 Box(Modifier.fillMaxSize())
+            }
+            if (!fullScreen) {
+                ToolBar(
+                    viewModel,
+                    darkPaper,
+                    onOpenDial = {
+                        val metrics = context.resources.displayMetrics
+                        dialAt = Offset(metrics.widthPixels / 2f, metrics.heightPixels / 2f)
+                    },
+                    onAddColor = { pickingColor = true },
+                    modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
             }
         }
     }
@@ -581,6 +586,8 @@ private fun PageList(
         zoomedToPage = null
     }
 
+    // Bars for a selection sit just under the floating tool bar.
+    val barsTop = if (fullScreen) 12.dp else TOOLBAR_SPACE
     BoxWithConstraints(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow).onGloballyPositioned { viewport = it.boundsInRoot() },
     ) {
@@ -606,7 +613,16 @@ private fun PageList(
             zoom = minOf(1f, fitHeight).coerceIn(MIN_ZOOM, MAX_ZOOM)
             zoomedToPage = index
         }
-        val gridWidth = if (fullScreen) maxOf(maxWidth, pageWidth) else maxOf(maxWidth, pageWidth + 32.dp)
+        // A turned page reaches past its own box; this much room on each side keeps all of it in reach.
+        val turn = Math.toRadians(pageRotation.toDouble())
+        val cos = abs(kotlin.math.cos(turn)).toFloat()
+        val sin = abs(kotlin.math.sin(turn)).toFloat()
+        fun turnedMargin(width: Dp, aspect: Float): Pair<Dp, Dp> {
+            val height = width / aspect
+            return (width * cos + height * sin - width) / 2 to (width * sin + height * cos - height) / 2
+        }
+        val gridMargin = turnedMargin(pageWidth, A4_ASPECT).first
+        val gridWidth = if (fullScreen) maxOf(maxWidth, pageWidth + gridMargin * 2) else maxOf(maxWidth, pageWidth + gridMargin * 2 + 32.dp)
         // In full screen at fitting size, a scroll or fling settles on whole pages, like turning them.
         val snapping = fullScreen && zoom <= 1f
         fun snapToNearestPage() {
@@ -628,7 +644,8 @@ private fun PageList(
                 state = gridState,
                 horizontalArrangement = Arrangement.spacedBy(if (fullScreen) 0.dp else 16.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(if (fullScreen) 0.dp else 12.dp),
-                contentPadding = PaddingValues(if (fullScreen) 0.dp else 16.dp),
+                // Room at the top for the floating tool bar.
+                contentPadding = if (fullScreen) PaddingValues(0.dp) else PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp, top = TOOLBAR_SPACE),
                 flingBehavior = if (snapping) rememberSnapFlingBehavior(gridState, SnapPosition.Start) else ScrollableDefaults.flingBehavior(),
                 modifier = Modifier.width(gridWidth).fillMaxHeight().onGloballyPositioned { gridBounds = it.boundsInRoot() },
             ) {
@@ -638,6 +655,7 @@ private fun PageList(
                     val dragged = draggingPage == page.id
                     val itemWidth = if (fullScreen) fitWidth(page.width / page.height) * zoom else pageWidth
                     val itemWidthPx = with(density) { itemWidth.toPx() }
+                    val (marginX, marginY) = turnedMargin(itemWidth, page.width / page.height)
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -650,6 +668,7 @@ private fun PageList(
                     ) {
                     Column(
                         Modifier
+                            .padding(horizontal = marginX, vertical = marginY)
                             // Before the graphics layer, so the bounds are the page's place in the grid, not where it's dragged.
                             .onGloballyPositioned { pageBounds[page.id] = it.boundsInRoot() }
                             .graphicsLayer {
@@ -804,14 +823,14 @@ private fun PageList(
             AdjustImageBar(
                 onFit = { viewModel.setBackgroundPlacement(pageId, BackgroundPlacement()) },
                 onDone = viewModel::finishAdjustingBackground,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = barsTop),
             )
         }
         if (viewModel.selection.isNotEmpty()) {
-            SelectionBar(viewModel, darkPaper, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
+            SelectionBar(viewModel, darkPaper, Modifier.align(Alignment.TopCenter).padding(top = barsTop))
         }
         viewModel.selectedImageObject?.let { image ->
-            ImageBar(viewModel, image, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
+            ImageBar(viewModel, image, Modifier.align(Alignment.TopCenter).padding(top = barsTop))
         }
     }
 }
@@ -1401,16 +1420,21 @@ private fun ToolBar(
     darkPaper: Boolean,
     onOpenDial: () -> Unit,
     onAddColor: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    // Wraps onto more rows on narrow (portrait) screens so every option stays reachable.
-    Surface(tonalElevation = 2.dp) {
-        FlowRow(
+    // Floats over the pages as one row; on narrow screens swipe it sideways for the rest.
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        tonalElevation = 4.dp,
+        shadowElevation = 6.dp,
+        modifier = modifier,
+    ) {
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             IconButton(onClick = onOpenDial) {
                 Icon(Icons.Filled.DonutLarge, contentDescription = "Quick dial")
@@ -1706,3 +1730,6 @@ private fun PenButtonChoice(label: String, action: PenButtonAction, onChange: (P
 
 /** A twist ending this close to straight or a quarter turn settles there. */
 private const val ROTATION_SNAP_DEG = 8f
+
+/** The floating tool bar's height plus its margins: the pages start below it. */
+private val TOOLBAR_SPACE = 76.dp
