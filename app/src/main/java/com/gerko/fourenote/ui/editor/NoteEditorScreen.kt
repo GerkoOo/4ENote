@@ -907,9 +907,30 @@ private fun PageList(
                                 val pinched = pinchScale != 1f
                                 val turned = (layoutRotations[page.id] ?: 0f) != (pageRotations[page.id] ?: 0f)
                                 if (pinched || turned) {
+                                    // How far the new room around a turned page will move it, so the picture can be
+                                    // held still for the frame before the scroll catches up (no visible jump).
+                                    val newTurn = pageRotations[page.id] ?: 0f
+                                    val aspect = page.width / page.height
+                                    fun top(deg: Float): Dp {
+                                        val my = turnedMargin(itemWidth, aspect, deg).second
+                                        return if (fullScreen) maxOf((this@BoxWithConstraints.maxHeight - itemWidth / aspect) / 2, my) else my
+                                    }
+                                    fun width(turns: Collection<Float>): Dp {
+                                        val gm = turns.maxOfOrNull { turnedMargin(pageWidth, A4_ASPECT, it).first } ?: 0.dp
+                                        return maxOf(this@BoxWithConstraints.maxWidth, pageWidth + gm * 2 + if (fullScreen) 0.dp else 32.dp)
+                                    }
+                                    val oldTurns = layoutRotations.toMap()
+                                    val newTurns = oldTurns + (page.id to newTurn)
+                                    val moved = with(density) {
+                                        Offset(
+                                            ((width(newTurns.values) - width(oldTurns.values)) / 2).toPx(),
+                                            (top(newTurn) - top(oldTurns[page.id] ?: 0f)).toPx(),
+                                        )
+                                    }
                                     keepCenterWhile {
-                                        layoutRotations[page.id] = pageRotations[page.id] ?: 0f
+                                        layoutRotations[page.id] = newTurn
                                         endPinch()
+                                        if (turned) pinchShift -= moved
                                     }
                                 } else {
                                     pendingFactor = 1f
