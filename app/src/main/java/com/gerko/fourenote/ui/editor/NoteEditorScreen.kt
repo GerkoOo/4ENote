@@ -480,6 +480,13 @@ private fun PageList(
     val horizontal = rememberScrollState()
     // Full screen opens at the fitting size on the page being looked at, and gives the zoom back after.
     var zoomBeforeFullScreen by rememberSaveable { mutableFloatStateOf(1f) }
+    // The pages are turned this far (degrees clockwise) by a two-finger twist, like turning paper to write.
+    var pageRotation by rememberSaveable { mutableFloatStateOf(0f) }
+    // When the twist ends near straight or a quarter turn, settle there exactly.
+    fun settleRotation() {
+        val quarter = (pageRotation / 90f).roundToInt() * 90f
+        if (abs(pageRotation - quarter) < ROTATION_SNAP_DEG) pageRotation = ((quarter % 360f) + 360f) % 360f
+    }
     // The last zoom change came from a pinch (not the buttons or full screen).
     var zoomByPinch by remember { mutableStateOf(false) }
     LaunchedEffect(fullScreen) {
@@ -678,6 +685,8 @@ private fun PageList(
                             Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(page.width / page.height)
+                                // Input inside follows the turn, so writing on a turned page lands where the pen is.
+                                .graphicsLayer { rotationZ = pageRotation }
                                 .then(if (fullScreen) Modifier else Modifier.shadow(2.dp)),
                         ) {
                         InkCanvas(
@@ -703,7 +712,8 @@ private fun PageList(
                                 gridState.dispatchRawDelta(dy)
                                 horizontal.dispatchRawDelta(dx)
                             },
-                            onScrollEnd = ::snapToNearestPage,
+                            onScrollEnd = { settleRotation(); snapToNearestPage() },
+                            onRotate = { pageRotation = ((pageRotation + it) % 360f + 360f) % 360f },
                             onZoom = ::zoomAround,
                             onTwoFingerHold = onTwoFingerHold,
                             primaryButtonAction = viewModel.primaryButtonAction,
@@ -772,6 +782,15 @@ private fun PageList(
                     AddPagesHandle(addPages)
                 }
             }
+        }
+        // While the pages are turned: how far, and a tap to straighten them.
+        if (pageRotation != 0f) {
+            AssistChip(
+                onClick = { pageRotation = 0f },
+                label = { Text("${pageRotation.roundToInt().let { if (it > 180) it - 360 else it }}° · straighten") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null) },
+                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+            )
         }
         // Hidden in full screen; pinching still zooms.
         if (!fullScreen) {
@@ -1684,3 +1703,6 @@ private fun PenButtonChoice(label: String, action: PenButtonAction, onChange: (P
         }
     }
 }
+
+/** A twist ending this close to straight or a quarter turn settles there. */
+private const val ROTATION_SNAP_DEG = 8f

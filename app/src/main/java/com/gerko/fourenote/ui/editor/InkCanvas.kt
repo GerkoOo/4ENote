@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.foundation.Canvas
@@ -133,6 +134,8 @@ fun InkCanvas(
     onScrollEnd: () -> Unit = {},
     /** A pinch: zoom by [factor] around [focus], the point between the fingers (root pixels). */
     onZoom: (factor: Float, focus: Offset) -> Unit,
+    /** A two-finger twist: turn the page view by this many degrees (clockwise). */
+    onRotate: (degrees: Float) -> Unit = {},
     onTwoFingerHold: (rootPx: Offset) -> Unit,
     modifier: Modifier = Modifier,
     placement: BackgroundPlacement = BackgroundPlacement(),
@@ -226,6 +229,7 @@ fun InkCanvas(
     val currentOnScroll by rememberUpdatedState(onScroll)
     val currentOnScrollEnd by rememberUpdatedState(onScrollEnd)
     val currentOnZoom by rememberUpdatedState(onZoom)
+    val currentOnRotate by rememberUpdatedState(onRotate)
     val currentBounds by rememberUpdatedState(bounds)
     val currentOnStroke by rememberUpdatedState(onStroke)
     val currentOnEraseStart by rememberUpdatedState(onEraseStart)
@@ -354,6 +358,14 @@ fun InkCanvas(
                     var moved = 0f
                     var decided = false
                     var lastSpan = 0f
+                    // Fingers are followed in root pixels: the page itself may be turned (and turning) under them.
+                    fun root(p: Offset) = coordinates?.localToRoot(p) ?: p
+                    val lastRoot = HashMap<PointerId, Offset>()
+                    currentEvent.changes.filter { it.pressed }.forEach { lastRoot[it.id] = root(it.position) }
+                    var lastAngle = Float.NaN
+                    // How far the fingers have twisted; past ROTATE_START_DEG the page starts turning with them.
+                    var twist = 0f
+                    var rotating = false
                     // A quick touch-and-lift without moving is a tap (two-finger tap = undo, three = redo).
                     var fingers = currentEvent.changes.count { it.pressed }
                     while (true) {
@@ -384,16 +396,32 @@ fun InkCanvas(
                             if (moved >= TWO_FINGER_SLOP_PX) currentOnScrollEnd()
                             return
                         }
-                        val dy = pressed.map { it.positionChange().y }.average().toFloat()
-                        val dx = pressed.map { it.positionChange().x }.average().toFloat()
-                        val span = if (pressed.size >= 2) (pressed[0].position - pressed[1].position).getDistance() else 0f
+                        val now = pressed.associate { it.id to root(it.position) }
+                        val moves = now.mapNotNull { (id, p) -> lastRoot[id]?.let { p - it } }
+                        val dy = if (moves.isEmpty()) 0f else moves.map { it.y }.average().toFloat()
+                        val dx = if (moves.isEmpty()) 0f else moves.map { it.x }.average().toFloat()
+                        lastRoot.clear()
+                        lastRoot.putAll(now)
+                        val a = now[pressed[0].id]!!
+                        val b = if (pressed.size >= 2) now[pressed[1].id]!! else a
+                        val span = if (pressed.size >= 2) (a - b).getDistance() else 0f
+                        val angle = if (pressed.size >= 2) Math.toDegrees(atan2((b.y - a.y).toDouble(), (b.x - a.x).toDouble())).toFloat() else Float.NaN
+                        val turn = if (angle.isNaN() || lastAngle.isNaN()) 0f else ((angle - lastAngle + 540f) % 360f) - 180f
+                        lastAngle = angle
                         if (!decided || moved >= TWO_FINGER_SLOP_PX) {
                             moved += abs(dx) + abs(dy)
                             if (lastSpan > 0f && span > 0f) moved += abs(span - lastSpan)
                             if (moved >= TWO_FINGER_SLOP_PX) decided = true
-                            if (lastSpan > 0f && span > 0f) {
-                                val between = (pressed[0].position + pressed[1].position) / 2f
-                                currentOnZoom(span / lastSpan, coordinates?.localToRoot(between) ?: between)
+                            if (lastSpan > 0f && span > 0f) currentOnZoom(span / lastSpan, (a + b) / 2f)
+                            if (rotating) {
+                                currentOnRotate(turn)
+                            } else {
+                                twist += turn
+                                if (abs(twist) > ROTATE_START_DEG) {
+                                    rotating = true
+                                    decided = true
+                                    currentOnRotate(twist)
+                                }
                             }
                             currentOnScroll(-dx, -dy)
                         }
@@ -1379,3 +1407,6 @@ private fun DrawScope.drawPhotoRequest(image: PageImage, scale: Float, accent: C
 
 // How far the pen may move and still count as a tap.
 private const val TAP_SLOP_DP = 8f
+
+// How far two fingers must twist before the page turns with them, so pinching and scrolling don't turn it.
+private const val ROTATE_START_DEG = 15f
