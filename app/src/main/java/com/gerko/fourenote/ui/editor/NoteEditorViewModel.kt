@@ -27,6 +27,7 @@ import com.gerko.fourenote.data.ink.TextStyleSpec
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.PaperStyle
 import com.gerko.fourenote.data.ink.Scribble
+import com.gerko.fourenote.data.ink.StrikeOut
 import com.gerko.fourenote.data.ink.Shapes
 import com.gerko.fourenote.data.ink.Smoothing
 import com.gerko.fourenote.data.ink.Tool
@@ -584,6 +585,18 @@ class NoteEditorViewModel(
                 return
             }
             // Nothing underneath: it was a zigzag on purpose, so keep it as ink.
+        }
+        // A straight line through the middle of words strikes them out.
+        if (scribbleToErase && !stroke.highlighter && StrikeOut.isLine(stroke)) {
+            val struck = StrikeOut.struckBy(stroke, strokes.filter { it.layerId == activeLayerId })
+            if (struck.isNotEmpty()) {
+                recordUndo()
+                val gone = struck.toSet()
+                strokes.removeAll { it in gone }
+                clearSelection()
+                persist()
+                return
+            }
         }
         recordUndo()
         val added = InkStroke(

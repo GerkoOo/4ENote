@@ -1574,7 +1574,7 @@ private fun ToolBar(
                     FilterChip(
                         selected = viewModel.scribbleToErase,
                         onClick = { viewModel.scribbleToErase = !viewModel.scribbleToErase },
-                        label = { Text("Scribble to erase") },
+                        label = { Text("Scribble or strike out to erase") },
                     )
                 }
                 VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))

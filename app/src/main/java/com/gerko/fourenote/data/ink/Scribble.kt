@@ -130,3 +130,76 @@ object Scribble {
         return false
     }
 }
+
+/**
+ * Strike out to erase: one straight, roughly level line drawn through the middle of words
+ * deletes them (as on iPad), alongside scrubbing. A line under or over words (underlining) or
+ * across empty paper stays as ink.
+ */
+object StrikeOut {
+    /** How much longer than straight the line may be; a hand-drawn straight line wobbles a little. */
+    private const val MAX_BEND = 1.12f
+    /** How far from level the line may lean, in degrees. */
+    private const val MAX_TILT_DEG = 25.0
+    private const val MIN_LENGTH = 20f
+    /** The line must cross a stroke between these fractions of its height: its middle, not its top or bottom. */
+    private const val BAND_LOW = 0.2f
+    private const val BAND_HIGH = 0.8f
+    /** At least this share of a stroke's width must lie along the line for it to count as struck. */
+    private const val MIN_COVER = 0.5f
+
+    /** True if [stroke] is a straight, roughly level line: maybe a strike-out. */
+    fun isLine(stroke: InkStroke): Boolean {
+        val p = stroke.points
+        val n = p.size / 2
+        if (n < 2) return false
+        val dx = p[2 * n - 2] - p[0]
+        val dy = p[2 * n - 1] - p[1]
+        val span = hypot(dx, dy)
+        if (span < MIN_LENGTH) return false
+        var length = 0f
+        for (i in 1 until n) length += hypot(p[2 * i] - p[2 * i - 2], p[2 * i + 1] - p[2 * i - 1])
+        if (length > span * MAX_BEND) return false
+        val tilt = Math.toDegrees(atan2(abs(dy).toDouble(), abs(dx).toDouble()))
+        return tilt <= MAX_TILT_DEG
+    }
+
+    /** The strokes in [candidates] that [line] strikes out: the words it crosses through the middle, dots and bars included. */
+    fun struckBy(line: InkStroke, candidates: List<InkStroke>): List<InkStroke> {
+        val p = line.points
+        val n = p.size / 2
+        val x0 = minOf(p[0], p[2 * n - 2])
+        val x1 = maxOf(p[0], p[2 * n - 2])
+        // The line's height at x, straight between its ends.
+        fun lineY(x: Float): Float {
+            val (ax, ay, bx, by) = listOf(p[0], p[1], p[2 * n - 2], p[2 * n - 1])
+            if (bx == ax) return (ay + by) / 2
+            return ay + (by - ay) * ((x - ax) / (bx - ax)).coerceIn(0f, 1f)
+        }
+        val margin = line.width
+        fun cover(b: Shapes.Bounds) = if (b.width <= 0f) {
+            if (b.left in (x0 - margin)..(x1 + margin)) 1f else 0f
+        } else {
+            (minOf(b.right, x1 + margin) - maxOf(b.left, x0 - margin)).coerceAtLeast(0f) / b.width
+        }
+        val bounds = candidates.associateWith { Shapes.Bounds.of(it.points) }
+        // Strokes crossed through their middle.
+        val crossed = candidates.filter { stroke ->
+            val b = bounds.getValue(stroke)
+            if (cover(b) < MIN_COVER) return@filter false
+            val y = lineY(b.centerX)
+            val low = b.top + b.height * BAND_LOW - stroke.width / 2
+            val high = b.top + b.height * BAND_HIGH + stroke.width / 2
+            y in low..high
+        }
+        if (crossed.isEmpty()) return emptyList()
+        // The words' height: anything along the line within it goes too (i dots, t bars, accents).
+        val top = crossed.minOf { bounds.getValue(it).top }
+        val bottom = crossed.maxOf { bounds.getValue(it).bottom }
+        val slack = (bottom - top) * 0.3f
+        return candidates.filter { stroke ->
+            val b = bounds.getValue(stroke)
+            stroke in crossed || (cover(b) >= MIN_COVER && b.centerY in (top - slack)..(bottom + slack))
+        }
+    }
+}
