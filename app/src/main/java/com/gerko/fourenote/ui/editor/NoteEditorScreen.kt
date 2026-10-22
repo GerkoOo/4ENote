@@ -1,5 +1,7 @@
 package com.gerko.fourenote.ui.editor
 
+import kotlin.math.ln
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.snapshotFlow
@@ -507,35 +509,58 @@ private fun PageList(
         gridState.scrollToItem(page)
         horizontal.scrollTo(0)
     }
-    // Where a pinch wants the view once the pages are laid out at the new zoom: the horizontal
-    // scroll, and how far to scroll down, so the point between the fingers stays put.
-    var pinchScrollX by remember { mutableStateOf<Float?>(null) }
-    var pinchScrollY by remember { mutableFloatStateOf(0f) }
+    // A pinch only scales and moves a picture of the pages (screen = layout * pinchScale + pinchShift),
+    // which is smooth; the pages are laid out at the new zoom once, when the fingers lift.
+    var pinchScale by remember { mutableFloatStateOf(1f) }
+    var pinchShift by remember { mutableStateOf(Offset.Zero) }
+    // A tiny spread doesn't start a pinch, so two-finger scrolling still scrolls the pages for real.
+    var pendingFactor by remember { mutableFloatStateOf(1f) }
+    // After the fingers lift: the scroll that keeps everything where it was, applied once the pages
+    // are laid out at the new zoom; until then [pinchShift] stands in for it.
+    var settleScroll by remember { mutableStateOf<Offset?>(null) }
     var viewport by remember { mutableStateOf(Rect.Zero) }
     fun zoomAround(factor: Float, focus: Offset) {
-        val old = zoom
-        val new = (old * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
-        val f = new / old
-        if (f == 1f) return
-        zoom = new
-        zoomByPinch = true
-        val fx = focus.x - viewport.left
-        val fy = focus.y - viewport.top
-        pinchScrollX = (((pinchScrollX ?: horizontal.value.toFloat()) + fx) * f - fx).coerceAtLeast(0f)
-        // The point's distance below the top of the first page on screen grows by f.
-        val above = gridState.firstVisibleItemScrollOffset + pinchScrollY + fy
-        pinchScrollY += above * (f - 1)
-    }
-    // During a pinch, every frame: keep the fingers' point in place.
-    LaunchedEffect(Unit) {
-        snapshotFlow { zoom }.collect {
-            withFrameNanos { } // once laid out at the new size
-            val x = pinchScrollX ?: return@collect
-            horizontal.scrollTo(x.roundToInt())
-            gridState.scrollBy(pinchScrollY)
-            pinchScrollX = null
-            pinchScrollY = 0f
+        var f = factor
+        if (pinchScale == 1f) {
+            pendingFactor *= factor
+            if (abs(ln(pendingFactor)) < PINCH_START) return
+            f = pendingFactor
+            pendingFactor = 1f
         }
+        // Never past the zoom limits.
+        val scale = (pinchScale * f).coerceIn(MIN_ZOOM / zoom, MAX_ZOOM / zoom)
+        val k = scale / pinchScale
+        val p = focus - viewport.topLeft
+        pinchShift = p - (p - pinchShift) * k
+        pinchScale = scale
+    }
+    fun panWhilePinching(dx: Float, dy: Float): Boolean {
+        if (pinchScale == 1f) return false
+        pinchShift -= Offset(dx, dy)
+        return true
+    }
+    fun endPinch() {
+        pendingFactor = 1f
+        if (pinchScale == 1f) return
+        val s = pinchScale
+        val t = pinchShift
+        val oldX = horizontal.value.toFloat()
+        // Each page grows by s; the scroll grows with it, less what the pinch moved the view.
+        val dx = oldX * s - t.x - oldX
+        val dy = gridState.firstVisibleItemScrollOffset * (s - 1) - t.y
+        zoomByPinch = true
+        zoom *= s
+        pinchScale = 1f
+        pinchShift = Offset(-dx, -dy)
+        settleScroll = Offset(dx, dy)
+    }
+    LaunchedEffect(settleScroll) {
+        val (dx, dy) = settleScroll ?: return@LaunchedEffect
+        withFrameNanos { } // once laid out at the new zoom
+        horizontal.scrollBy(dx)
+        gridState.scrollBy(dy)
+        pinchShift = Offset.Zero
+        settleScroll = null
     }
     // Zoom buttons and full screen: pages wider than the screen start centered rather than pinned to the left edge.
     LaunchedEffect(zoom, fullScreen) {
@@ -639,7 +664,18 @@ private fun PageList(
         // Backgrounds are re-rendered in size steps, not on every frame of a pinch.
         val backgroundWidthPx = ((pageWidthPx / 128f).roundToInt().coerceAtLeast(1)) * 128
 
-        Box(Modifier.fillMaxSize().horizontalScroll(horizontal, enabled = gridWidth > maxWidth)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = pinchScale
+                    scaleY = pinchScale
+                    translationX = pinchShift.x
+                    translationY = pinchShift.y
+                    transformOrigin = TransformOrigin(0f, 0f)
+                }
+                .horizontalScroll(horizontal, enabled = gridWidth > maxWidth),
+        ) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 state = gridState,
@@ -729,10 +765,18 @@ private fun PageList(
                             onLasso = { viewModel.selectWithLasso(page.id, it) },
                             onTransformSelection = viewModel::transformSelection,
                             onScroll = { dx, dy ->
-                                gridState.dispatchRawDelta(dy)
-                                horizontal.dispatchRawDelta(dx)
+                                if (!panWhilePinching(dx, dy)) {
+                                    gridState.dispatchRawDelta(dy)
+                                    horizontal.dispatchRawDelta(dx)
+                                }
                             },
-                            onScrollEnd = { settleRotation(); snapToNearestPage() },
+                            onScrollEnd = {
+                                // After a pinch the view stays where the fingers left it; page snapping is for scrolling.
+                                val pinched = pinchScale != 1f
+                                endPinch()
+                                settleRotation()
+                                if (!pinched) snapToNearestPage()
+                            },
                             onRotate = { pageRotation = ((pageRotation + it) % 360f + 360f) % 360f },
                             onZoom = ::zoomAround,
                             onTwoFingerHold = onTwoFingerHold,
@@ -1741,3 +1785,6 @@ private const val ROTATION_SNAP_DEG = 8f
 
 /** The floating tool bar's height plus its margins: the pages start below it. */
 private val TOOLBAR_SPACE = 136.dp
+
+/** How much fingers must spread or pinch (as a log of the scale) before a pinch starts zooming. */
+private const val PINCH_START = 0.03f
