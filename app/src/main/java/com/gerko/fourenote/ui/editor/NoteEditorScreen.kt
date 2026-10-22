@@ -1,5 +1,9 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -214,6 +218,7 @@ fun NoteEditorScreen(
     // Where two fingers were held to open the pen dial, in window pixels; null when closed.
     var dialAt by remember { mutableStateOf<Offset?>(null) }
     var pickingColor by remember { mutableStateOf(false) }
+    var addingTable by remember { mutableStateOf(false) }
     // A pen button click: [at] is where the pen was, in window pixels (null for key presses, which have no position).
     fun onPenButton(action: PenButtonAction, at: Offset?) {
         when (action) {
@@ -307,6 +312,7 @@ fun NoteEditorScreen(
                         onImportPdf = { pdfPicker.launch(arrayOf("application/pdf")) },
                         onImportImages = { imagePicker.launch(arrayOf("image/*")) },
                         onScan = ::startScan,
+                        onTable = { addingTable = true },
                     )
                     IconButton(onClick = {
                         viewModel.exportPdf { file ->
@@ -396,6 +402,16 @@ fun NoteEditorScreen(
         )
     }
     if (showingSettings) PenSettingsDialog(viewModel, onDismiss = { showingSettings = false })
+    if (addingTable) {
+        TableDialog(
+            onInsert = { rows, columns ->
+                addingTable = false
+                // On the page at the top of the screen.
+                viewModel.pages.getOrNull(gridState.firstVisibleItemIndex)?.let { viewModel.insertTable(it.id, rows, columns) }
+            },
+            onDismiss = { addingTable = false },
+        )
+    }
     pdfToImport?.let { uri ->
         fun import(inverted: Boolean) {
             pdfToImport = null
@@ -600,6 +616,8 @@ private fun PageList(
                                 draggingPage = page.id
                             },
                             onPageDrag = ::dragPageTo,
+                            loop = viewModel.recentLoop?.takeIf { it.first == page.id }?.second,
+                            onLoopHold = { viewModel.loopToSelection(page.id) },
                             onPageDragEnd = {
                                 draggingPage = null
                                 viewModel.endPageMove()
@@ -953,7 +971,7 @@ private fun PageFooter(
 }
 
 @Composable
-private fun AddMenu(onBlankPage: () -> Unit, onImportPdf: () -> Unit, onImportImages: () -> Unit, onScan: () -> Unit) {
+private fun AddMenu(onBlankPage: () -> Unit, onImportPdf: () -> Unit, onImportImages: () -> Unit, onScan: () -> Unit, onTable: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -980,9 +998,55 @@ private fun AddMenu(onBlankPage: () -> Unit, onImportPdf: () -> Unit, onImportIm
                 leadingIcon = { Icon(Icons.Filled.DocumentScanner, contentDescription = null) },
                 onClick = { open = false; onScan() },
             )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Table…") },
+                leadingIcon = { Icon(Icons.Filled.TableChart, contentDescription = null) },
+                onClick = { open = false; onTable() },
+            )
         }
     }
 }
+
+/** Asks how many rows and columns a new table gets. */
+@Composable
+private fun TableDialog(onInsert: (rows: Int, columns: Int) -> Unit, onDismiss: () -> Unit) {
+    var rows by rememberSaveable { mutableIntStateOf(3) }
+    var columns by rememberSaveable { mutableIntStateOf(3) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Insert table") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Stepper("Rows", rows) { rows = it }
+                Stepper("Columns", columns) { columns = it }
+                Text(
+                    "The table is selected after inserting: drag to move it, pull the dots to resize it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onInsert(rows, columns) }) { Text("Insert") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun Stepper(label: String, value: Int, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text(label, Modifier.weight(1f))
+        IconButton(onClick = { onChange((value - 1).coerceAtLeast(1)) }, enabled = value > 1) {
+            Icon(Icons.Filled.Remove, contentDescription = "Fewer $label")
+        }
+        Text("$value", style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(32.dp), textAlign = TextAlign.Center)
+        IconButton(onClick = { onChange((value + 1).coerceAtMost(MAX_TABLE_CELLS)) }, enabled = value < MAX_TABLE_CELLS) {
+            Icon(Icons.Filled.Add, contentDescription = "More $label")
+        }
+    }
+}
+
+private const val MAX_TABLE_CELLS = 20
 
 /** Ways to add pages, offered under the last page. */
 private class AddPageActions(val blank: () -> Unit, val pdf: () -> Unit, val images: () -> Unit, val scan: () -> Unit)
@@ -1055,6 +1119,13 @@ private fun PenSettingsDialog(viewModel: NoteEditorViewModel, onDismiss: () -> U
                 SettingSwitch("Two-finger double-tap to undo", viewModel.twoFingerDoubleTapUndo) { viewModel.twoFingerDoubleTapUndo = it }
                 SettingSwitch("Three-finger double-tap to redo", viewModel.threeFingerDoubleTapRedo) { viewModel.threeFingerDoubleTapRedo = it }
                 SettingSwitch("Stylus only (fingers scroll, palm ignored)", viewModel.stylusOnly) { viewModel.stylusOnly = it }
+                Text(
+                    "Draw a line, circle, triangle or rectangle and hold the pen still to straighten it. " +
+                        "Draw a loop around something, then hold a finger inside it to select it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
                 Text(
                     "Hold two fingers still on a page, or tap the dial button, to open the quick dial.",
                     style = MaterialTheme.typography.bodySmall,

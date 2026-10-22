@@ -28,6 +28,7 @@ import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.PaperStyle
 import com.gerko.fourenote.data.ink.Scribble
+import com.gerko.fourenote.data.ink.Shapes
 import com.gerko.fourenote.data.ink.Smoothing
 import com.gerko.fourenote.data.ink.Tool
 import com.gerko.fourenote.data.ink.isInsideLasso
@@ -58,6 +59,9 @@ val PenWidths = listOf(1.5f, 3f, 6f)
 val HighlighterWidths = listOf(12f, 20f, 30f)
 /** Font size formulas are typeset at before they're scaled onto the page; big enough to stay sharp. */
 private const val FORMULA_RENDER_PX = 96f
+
+/** Row height of an inserted table, in page units: about one line of handwriting. */
+private const val TABLE_ROW_HEIGHT = 44f
 
 val InkPenWidths = listOf(2.5f, 4.5f, 8f)
 val CalligraphyWidths = listOf(6f, 10f, 16f)
@@ -374,9 +378,46 @@ class NoteEditorViewModel(
     /** The drawing tool used before the current one, for the pen button's "last tool" action. */
     private var previousTool = Tool.PEN
 
+    /**
+     * The last stroke, if it was a closed loop: long-pressing inside it with a finger turns it
+     * into a lasso selection of what it encloses. Page id and stroke.
+     */
+    var recentLoop by mutableStateOf<Pair<String, InkStroke>?>(null)
+        private set
+
+    // The tool to go back to once a selection made from a loop, or a table just inserted, is done with.
+    private var toolBeforeLoop: Tool? = null
+
+    /** Turns [recentLoop] into a selection of the ink (or else the picture) inside it. */
+    fun loopToSelection(pageId: String) {
+        val (loopPage, loop) = recentLoop ?: return
+        val page = page(pageId) ?: return
+        recentLoop = null
+        if (loopPage != pageId || loop !in page.strokes) return
+        recordUndo()
+        page.strokes.remove(loop)
+        persist()
+        if (tool != Tool.LASSO) {
+            previousTool = tool
+            toolBeforeLoop = tool
+            tool = Tool.LASSO
+        }
+        selectWithLasso(pageId, loop.points)
+        if (selection.isEmpty()) {
+            val picture = page.images.lastOrNull { Shapes.contains(loop.points, it.x, it.y) }
+            if (picture != null) {
+                selectedImage = pageId to picture.id
+            } else {
+                clearSelection()
+                message = "Nothing inside the loop to select"
+            }
+        }
+    }
+
     fun selectTool(newTool: Tool) {
         if (newTool != tool) previousTool = tool
         tool = newTool
+        toolBeforeLoop = null
         clearSelection()
         selectedImage = null
     }
@@ -389,6 +430,10 @@ class NoteEditorViewModel(
     }
 
     fun clearSelection() {
+        toolBeforeLoop?.let {
+            toolBeforeLoop = null
+            tool = it
+        }
         selection = emptySet()
         selectionPageId = null
     }
@@ -456,9 +501,9 @@ class NoteEditorViewModel(
             // Nothing underneath: it was a zigzag on purpose, so keep it as ink.
         }
         recordUndo()
-        strokes.add(
-            InkStroke(stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, activeLayerId, stroke.id, stroke.nibAngle),
-        )
+        val added = InkStroke(stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, activeLayerId, stroke.id, stroke.nibAngle)
+        strokes.add(added)
+        recentLoop = if (!added.highlighter && Shapes.isLoop(added.points)) pageId to added else null
         // Drawing on a hidden layer would look like nothing happened.
         val index = layers.indexOfFirst { it.id == activeLayerId }
         if (index >= 0 && !layers[index].visible) layers[index] = layers[index].copy(visible = true)
@@ -706,6 +751,34 @@ class NoteEditorViewModel(
         persist()
     }
 
+    /**
+     * Draws a table of [rows] by [columns] cells in the pen's color, centered on the page, and
+     * selects it so it can be moved and stretched straight away.
+     */
+    fun insertTable(pageId: String, rows: Int, columns: Int) {
+        val page = page(pageId) ?: return
+        val width = minOf(page.width * 0.8f, columns * 160f)
+        val height = rows * TABLE_ROW_HEIGHT
+        val left = (page.width - width) / 2
+        val top = ((page.height - height) / 2).coerceAtLeast(40f)
+        val color = penColor.toArgb()
+        fun line(x0: Float, y0: Float, x1: Float, y1: Float) =
+            InkStroke(color, penWidth, highlighter = false, points = Shapes.polyline(floatArrayOf(x0, y0, x1, y1)), layerId = activeLayerId)
+        val lines = (0..rows).map { r -> line(left, top + r * TABLE_ROW_HEIGHT, left + width, top + r * TABLE_ROW_HEIGHT) } +
+            (0..columns).map { c -> line(left + c * width / columns, top, left + c * width / columns, top + height) }
+        recordUndo()
+        page.strokes.addAll(lines)
+        persist()
+        if (tool != Tool.LASSO) {
+            previousTool = tool
+            toolBeforeLoop = tool
+            tool = Tool.LASSO
+        }
+        selectedImage = null
+        selection = lines.toSet()
+        selectionPageId = pageId
+    }
+
     /** Starts moving a page by hand: one undo step covers the whole move. */
     fun beginPageMove() = recordUndo()
 
@@ -890,12 +963,14 @@ class NoteEditorViewModel(
     }
 
     fun undo() {
+        recentLoop = null
         val previous = undoStack.removeLastOrNull() ?: return
         redoStack.addLast(snapshot())
         restore(previous)
     }
 
     fun redo() {
+        recentLoop = null
         val next = redoStack.removeLastOrNull() ?: return
         undoStack.addLast(snapshot())
         restore(next)

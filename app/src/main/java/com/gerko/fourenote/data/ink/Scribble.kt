@@ -10,16 +10,17 @@ import kotlin.math.hypot
 object Scribble {
     private const val MIN_REVERSALS = 4
     /** How much longer the scribble's path must be than its bounding box's diagonal. */
-    private const val MIN_DENSITY = 2.5f
+    private const val MIN_DENSITY = 3f
     /** Movement shorter than this (page units) never counts as a reversal, so jitter is ignored. */
     private const val MIN_SWING = 6f
 
     /**
      * A reversal only counts if the pass it ends spans at least this share of
      * the scribble's extent. Scrubbing sweeps nearly edge to edge every pass;
-     * the small backward loops of cursive letters (m, n, e, l) don't.
+     * the backward loops of cursive letters (e, a, l) and a t crossed in one go
+     * reach back only a third of a short word or so.
      */
-    private const val MIN_PASS_FRACTION = 0.35f
+    private const val MIN_PASS_FRACTION = 0.6f
 
     /** True if [stroke] is a back-and-forth scrub rather than writing. */
     fun isScribble(stroke: InkStroke): Boolean {

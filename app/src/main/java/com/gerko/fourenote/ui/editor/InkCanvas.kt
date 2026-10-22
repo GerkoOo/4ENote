@@ -55,6 +55,7 @@ import com.gerko.fourenote.data.ink.InkPen
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.outline
 import com.gerko.fourenote.data.ink.PaperStyle
+import com.gerko.fourenote.data.ink.Shapes
 import com.gerko.fourenote.data.ink.Smoothing
 import com.gerko.fourenote.data.ink.Tool
 import java.util.WeakHashMap
@@ -79,6 +80,9 @@ private const val TWO_FINGER_HOLD_MS = 450L
 private const val TWO_FINGER_SLOP_PX = 24f
 private const val MULTI_FINGER_TAP_MS = 300L
 private const val PAGE_HOLD_MS = 450L
+private const val SHAPE_HOLD_MS = 500L
+private const val LOOP_HOLD_MS = 500L
+private const val HOLD_SLOP_PX = 6f
 private const val MAX_SCALE = 8f
 
 /** RESIZE_X and RESIZE_Y stretch one axis; RESIZE_XY scales both axes independently. */
@@ -147,6 +151,9 @@ fun InkCanvas(
     onPageDragStart: (Offset) -> Unit = {},
     onPageDrag: (Offset) -> Unit = {},
     onPageDragEnd: () -> Unit = {},
+    /** A loop just drawn on this page; long-pressing inside it with a finger calls [onLoopHold]. */
+    loop: InkStroke? = null,
+    onLoopHold: () -> Unit = {},
     /** Color and width of a tool, for strokes drawn with a tool other than the selected one (pen button). */
     styleFor: (Tool) -> Pair<Color, Float> = { color to width },
 ) {
@@ -193,6 +200,8 @@ fun InkCanvas(
     val currentOnPageDragStart by rememberUpdatedState(onPageDragStart)
     val currentOnPageDrag by rememberUpdatedState(onPageDrag)
     val currentOnPageDragEnd by rememberUpdatedState(onPageDragEnd)
+    val currentLoop by rememberUpdatedState(loop)
+    val currentOnLoopHold by rememberUpdatedState(onLoopHold)
     val currentSmoothing by rememberUpdatedState(smoothing)
     val currentNibDegrees by rememberUpdatedState(nibDegrees)
     val currentScale by rememberUpdatedState(scale)
@@ -261,9 +270,33 @@ fun InkCanvas(
 
                 // Collects every position of the gesture after the first, in page units.
                 // Stops early if a second finger lands; the gesture then becomes a scroll.
-                suspend fun AwaitPointerEventScope.trackDrag(onPoint: (Offset) -> Unit) {
+                // [onHold] runs once if the pointer stays still for SHAPE_HOLD_MS mid-drag.
+                suspend fun AwaitPointerEventScope.trackDrag(onHold: (() -> Unit)? = null, onPoint: (Offset) -> Unit) {
+                    var stillAt = down.position
+                    var stillSince = down.uptimeMillis
+                    var held = false
                     while (true) {
-                        val event = awaitPointerEvent()
+                        val waitMs = stillSince + SHAPE_HOLD_MS - currentEvent.changes.first().uptimeMillis
+                        val event = if (onHold != null && !held) {
+                            withTimeoutOrNull(waitMs.coerceAtLeast(1)) { awaitPointerEvent() }
+                        } else {
+                            awaitPointerEvent()
+                        }
+                        if (event == null) {
+                            held = true
+                            onHold?.invoke()
+                            continue
+                        }
+                        event.changes.firstOrNull { it.id == down.id }?.let { change ->
+                            // A pen resting on the screen still jitters a little; that counts as still.
+                            if ((change.position - stillAt).getDistance() > HOLD_SLOP_PX) {
+                                stillAt = change.position
+                                stillSince = change.uptimeMillis
+                            } else if (onHold != null && !held && change.pressed && change.uptimeMillis - stillSince >= SHAPE_HOLD_MS) {
+                                held = true
+                                onHold()
+                            }
+                        }
                         if (event.changes.count { it.pressed } > 1) {
                             secondFinger = true
                             return
@@ -430,6 +463,28 @@ fun InkCanvas(
 
                 val fingerOnSelectedPicture = gestureTool == Tool.LASSO &&
                     currentImages.any { it.id == currentSelectedImageId && it.contains(toDp(down.position).x, toDp(down.position).y) }
+                // A finger held still inside a loop just drawn turns the loop into a lasso selection.
+                val loopPoints = currentLoop?.points
+                if (down.type == PointerType.Touch && loopPoints != null && toDp(down.position).let { Shapes.contains(loopPoints, it.x, it.y) }) {
+                    var lifted = false
+                    var moved = false
+                    val timedOut = withTimeoutOrNull(LOOP_HOLD_MS) {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val finger = event.changes.firstOrNull { it.id == down.id }
+                            if (finger == null || !finger.pressed) { lifted = true; break }
+                            if (event.changes.count { it.pressed } > 1 || (finger.position - down.position).getDistance() > TWO_FINGER_SLOP_PX) { moved = true; break }
+                        }
+                    } == null
+                    if (timedOut) {
+                        currentOnLoopHold()
+                        while (currentEvent.changes.any { it.pressed }) awaitPointerEvent().changes.forEach { it.consume() }
+                        return@awaitEachGesture
+                    }
+                    if (lifted) return@awaitEachGesture
+                    // Moved: carry on as an ordinary touch.
+                }
+
                 if ((currentStylusOnly || currentOverview) && down.type == PointerType.Touch && !fingerOnSelectedPicture) {
                     // Fingers never draw here. One finger is left to the page list (so it scrolls
                     // and flings normally); a second finger takes over to scroll or open the dial.
@@ -625,8 +680,21 @@ fun InkCanvas(
                     val stabilizer = Smoothing.Stabilizer(level)
                     stabilizer.next(start.x, start.y)
                     var lastRaw = start
-                    trackDrag { p ->
+                    // Draw a shape and hold the pen still: it snaps to a clean line, circle, triangle or rectangle.
+                    var shape: FloatArray? = null
+                    // The pen's path before smoothing, which would round off the corners of shapes.
+                    val path = arrayListOf(start.x, start.y)
+                    trackDrag(onHold = {
+                        Shapes.recognize(path.toFloatArray())?.let { clean ->
+                            shape = clean
+                            current.clear()
+                            for (i in clean.indices step 2) current.add(Offset(clean[i], clean[i + 1]))
+                        }
+                    }) { p ->
                         lastRaw = p
+                        if (shape != null) return@trackDrag
+                        path += p.x
+                        path += p.y
                         val (x, y) = stabilizer.next(p.x, p.y)
                         val steady = Offset(x, y)
                         if ((steady - current.last()).getDistance() > 0.5f) addPoint(steady)
@@ -638,14 +706,16 @@ fun InkCanvas(
                         return@awaitEachGesture
                     }
                     // The stabilizer trails the pen; finish the line where the pen lifted.
-                    if ((lastRaw - current.last()).getDistance() > 0.5f) addPoint(lastRaw)
+                    if (shape == null && (lastRaw - current.last()).getDistance() > 0.5f) addPoint(lastRaw)
                     val raw = FloatArray(current.size * 2)
                     current.forEachIndexed { i, p ->
                         raw[2 * i] = p.x
                         raw[2 * i + 1] = p.y
                     }
-                    val points = Smoothing.smoothStroke(raw, level)
+                    val points = shape ?: Smoothing.smoothStroke(raw, level)
                     val widths = when {
+                        // A snapped shape is drawn evenly; its points no longer match the pen's pressure.
+                        shape != null -> null
                         inkPen -> {
                             val factors = InkPen.widthFactors(raw, currentTimes.toLongArray(), currentPressures.toFloatArray())
                             InkPen.resampleWidths(raw, factors, points)
