@@ -44,4 +44,17 @@ class StrikeOutTest {
     fun aLineOnEmptyPaperErasesNothing() {
         assertTrue(StrikeOut.struckBy(line(0f, 300f, 100f, 300f), listOf(word("hello", 0f, 100f))).isEmpty())
     }
+
+    @Test
+    fun theBarOfATOrFIsNotAStrikeOut() {
+        // A t: a tall stem, then a short bar across its middle.
+        val stem = stroke("stem", 20f, 100f, 20f, 115f, 20f, 130f, 22f, 140f, 28f, 142f)
+        assertTrue(StrikeOut.struckBy(line(10f, 112f, 32f, 112f), listOf(stem)).isEmpty())
+        // An f with a loop, crossed by a slightly longer bar.
+        val f = stroke("f", 30f, 105f, 24f, 100f, 20f, 110f, 20f, 140f, 18f, 160f, 12f, 162f)
+        assertTrue(StrikeOut.struckBy(line(8f, 125f, 34f, 124f), listOf(f)).isEmpty())
+        // The t's bar drawn next to the word "hello" written earlier doesn't erase it either.
+        val hello = word("hello", 40f, 100f)
+        assertTrue(StrikeOut.struckBy(line(10f, 112f, 32f, 112f), listOf(hello, stem)).isEmpty())
+    }
 }
