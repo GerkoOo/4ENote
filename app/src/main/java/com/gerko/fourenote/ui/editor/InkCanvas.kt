@@ -163,6 +163,8 @@ fun InkCanvas(
     overview: Boolean = false,
     /** A quick one-finger tap on the page while fingers don't draw. */
     onFingerTap: () -> Unit = {},
+    /** One finger held still on the page (where fingers don't draw), outside the overview. */
+    onFingerHold: () -> Unit = {},
     /** In the [overview], holding a finger still on the page picks it up to move: start, move and drop, in root pixels. */
     onPageDragStart: (Offset) -> Unit = {},
     onPageDrag: (Offset) -> Unit = {},
@@ -219,6 +221,7 @@ fun InkCanvas(
     val currentStylusOnly by rememberUpdatedState(stylusOnly)
     val currentOverview by rememberUpdatedState(overview)
     val currentOnFingerTap by rememberUpdatedState(onFingerTap)
+    val currentOnFingerHold by rememberUpdatedState(onFingerHold)
     val currentOnPageDragStart by rememberUpdatedState(onPageDragStart)
     val currentOnPageDrag by rememberUpdatedState(onPageDrag)
     val currentOnPageDragEnd by rememberUpdatedState(onPageDragEnd)
@@ -428,10 +431,10 @@ fun InkCanvas(
                                 currentOnRotate(turn)
                             } else {
                                 twist += turn
+                                // From here the page turns with the fingers, without jumping by the start twist.
                                 if (abs(twist) > ROTATE_START_DEG) {
                                     rotating = true
                                     decided = true
-                                    currentOnRotate(twist)
                                 }
                             }
                             currentOnScroll(-dx, -dy)
@@ -590,10 +593,16 @@ fun InkCanvas(
                     var moved = 0f
                     while (true) {
                         val held = down.uptimeMillis + PAGE_HOLD_MS - (currentEvent.changes.first().uptimeMillis)
-                        val event = if (currentOverview && moved < TWO_FINGER_SLOP_PX) {
+                        val event = if (moved < TWO_FINGER_SLOP_PX) {
                             withTimeoutOrNull(held.coerceAtLeast(1)) { awaitPointerEvent() }
                         } else {
                             awaitPointerEvent()
+                        }
+                        if (event == null && !currentOverview) {
+                            // Held still at normal size: bring this page to the middle.
+                            currentOnFingerHold()
+                            while (currentEvent.changes.any { it.pressed }) awaitPointerEvent().changes.forEach { it.consume() }
+                            return@awaitEachGesture
                         }
                         if (event == null) {
                             // Held still: pick the page up and follow the finger until it lifts.
@@ -1423,4 +1432,4 @@ private fun DrawScope.drawPhotoRequest(image: PageImage, scale: Float, accent: C
 private const val TAP_SLOP_DP = 8f
 
 // How far two fingers must twist before the page turns with them, so pinching and scrolling don't turn it.
-private const val ROTATE_START_DEG = 10f
+private const val ROTATE_START_DEG = 6f

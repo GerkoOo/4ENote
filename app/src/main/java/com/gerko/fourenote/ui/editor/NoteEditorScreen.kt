@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.input.pointer.pointerInput
@@ -24,8 +25,6 @@ import androidx.compose.material.icons.filled.Title
 import kotlin.math.abs
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.gestures.ScrollableDefaults
-import androidx.compose.foundation.gestures.snapping.SnapPosition
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TableChart
@@ -646,6 +645,8 @@ private fun PageList(
     // Bars for a selection sit just under the floating tool bar.
     val barsTop = if (fullScreen) 12.dp else TOOLBAR_SPACE
     val currentOnTwoFingerHold by androidx.compose.runtime.rememberUpdatedState(onTwoFingerHold)
+    // Where a finger was held still beside the pages, to center the page nearest to it.
+    var centerNear by remember { mutableStateOf<Offset?>(null) }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -655,12 +656,23 @@ private fun PageList(
             // Only watches: scrolling there carries on as usual.
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = true)
+                    val first = awaitFirstDown(requireUnconsumed = true)
                     var held = emptyMap<androidx.compose.ui.input.pointer.PointerId, Offset>()
                     var since = 0L
+                    // One finger held still: center the nearest page.
+                    var oneStill = true
                     while (true) {
-                        val wait = if (held.isEmpty()) Long.MAX_VALUE else since + DIAL_HOLD_MS - System.currentTimeMillis()
+                        val wait = if (held.isEmpty()) {
+                            if (oneStill) first.uptimeMillis + DIAL_HOLD_MS - currentEvent.changes.first().uptimeMillis else Long.MAX_VALUE
+                        } else {
+                            since + DIAL_HOLD_MS - System.currentTimeMillis()
+                        }
                         val event = withTimeoutOrNull(wait.coerceAtLeast(1)) { awaitPointerEvent() }
+                        if (event == null && held.isEmpty()) {
+                            centerNear = first.position
+                            while (currentEvent.changes.any { it.pressed }) awaitPointerEvent().changes.forEach { it.consume() }
+                            break
+                        }
                         if (event == null) {
                             val fingers = currentEvent.changes.filter { it.pressed }
                             val middle = fingers.fold(Offset.Zero) { sum, it -> sum + it.position } / fingers.size.toFloat()
@@ -671,6 +683,7 @@ private fun PageList(
                         if (event.changes.any { it.isConsumed }) break
                         val pressed = event.changes.filter { it.pressed }
                         if (pressed.isEmpty()) break
+                        if (pressed.size > 1 || pressed.any { (it.position - first.position).getDistance() > DIAL_HOLD_SLOP_PX }) oneStill = false
                         when {
                             pressed.size >= 2 && held.isEmpty() -> {
                                 held = pressed.associate { it.id to it.position }
@@ -715,16 +728,6 @@ private fun PageList(
         }
         val gridMargin = layoutRotations.values.maxOfOrNull { turnedMargin(pageWidth, A4_ASPECT, it).first } ?: 0.dp
         val gridWidth = if (fullScreen) maxOf(maxWidth, pageWidth + gridMargin * 2) else maxOf(maxWidth, pageWidth + gridMargin * 2 + 32.dp)
-        // In full screen at fitting size, a scroll or fling settles on whole pages, like turning them.
-        val snapping = fullScreen && zoom <= 1f
-        fun snapToNearestPage() {
-            if (!snapping) return
-            val info = gridState.layoutInfo
-            val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
-            val nearest = info.visibleItemsInfo.filter { it.index < viewModel.pages.size }
-                .minByOrNull { abs(it.offset.y + it.size.height / 2 - middle) } ?: return
-            scope.launch { gridState.animateScrollToItem(nearest.index) }
-        }
         val density = LocalDensity.current
         // Where page [index] is laid out now, in pixels from the top left of the view (before any
         // pinch scaling). Reads the zoom and turn live, so it is right even straight after they change.
@@ -757,6 +760,22 @@ private fun PageList(
             }
             change()
             settleTick++
+        }
+        // Glides page [index] to the middle of the screen (only ever on request: a finger held still).
+        fun centerPage(index: Int) {
+            val r = pageRect(index) ?: return
+            val by = r.center - Offset(viewport.width / 2, viewport.height / 2)
+            scope.launch { horizontal.animateScrollBy(by.x) }
+            scope.launch { gridState.animateScrollBy(by.y) }
+        }
+        // A finger held still beside the pages centers the page nearest to it.
+        LaunchedEffect(centerNear) {
+            val at = centerNear ?: return@LaunchedEffect
+            centerNear = null
+            gridState.layoutInfo.visibleItemsInfo.filter { it.index < viewModel.pages.size }
+                .mapNotNull { info -> pageRect(info.index)?.let { info.index to it } }
+                .minByOrNull { (_, r) -> (r.center - at).getDistance() }
+                ?.let { (index, _) -> centerPage(index) }
         }
         LaunchedEffect(settleTick) {
             if (settleTick == 0) return@LaunchedEffect
@@ -797,7 +816,6 @@ private fun PageList(
                 verticalArrangement = Arrangement.spacedBy(if (fullScreen) 0.dp else 12.dp),
                 // Room at the top for the floating tool bar.
                 contentPadding = if (fullScreen) PaddingValues(0.dp) else PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp, top = TOOLBAR_SPACE),
-                flingBehavior = if (snapping) rememberSnapFlingBehavior(gridState, SnapPosition.Start) else ScrollableDefaults.flingBehavior(),
                 modifier = Modifier.width(gridWidth).fillMaxHeight().onGloballyPositioned { gridBounds = it.boundsInRoot() },
             ) {
                 itemsIndexed(viewModel.pages, key = { _, page -> page.id }) { index, page ->
@@ -895,9 +913,9 @@ private fun PageList(
                                     }
                                 } else {
                                     pendingFactor = 1f
-                                    snapToNearestPage()
                                 }
                             },
+                            onFingerHold = { centerPage(index) },
                             onRotate = { pageRotations[page.id] = (((pageRotations[page.id] ?: 0f) + it) % 360f + 360f) % 360f },
                             onZoom = ::zoomAround,
                             onTwoFingerHold = onTwoFingerHold,
