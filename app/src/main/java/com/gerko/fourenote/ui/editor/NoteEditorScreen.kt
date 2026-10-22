@@ -853,12 +853,16 @@ private fun PageList(
                             .width(itemWidth),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        val background by produceState<ImageBitmap?>(null, page.background, backgroundWidthPx) {
-                            value = page.background?.let { backgrounds.load(viewModel.noteId, it, backgroundWidthPx)?.asImageBitmap() }
+                        // Reloaded at a new size after zooming; the old copy stays up until the new one is
+                        // ready, so the page never flashes blank.
+                        var background by remember(page.id) { mutableStateOf<ImageBitmap?>(null) }
+                        LaunchedEffect(page.background, backgroundWidthPx) {
+                            background = page.background?.let { backgrounds.load(viewModel.noteId, it, backgroundWidthPx)?.asImageBitmap() }
                         }
                         val imageFiles = page.images.map { it.file }.toSet()
-                        val imageBitmaps by produceState(emptyMap<String, ImageBitmap>(), imageFiles, backgroundWidthPx) {
-                            value = imageFiles.mapNotNull { file ->
+                        var imageBitmaps by remember(page.id) { mutableStateOf(emptyMap<String, ImageBitmap>()) }
+                        LaunchedEffect(imageFiles, backgroundWidthPx) {
+                            imageBitmaps = imageFiles.mapNotNull { file ->
                                 backgrounds.load(viewModel.noteId, PageBackground.Image(file), backgroundWidthPx)
                                     ?.let { file to it.asImageBitmap() }
                             }.toMap()
