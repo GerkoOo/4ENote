@@ -84,6 +84,55 @@ class ScribbleTest {
         assertFalse(Scribble.isScribble(stroke("eat", *bigLoops.toFloatArray())))
     }
 
+    /** [scrub] turned by [degrees] around its start. */
+    private fun rotated(stroke: InkStroke, degrees: Double): InkStroke {
+        val a = Math.toRadians(degrees)
+        val c = Math.cos(a).toFloat()
+        val sn = Math.sin(a).toFloat()
+        val p = stroke.points
+        return stroke("turned", *FloatArray(p.size) { i ->
+            val x = p[i - i % 2]
+            val y = p[i - i % 2 + 1]
+            if (i % 2 == 0) x * c - y * sn else x * sn + y * c
+        })
+    }
+
+    @Test
+    fun scrubsCountAtAnyAngle() {
+        val scrub = scrub(0f, 60f, 0f, passes = 5)
+        for (degrees in listOf(30.0, 45.0, 90.0, 135.0)) assertTrue("at $degrees", Scribble.isScribble(rotated(scrub, degrees)))
+    }
+
+    @Test
+    fun scrubThatDriftsAlongTheWordStillCounts() {
+        // Each pass starts a little further right, as when scrubbing out a line of writing.
+        val points = ArrayList<Float>()
+        for (k in 0..7) {
+            val from = k * 8f
+            val (x0, x1) = if (k % 2 == 0) from to from + 60f else from + 60f to from
+            for (s in 0..4) {
+                points += x0 + (x1 - x0) * s / 4f
+                points += k * 1.5f
+            }
+        }
+        assertTrue(Scribble.isScribble(stroke("drift", *points.toFloatArray())))
+    }
+
+    @Test
+    fun handwritingInAnyDirectionMixIsNotAScribble() {
+        // A word of loops (like "lll"): up, down, around - many directions, not one line.
+        val points = ArrayList<Float>()
+        var t = 0.0
+        while (t < 6 * Math.PI) {
+            points += (4.0 * t + 10.0 * Math.sin(t)).toFloat()
+            points += (-30.0 * Math.abs(Math.sin(t / 2))).toFloat()
+            t += 0.15
+        }
+        assertFalse(Scribble.isScribble(stroke("loops", *points.toFloatArray())))
+        // A single straight line back and forth once is not a scrub either.
+        assertFalse(Scribble.isScribble(stroke("line", 0f, 0f, 20f, 0f, 40f, 0f, 60f, 0f, 40f, 0f, 20f, 0f, 0f, 0f, 20f, 0f)))
+    }
+
     @Test
     fun scrubOverAShortWordStillCounts() {
         // Passes that cover a bit less than the full width each time, like a real hurried scrub.

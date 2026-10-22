@@ -1,7 +1,10 @@
 package com.gerko.fourenote.data.ink
 
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * Scribble to erase: scrubbing back and forth over ink with the pen deletes
@@ -21,11 +24,12 @@ object Scribble {
     private const val MIN_PASS_FRACTION = 0.3f
 
     /**
-     * How far apart (as a share of the extent) the pen's turning points on each side may be.
-     * A scrub turns back at about the same place every pass; joined-up writing loops back
-     * too, but each loop turns further along the word.
+     * How much of the stroke must run along one line, back and forth (0 to 1). A scrub goes
+     * along one direction and back; handwriting, cursive included, heads in many directions
+     * (letters, loops, joins). Measured on real strokes, scrubs come out around 0.95 and written
+     * words below about 0.77, whatever the angle of the scrub.
      */
-    private const val MAX_TURN_SPREAD = 0.3f
+    private const val MIN_CONSISTENCY = 0.82f
 
     /** True if [stroke] is a back-and-forth scrub rather than writing. */
     fun isScribble(stroke: InkStroke): Boolean {
@@ -37,44 +41,55 @@ object Scribble {
         var maxX = p[0]
         var minY = p[1]
         var maxY = p[1]
+        // Segment directions with their angles doubled, so going one way and coming back
+        // along the same line add up instead of cancelling out.
+        var sumCos = 0.0
+        var sumSin = 0.0
         for (i in 1 until n) {
-            length += hypot(p[2 * i] - p[2 * i - 2], p[2 * i + 1] - p[2 * i - 1])
+            val dx = p[2 * i] - p[2 * i - 2]
+            val dy = p[2 * i + 1] - p[2 * i - 1]
+            val segment = hypot(dx, dy)
+            length += segment
+            if (segment > 0f) {
+                val angle = 2.0 * atan2(dy.toDouble(), dx.toDouble())
+                sumCos += segment * cos(angle)
+                sumSin += segment * sin(angle)
+            }
             minX = minOf(minX, p[2 * i]); maxX = maxOf(maxX, p[2 * i])
             minY = minOf(minY, p[2 * i + 1]); maxY = maxOf(maxY, p[2 * i + 1])
         }
         val diagonal = hypot(maxX - minX, maxY - minY).coerceAtLeast(1f)
         if (length < diagonal * MIN_DENSITY) return false
-        // Count reversals along the scribble's main direction (usually sideways).
-        val axis = if (maxX - minX >= maxY - minY) 0 else 1
-        val extent = if (axis == 0) maxX - minX else maxY - minY
-        val turns = turns(p, axis, minSwing = maxOf(MIN_SWING, extent * MIN_PASS_FRACTION))
-        if (turns.size < MIN_REVERSALS) return false
-        val spread = turns.groupBy { it.second }.values.maxOf { side -> side.maxOf { it.first } - side.minOf { it.first } }
-        return spread <= extent * MAX_TURN_SPREAD
+        val consistency = hypot(sumCos, sumSin) / length
+        if (consistency < MIN_CONSISTENCY) return false
+        // Count the back-and-forths along that main line, so scrubs at any angle work.
+        val axis = atan2(sumSin, sumCos) / 2
+        val ux = cos(axis).toFloat()
+        val uy = sin(axis).toFloat()
+        val along = FloatArray(n) { i -> p[2 * i] * ux + p[2 * i + 1] * uy }
+        val extent = along.max() - along.min()
+        return reversals(along, minSwing = maxOf(MIN_SWING, extent * MIN_PASS_FRACTION)) >= MIN_REVERSALS
     }
 
-    /**
-     * Where along [axis] the pen turned back after swinging at least [minSwing] from the
-     * furthest point it reached, and which way it was going then (1 forward, -1 back).
-     */
-    private fun turns(points: FloatArray, axis: Int, minSwing: Float): List<Pair<Float, Int>> {
-        val turns = ArrayList<Pair<Float, Int>>()
+    /** Counts direction changes in [values] where they swing back at least [minSwing] from the furthest point reached. */
+    private fun reversals(values: FloatArray, minSwing: Float): Int {
+        var count = 0
         var direction = 0
-        var extreme = points[axis]
-        for (i in 1 until points.size / 2) {
-            val v = points[2 * i + axis]
+        var extreme = values[0]
+        for (i in 1 until values.size) {
+            val v = values[i]
             val delta = v - extreme
             when {
                 direction >= 0 && delta > 0 -> { extreme = v; direction = 1 }
                 direction <= 0 && delta < 0 -> { extreme = v; direction = -1 }
                 abs(delta) >= minSwing -> {
-                    turns += extreme to direction
+                    count++
                     direction = -direction
                     extreme = v
                 }
             }
         }
-        return turns
+        return count
     }
 
     /**
