@@ -6,13 +6,11 @@ import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.ink.BackgroundPlacement
 import com.gerko.fourenote.data.ink.Calligraphy
 import com.gerko.fourenote.data.ink.InkDocument
 import com.gerko.fourenote.data.ink.InkPage
-import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.PageBackground
 import com.gerko.fourenote.data.ink.PageImage
@@ -54,14 +52,13 @@ object PdfExporter {
     private val RULE = floatArrayOf(0xB9 / 255f, 0xD3 / 255f, 0xEA / 255f)
     private val MARGIN = floatArrayOf(0xF0 / 255f, 0xA8 / 255f, 0xA8 / 255f)
 
-    fun export(note: Note, attachments: AttachmentStore, target: File) {
+    fun export(noteId: String, doc: InkDocument, attachments: AttachmentStore, target: File) {
         PDFBoxResourceLoader.init(attachments.context)
-        val doc = InkSerializer.decode(note.inkData)
         val sources = HashMap<String, PDDocument>()
         try {
             PDDocument(MemoryUsageSetting.setupTempFileOnly()).use { out ->
                 for (page in doc.pages) {
-                    exportPage(out, page, doc, note.id, attachments, sources)
+                    exportPage(out, page, doc, noteId, attachments, sources)
                 }
                 target.outputStream().buffered().use { out.save(it) }
             }
@@ -69,7 +66,7 @@ object PdfExporter {
             // Copied pages share data with their source PDFs, so those stay open until saved.
             sources.values.forEach { runCatching { it.close() } }
         }
-        Log.i(TAG, "note ${note.id.take(8)}: ${doc.pages.size} pages, ${target.length() / 1024} KB")
+        Log.i(TAG, "note ${noteId.take(8)}: ${doc.pages.size} pages, ${target.length() / 1024} KB")
     }
 
     private fun exportPage(

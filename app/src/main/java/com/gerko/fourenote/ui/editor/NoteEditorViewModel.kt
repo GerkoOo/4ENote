@@ -24,7 +24,6 @@ import com.gerko.fourenote.data.ink.InkLayer
 import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.PageBackground
 import com.gerko.fourenote.data.ink.PageImage
-import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.PaperStyle
 import com.gerko.fourenote.data.ink.Scribble
@@ -156,11 +155,7 @@ class NoteEditorViewModel(
                     val dir = java.io.File(attachments.context.cacheDir, "exports").apply { mkdirs() }
                     dir.listFiles()?.forEach { it.delete() }
                     java.io.File(dir, "$name.pdf").also {
-                        com.gerko.fourenote.export.PdfExporter.export(
-                            base.copy(title = title, inkData = InkSerializer.encode(snapshot)),
-                            attachments,
-                            it,
-                        )
+                        com.gerko.fourenote.export.PdfExporter.export(base.id, snapshot, attachments, it)
                     }
                 }
                 onReady(file)
@@ -262,7 +257,7 @@ class NoteEditorViewModel(
         repository.markOpen(noteId)
         viewModelScope.launch {
             val loadedNote = repository.getById(noteId) ?: Note(id = noteId, title = "Untitled")
-            val doc = InkSerializer.decode(loadedNote.inkData)
+            val doc = repository.loadDocument(noteId)
             note = loadedNote
             title = loadedNote.title
             paper = doc.paper
@@ -1088,11 +1083,8 @@ class NoteEditorViewModel(
         val pending = pendingSave ?: return
         val base = note ?: return
         pendingSave = null
-        val updated = withContext(Dispatchers.Default) {
-            base.copy(title = pending.title, inkData = InkSerializer.encode(pending.doc))
-        }
-        note = updated
-        withContext(NonCancellable) { repository.save(updated) }
+        note = base.copy(title = pending.title)
+        withContext(NonCancellable) { repository.saveDocument(noteId, pending.title, pending.doc) }
     }
 
     override fun onCleared() {

@@ -80,7 +80,7 @@ class SyncManager(
     private fun exportPdf(note: com.gerko.fourenote.data.Note): File? {
         val target = File.createTempFile("export-", ".pdf", context.cacheDir)
         return try {
-            PdfExporter.export(note, attachments, target)
+            PdfExporter.export(note.id, com.gerko.fourenote.data.ink.InkSerializer.decode(note.inkData), attachments, target)
             target
         } catch (e: Exception) {
             android.util.Log.w("SyncManager", "PDF copy of ${note.id.take(8)} failed", e)

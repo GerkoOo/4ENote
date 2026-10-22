@@ -5,8 +5,11 @@ import java.io.File
 
 /** The local side of sync; implemented over Room by NoteRepository. */
 interface SyncStore {
-    /** Every note, including deletion tombstones. */
+    /** Every note, including deletion tombstones, without its ink (see [withContent]). */
     suspend fun notesForSync(): List<Note>
+
+    /** [note] with its ink and last-synced snapshot filled in, for uploading or merging. */
+    suspend fun withContent(note: Note): Note = note
 
     /** True while the note is open in the editor; sync leaves it alone until it closes. */
     fun isOpen(noteId: String): Boolean
@@ -137,6 +140,7 @@ class SyncEngine(
             }
 
             else -> {
+                val note = store.withContent(note)
                 val fromCloud = NoteFile.decode(provider.download(cloud.id).decodeToString())
                 val base = note.syncedSnapshot.takeIf { it.isNotEmpty() }?.let(NoteFile::decode)
                 val result = NoteMerger.merge(base, note, fromCloud)
@@ -149,7 +153,9 @@ class SyncEngine(
         }
     }
 
-    private suspend fun upload(note: Note, remoteId: String?) {
+    private suspend fun upload(listed: Note, remoteId: String?) {
+        // A merged note already carries its ink; one listed for sync doesn't yet.
+        val note = if (listed.inkData.isEmpty()) store.withContent(listed) else listed
         val pdfId = pdfExporter?.let { export ->
             export(note)?.let { pdf ->
                 try {

@@ -21,9 +21,11 @@ class NoteListViewModel(
     val notes: StateFlow<List<Note>?> = repository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    suspend fun thumbnail(noteId: String) = repository.loadThumbnail(noteId)
+
     fun createNote(): Note {
         val note = Note(title = "Untitled")
-        viewModelScope.launch { repository.save(note) }
+        viewModelScope.launch { repository.create(note) }
         return note
     }
 

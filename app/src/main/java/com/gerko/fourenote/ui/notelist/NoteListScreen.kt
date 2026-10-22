@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.notelist
 
+import com.gerko.fourenote.data.ink.InkDocument
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ContentCopy
@@ -65,7 +66,6 @@ import androidx.compose.ui.unit.IntSize
 import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.attachments.BackgroundLoader
 import com.gerko.fourenote.data.ink.PageBackground
-import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.sync.CloudChoice
 import com.gerko.fourenote.data.sync.SyncManager
 import com.gerko.fourenote.data.sync.SyncStatus
@@ -166,6 +166,7 @@ fun NoteListScreen(
                         selected = note.id in viewModel.selected,
                         onClick = { if (selecting) viewModel.toggleSelected(note.id) else onOpenNote(note.id) },
                         onLongClick = { viewModel.toggleSelected(note.id) },
+                        loadThumbnail = viewModel::thumbnail,
                     )
                 }
             }
@@ -192,7 +193,14 @@ fun NoteListScreen(
 }
 
 @Composable
-private fun NoteCard(note: Note, backgrounds: BackgroundLoader, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun NoteCard(
+    note: Note,
+    backgrounds: BackgroundLoader,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    loadThumbnail: suspend (String) -> InkDocument?,
+) {
     Card(
         border = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier
@@ -200,7 +208,7 @@ private fun NoteCard(note: Note, backgrounds: BackgroundLoader, selected: Boolea
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Box {
-            NoteThumbnail(note, backgrounds)
+            NoteThumbnail(note, backgrounds, loadThumbnail)
             if (selected) {
                 Icon(
                     Icons.Filled.CheckCircle,
@@ -229,8 +237,10 @@ private fun NoteCard(note: Note, backgrounds: BackgroundLoader, selected: Boolea
 
 /** Miniature of the note's first page, background included. */
 @Composable
-private fun NoteThumbnail(note: Note, backgrounds: BackgroundLoader) {
-    val doc = remember(note.inkData) { InkSerializer.decode(note.inkData) }
+private fun NoteThumbnail(note: Note, backgrounds: BackgroundLoader, load: suspend (String) -> InkDocument?) {
+    // Only the first page is read, from disk, and again only when the note has changed.
+    val loaded by produceState<InkDocument?>(null, note.id, note.updatedAt) { value = load(note.id) }
+    val doc = loaded ?: InkDocument()
     val first = doc.pages.first()
     val paper = doc.paper
     val paths = remember(doc) { doc.visibleStrokes(first).map { it to it.toPath() } }

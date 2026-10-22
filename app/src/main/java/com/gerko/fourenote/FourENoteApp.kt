@@ -5,6 +5,7 @@ import com.gerko.fourenote.data.AppDatabase
 import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.attachments.BackgroundLoader
+import com.gerko.fourenote.data.ink.InkStore
 import com.gerko.fourenote.data.sync.SyncManager
 import com.gerko.fourenote.ui.editor.ToolPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -22,7 +23,7 @@ class FourENoteApp : Application() {
     val toolPreferences: ToolPreferences by lazy { ToolPreferences(this) }
 
     val repository: NoteRepository by lazy {
-        NoteRepository(AppDatabase.getInstance(this).noteDao(), attachments)
+        NoteRepository(AppDatabase.getInstance(this).noteDao(), attachments, InkStore(java.io.File(filesDir, "ink")), appScope)
     }
 
     val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, appScope) }

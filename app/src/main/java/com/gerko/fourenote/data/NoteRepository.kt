@@ -1,23 +1,59 @@
 package com.gerko.fourenote.data
 
+import android.util.Log
 import com.gerko.fourenote.data.attachments.AttachmentStore
+import com.gerko.fourenote.data.ink.InkDocument
+import com.gerko.fourenote.data.ink.InkSerializer
+import com.gerko.fourenote.data.ink.InkStore
 import com.gerko.fourenote.data.sync.RemoteFile
 import com.gerko.fourenote.data.sync.SyncStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Notes: their details in Room, their ink in files ([InkStore]). Ink saved in the database by
+ * older versions is moved to files once, in the background, before anything reads it.
+ */
 class NoteRepository(
     private val dao: NoteDao,
     private val attachments: AttachmentStore,
+    private val ink: InkStore,
+    scope: CoroutineScope,
 ) : SyncStore {
     private val openNotes = ConcurrentHashMap.newKeySet<String>()
+
+    private val legacyMoved: Deferred<Unit> = scope.async { moveLegacyInk() }
 
     fun observeAll(): Flow<List<Note>> = dao.observeAll()
 
     suspend fun getById(id: String): Note? = dao.getById(id)
 
-    /** Saves a local edit; it will upload on the next sync. */
-    suspend fun save(note: Note) = dao.upsert(note.copy(updatedAt = System.currentTimeMillis(), dirty = true))
+    /** The note's pages and ink; an empty note if it has none yet. */
+    suspend fun loadDocument(noteId: String): InkDocument {
+        legacyMoved.await()
+        return ink.load(noteId) ?: readLegacyDocument(noteId) ?: InkDocument()
+    }
+
+    /** Paper, layers and the first page only, for the notes list. */
+    suspend fun loadThumbnail(noteId: String): InkDocument? {
+        legacyMoved.await()
+        return ink.loadFirstPage(noteId)
+    }
+
+    /** Saves an edit from the editor; it will upload on the next sync. */
+    suspend fun saveDocument(noteId: String, title: String, doc: InkDocument) {
+        legacyMoved.await()
+        ink.save(noteId, doc)
+        if (dao.markEdited(noteId, title, System.currentTimeMillis()) == 0) {
+            dao.upsert(Note(id = noteId, title = title))
+        }
+    }
+
+    /** Saves a new note's details (it has no ink yet). */
+    suspend fun create(note: Note) = dao.upsert(note.copy(updatedAt = System.currentTimeMillis(), dirty = true))
 
     /**
      * A note that never reached the cloud is removed at once. Otherwise a
@@ -29,7 +65,9 @@ class NoteRepository(
 
     /** A new note with the same pages, ink and pictures, titled as a copy. Uploads on the next sync. */
     suspend fun duplicate(note: Note): Note {
-        val copy = Note(title = "${note.title.ifBlank { "Untitled" }} (copy)", inkData = note.inkData)
+        legacyMoved.await()
+        val copy = Note(title = "${note.title.ifBlank { "Untitled" }} (copy)")
+        ink.copy(note.id, copy.id)
         attachments.copyAll(note.id, copy.id)
         dao.upsert(copy)
         return copy
@@ -44,22 +82,36 @@ class NoteRepository(
         openNotes.remove(noteId)
     }
 
-    override suspend fun notesForSync(): List<Note> = dao.getAllForSync()
+    override suspend fun notesForSync(): List<Note> {
+        legacyMoved.await()
+        return dao.getAllForSync()
+    }
+
+    override suspend fun withContent(note: Note): Note = note.copy(
+        inkData = InkSerializer.encode(loadDocument(note.id)),
+        syncedSnapshot = ink.readSnapshot(note.id).orEmpty(),
+    )
 
     override fun isOpen(noteId: String): Boolean = noteId in openNotes
 
-    override suspend fun insertFromCloud(note: Note) = dao.upsert(note)
+    override suspend fun insertFromCloud(note: Note) {
+        ink.save(note.id, InkSerializer.decode(note.inkData))
+        if (note.syncedSnapshot.isNotEmpty()) ink.writeSnapshot(note.id, note.syncedSnapshot)
+        dao.upsert(note.copy(inkData = "", syncedSnapshot = ""))
+    }
 
-    override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean =
-        dao.replaceContentIfUnchanged(
+    override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean {
+        val replaced = dao.replaceContentIfUnchanged(
             id = note.id,
             title = note.title,
-            inkData = note.inkData,
             createdAt = note.createdAt,
             updatedAt = note.updatedAt,
             dirty = dirty,
             expectedUpdatedAt = expectedUpdatedAt,
         ) > 0
+        if (replaced) ink.save(note.id, InkSerializer.decode(note.inkData))
+        return replaced
+    }
 
     override suspend fun markSynced(
         noteId: String,
@@ -67,18 +119,75 @@ class NoteRepository(
         pdfId: String?,
         snapshot: String,
         expectedUpdatedAt: Long,
-    ) = dao.markSynced(
-        id = noteId,
-        remoteId = file.id,
-        remotePdfId = pdfId,
-        remoteVersion = file.version,
-        snapshot = snapshot,
-        syncedAt = System.currentTimeMillis(),
-        expectedUpdatedAt = expectedUpdatedAt,
-    )
+    ) {
+        ink.writeSnapshot(noteId, snapshot)
+        dao.markSynced(
+            id = noteId,
+            remoteId = file.id,
+            remotePdfId = pdfId,
+            remoteVersion = file.version,
+            syncedAt = System.currentTimeMillis(),
+            expectedUpdatedAt = expectedUpdatedAt,
+        )
+    }
 
     override suspend fun purge(noteId: String) {
         dao.purge(noteId)
+        ink.delete(noteId)
         attachments.deleteAll(noteId)
+    }
+
+    /**
+     * Moves ink and sync snapshots that older versions kept in the database into files. A note's
+     * database copy is only cleared once its files have been written and read back identical.
+     */
+    private suspend fun moveLegacyInk() {
+        for (id in dao.idsWithLegacyInk()) {
+            try {
+                val text = readLegacy(id, dao::legacyInkLength, dao::legacyInkPart)
+                if (text.isNotBlank() && !ink.exists(id)) {
+                    val doc = InkSerializer.decode(text)
+                    // The decoder falls back to an empty note on damaged text; keep such a note where it is.
+                    check(doc.pages.any { it.strokes.isNotEmpty() || it.background != null || it.images.isNotEmpty() } ||
+                        text.length < 4096) { "ink could not be read" }
+                    ink.save(id, doc)
+                    val back = ink.load(id)
+                    check(back != null && back.pages.size == doc.pages.size &&
+                        back.pages.indices.all { back.pages[it].strokes.size == doc.pages[it].strokes.size }) {
+                        "ink read back differently"
+                    }
+                }
+                val snapshot = readLegacy(id, dao::legacySnapshotLength, dao::legacySnapshotPart)
+                if (snapshot.isNotEmpty() && ink.readSnapshot(id) == null) ink.writeSnapshot(id, snapshot)
+                dao.clearLegacyInk(id)
+            } catch (e: Exception) {
+                // Left in the database; loadDocument still reads it from there.
+                Log.w(TAG, "Couldn't move note $id to files", e)
+            }
+        }
+    }
+
+    private suspend fun readLegacyDocument(noteId: String): InkDocument? =
+        readLegacy(noteId, dao::legacyInkLength, dao::legacyInkPart).takeIf { it.isNotBlank() }?.let(InkSerializer::decode)
+
+    // Reads a big text column in pieces small enough for Android's database cursor.
+    private suspend fun readLegacy(
+        id: String,
+        length: suspend (String) -> Int?,
+        part: suspend (String, Int, Int) -> String?,
+    ): String {
+        val total = length(id) ?: return ""
+        val text = StringBuilder(total)
+        var start = 1 // SQL counts from 1
+        while (start <= total) {
+            text.append(part(id, start, LEGACY_PART_CHARS).orEmpty())
+            start += LEGACY_PART_CHARS
+        }
+        return text.toString()
+    }
+
+    private companion object {
+        const val TAG = "NoteRepository"
+        const val LEGACY_PART_CHARS = 256 * 1024
     }
 }

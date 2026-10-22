@@ -63,8 +63,7 @@ class PdfExporterTest {
         InkStroke(0xFF1E5BD8.toInt(), 4f, highlighter, xy, widths, nibAngle = nib)
 
     private fun export(doc: InkDocument): File {
-        val note = Note(id = noteId, title = "Test", inkData = InkSerializer.encode(doc))
-        return File(context.cacheDir, "export-${System.nanoTime()}.pdf").also { PdfExporter.export(note, attachments, it) }
+        return File(context.cacheDir, "export-${System.nanoTime()}.pdf").also { PdfExporter.export(noteId, doc, attachments, it) }
     }
 
     @Test

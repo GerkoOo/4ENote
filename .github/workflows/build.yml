@@ -28,3 +28,6 @@ jobs:
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --console=plain
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --console=plain
