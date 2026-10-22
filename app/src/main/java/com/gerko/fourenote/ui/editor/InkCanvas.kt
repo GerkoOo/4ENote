@@ -653,6 +653,14 @@ fun InkCanvas(
                                 scrollWithFingers()
                                 return@awaitEachGesture
                             }
+                            // A tap (no lasso drawn) on a picture selects it, with the pen too.
+                            val tapped = lasso.all { (it - start).getDistance() < TAP_SLOP_DP }
+                            val picture = if (tapped) currentImages.lastOrNull { it.contains(start.x, start.y) } else null
+                            if (picture != null) {
+                                lasso.clear()
+                                currentOnImageSelect(picture.id)
+                                return@awaitEachGesture
+                            }
                             val polygon = FloatArray(lasso.size * 2)
                             lasso.forEachIndexed { i, p ->
                                 polygon[2 * i] = p.x
@@ -1343,3 +1351,6 @@ private fun DrawScope.drawPhotoRequest(image: PageImage, scale: Float, accent: C
         }
     }
 }
+
+// How far the pen may move and still count as a tap.
+private const val TAP_SLOP_DP = 8f
