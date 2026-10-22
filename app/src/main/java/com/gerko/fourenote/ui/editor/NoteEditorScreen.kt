@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -309,6 +310,8 @@ fun NoteEditorScreen(
     val darkPaper = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val focusTimer = (context.applicationContext as com.gerko.fourenote.FourENoteApp).focusTimer
     var showingFocus by remember { mutableStateOf(false) }
+    // Arrange pages: all pages small in a grid, to reorder them or jump to one. No zooming or turning there.
+    var arranging by rememberSaveable { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -371,6 +374,9 @@ fun NoteEditorScreen(
                     IconButton(onClick = { fullScreen = true }) {
                         Icon(Icons.Filled.Fullscreen, contentDescription = "Full screen")
                     }
+                    IconToggleButton(checked = arranging, onCheckedChange = { arranging = it }) {
+                        Icon(Icons.Filled.ViewModule, contentDescription = if (arranging) "Done arranging pages" else "Arrange pages")
+                    }
                     LayersMenu(viewModel)
                     PaperMenu(selected = viewModel.paper, onSelect = viewModel::changePaper)
                     IconToggleButton(
@@ -408,11 +414,13 @@ fun NoteEditorScreen(
                         scan = ::startScan,
                     ),
                     fullScreen = fullScreen,
+                    arranging = arranging,
+                    onArranged = { arranging = false },
                 )
             } else {
                 Box(Modifier.fillMaxSize())
             }
-            if (!fullScreen) {
+            if (!fullScreen && !arranging) {
                 ToolBar(
                     viewModel,
                     darkPaper,
@@ -512,6 +520,9 @@ private fun PageList(
     onPenButton: (PenButtonAction, Offset) -> Unit,
     addPages: AddPageActions,
     fullScreen: Boolean,
+    /** Arrange pages: a grid of small pages to drag into order; a tap opens one ([onArranged]). */
+    arranging: Boolean = false,
+    onArranged: () -> Unit = {},
 ) {
     val drawingColor = if (viewModel.tool == Tool.HIGHLIGHTER) viewModel.highlighterColor else viewModel.penColor
     val drawingWidth = when (viewModel.tool) {
@@ -524,6 +535,8 @@ private fun PageList(
     val horizontal = rememberScrollState()
     // Full screen opens at the fitting size on the page being looked at, and gives the zoom back after.
     var zoomBeforeFullScreen by rememberSaveable { mutableFloatStateOf(1f) }
+    // A zoom saved by an older version may be below today's smallest.
+    LaunchedEffect(Unit) { zoom = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM) }
     // How far each page is turned (degrees clockwise, by page id) by a two-finger twist on it, like
     // turning paper to write. Only the page twisted turns.
     val pageRotations = remember { mutableStateMapOf<String, Float>() }
@@ -603,9 +616,7 @@ private fun PageList(
         horizontal.scrollTo(horizontal.maxValue / 2)
     }
     val scope = rememberCoroutineScope()
-    // The last one-finger tap on a page in the overview, to spot a double tap: page id and time.
-    var lastPageTap by remember { mutableStateOf("" to 0L) }
-    // The page a double tap zoomed to. Scrolled to once the grid is composed at the new zoom:
+    // The page opened from Arrange pages. Scrolled to once the pages are laid out at full size:
     // scrolling straight away would use the zoomed-out layout, where every page fits on screen
     // and the scroll is clamped to the first page.
     var zoomedToPage by remember { mutableStateOf<Int?>(null) }
@@ -702,26 +713,20 @@ private fun PageList(
                 }
             },
     ) {
-        // At 100% a page fills the width (up to a comfortable maximum). Zooming out fits
-        // several pages per row; zooming in makes pages wider than the screen, panned sideways.
-        // Full screen: one page per screen, as large as fits, centered, with no gaps or footers.
+        // The pages scroll in one column: at 100% a page fills the width (up to a comfortable
+        // maximum); zooming in makes it wider than the screen, panned sideways; zooming out keeps it
+        // centred. Full screen: one page per screen, as large as fits, centred, with no gaps or footers.
+        // Arranging pages: all of them small in a grid instead.
         fun fitWidth(aspect: Float) = minOf(maxWidth, maxHeight * aspect)
-        val fullWidth = if (fullScreen) fitWidth(A4_ASPECT) else minOf(maxWidth - 32.dp, MAX_PAGE_WIDTH)
-        val pageWidth = fullWidth * zoom
-        val columns = if (fullScreen) 1 else maxOf(1, ((maxWidth - 16.dp) / (pageWidth + 16.dp)).toInt())
-        // Zoomed out below 100%, double-tapping a page zooms in until it just fits the screen.
-        fun onPageTap(index: Int, pageId: String, aspect: Float) {
-            val now = System.currentTimeMillis()
-            val (lastId, lastTime) = lastPageTap
-            if (lastId != pageId || now - lastTime > DOUBLE_TAP_MS) {
-                lastPageTap = pageId to now
-                return
-            }
-            lastPageTap = "" to 0L
-            // Leave room for the page footer below the page.
-            val fitHeight = (maxHeight - 32.dp - PAGE_FOOTER_HEIGHT) / (fullWidth / aspect)
-            zoomByPinch = false
-            zoom = minOf(1f, fitHeight).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val arrange = arranging
+        val fullWidth = if (fullScreen && !arrange) fitWidth(A4_ASPECT) else minOf(maxWidth - 32.dp, MAX_PAGE_WIDTH)
+        fun viewZoom() = if (arrange) ARRANGE_ZOOM else zoom
+        val pageWidth = fullWidth * viewZoom()
+        val columns = if (arrange) maxOf(1, ((maxWidth - 16.dp) / (pageWidth + 16.dp)).toInt()) else 1
+        val fullScreen = fullScreen && !arrange
+        // Arranging, a tap on a page opens it at its place.
+        fun openFromArrange(index: Int) {
+            onArranged()
             zoomedToPage = index
         }
         // A turned page reaches past its own box; this much room on each side keeps all of it in reach.
@@ -744,10 +749,12 @@ private fun PageList(
             val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
             val page = viewModel.pages.getOrNull(index) ?: return null
             val aspect = page.width / page.height
-            val w = with(density) { (if (fullScreen) fitWidth(aspect) * zoom else fullWidth * zoom).toPx() }
+            val w = with(density) { (if (fullScreen) fitWidth(aspect) * viewZoom() else fullWidth * viewZoom()).toPx() }
             val h = w / aspect
-            val left = item.offset.x - horizontal.value + (item.size.width - w) / 2
-            val top = item.offset.y + if (fullScreen) {
+            // Item offsets start inside the grid's padding (the room for the tool bar and the side margin).
+            val padStart = if (fullScreen) 0f else with(density) { 16.dp.toPx() }
+            val left = padStart + item.offset.x - horizontal.value + (item.size.width - w) / 2
+            val top = gridState.layoutInfo.beforeContentPadding + item.offset.y + if (fullScreen) {
                 (item.size.height - h) / 2
             } else {
                 val t = Math.toRadians((layoutRotations[page.id] ?: 0f).toDouble())
@@ -834,7 +841,7 @@ private fun PageList(
                     // Grid cells are stretched to fill their column; keep the page at its zoomed
                     // width so the ink's scale and the page's on-screen size always agree.
                     val dragged = draggingPage == page.id
-                    val itemWidth = if (fullScreen) fitWidth(page.width / page.height) * zoom else pageWidth
+                    val itemWidth = if (fullScreen) fitWidth(page.width / page.height) * viewZoom() else pageWidth
                     val itemWidthPx = with(density) { itemWidth.toPx() }
                     val (marginX, marginY) = turnedMargin(itemWidth, page.width / page.height, layoutRotations[page.id] ?: 0f)
                     Box(
@@ -890,7 +897,7 @@ private fun PageList(
                                 .fillMaxWidth()
                                 .aspectRatio(page.width / page.height)
                                 // Input inside follows the turn, so writing on a turned page lands where the pen is.
-                                .graphicsLayer { rotationZ = pageRotations[page.id] ?: 0f }
+                                .graphicsLayer { rotationZ = if (arrange) 0f else pageRotations[page.id] ?: 0f }
                                 .then(if (fullScreen) Modifier else Modifier.shadow(2.dp)),
                         ) {
                         InkCanvas(
@@ -959,8 +966,8 @@ private fun PageList(
                                 }
                             },
                             onFingerHold = { centerPage(index) },
-                            onRotate = { pageRotations[page.id] = (((pageRotations[page.id] ?: 0f) + it) % 360f + 360f) % 360f },
-                            onZoom = ::zoomAround,
+                            onRotate = { if (!arrange) pageRotations[page.id] = (((pageRotations[page.id] ?: 0f) + it) % 360f + 360f) % 360f },
+                            onZoom = { factor, focus -> if (!arrange) zoomAround(factor, focus) },
                             onTwoFingerHold = onTwoFingerHold,
                             primaryButtonAction = viewModel.primaryButtonAction,
                             secondaryButtonAction = viewModel.secondaryButtonAction,
@@ -968,8 +975,8 @@ private fun PageList(
                             onPenSignal = { viewModel.lastPenSignal = it },
                             onMultiFingerTap = onMultiFingerTap,
                             // Zoomed out below 100%, fingers scroll, tap and move pages; only the pen writes.
-                            overview = zoom < 1f,
-                            onFingerTap = { if (zoom < 1f) onPageTap(index, page.id, page.width / page.height) },
+                            overview = arrange,
+                            onFingerTap = { if (arrange) openFromArrange(index) },
                             onPageDragStart = { finger ->
                                 viewModel.beginPageMove()
                                 dragGrab = finger - (pageBounds[page.id]?.topLeft ?: finger)
@@ -1051,7 +1058,20 @@ private fun PageList(
             )
         }
         // Hidden in full screen; pinching still zooms.
-        if (!fullScreen) {
+        if (arrange) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 6.dp,
+                shadowElevation = 6.dp,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp, end = 4.dp)) {
+                    Text("Hold and drag a page to move it · tap one to open it", style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = onArranged) { Text("Done") }
+                }
+            }
+        }
+        if (!fullScreen && !arrange) {
             ZoomControl(
                 zoom = zoom,
                 onZoom = { zoomByPinch = false; zoom = it.coerceIn(MIN_ZOOM, MAX_ZOOM) },
@@ -1242,7 +1262,10 @@ private fun ZoomButton(icon: ImageVector, description: String, onClick: () -> Un
     }
 }
 
-private const val MIN_ZOOM = 0.2f
+// One column: zooming out stops at half size (the grid of all pages is Arrange pages).
+private const val MIN_ZOOM = 0.5f
+/** How small pages are while arranging them. */
+private const val ARRANGE_ZOOM = 0.28f
 private const val A4_ASPECT = 210f / 297f
 private val PAGE_FOOTER_HEIGHT = 28.dp
 private const val MAX_ZOOM = 3f
