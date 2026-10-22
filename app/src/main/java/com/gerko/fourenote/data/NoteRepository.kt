@@ -73,6 +73,49 @@ class NoteRepository(
         return copy
     }
 
+    /** An empty frame somewhere in the notes, waiting for a photo. */
+    data class PhotoRequest(val noteId: String, val noteTitle: String, val pageNumber: Int, val frameId: String, val aspect: Float)
+
+    /** Every frame waiting for a photo, in all notes. Reads only the notes' outlines, not their ink. */
+    suspend fun photoRequests(): List<PhotoRequest> {
+        legacyMoved.await()
+        val notes = dao.getAllForSync().filterNot { it.deleted }
+        return notes.flatMap { note ->
+            val outline = ink.loadOutline(note.id) ?: return@flatMap emptyList()
+            outline.pages.withIndex().flatMap { (index, page) ->
+                page.images.filter { it.waitingForPhoto }.map {
+                    PhotoRequest(note.id, note.title.ifBlank { "Untitled" }, index + 1, it.id, it.width / it.height)
+                }
+            }
+        }
+    }
+
+    /**
+     * Fills a waiting frame with a photo (JPEG bytes): the photo is stored with the note and
+     * takes the frame's place, as large as fits inside it. Saved like any edit, so it syncs.
+     */
+    suspend fun fillPhotoRequest(noteId: String, frameId: String, photo: ByteArray) {
+        legacyMoved.await()
+        val note = dao.getById(noteId) ?: return
+        val doc = ink.load(noteId) ?: return
+        val stored = attachments.storeImage(noteId, photo.inputStream())
+        val aspect = stored.widthPx.toFloat() / stored.heightPx.coerceAtLeast(1)
+        val pages = doc.pages.map { page ->
+            page.copy(
+                images = page.images.map { frame ->
+                    if (frame.id != frameId) return@map frame
+                    val width = minOf(frame.width, frame.height * aspect)
+                    frame.copy(file = stored.file, width = width, height = width / aspect)
+                },
+            )
+        }
+        ink.save(noteId, doc.copy(pages = pages))
+        dao.markEdited(noteId, note.title, System.currentTimeMillis())
+    }
+
+    /** A photo for the scanner, the right way up and at most 3000 pixels on its long side. */
+    fun decodePhoto(file: java.io.File) = attachments.decodeUpright(file)
+
     /** Called by the editor; sync skips open notes so it never overwrites ink being drawn. */
     fun markOpen(noteId: String) {
         openNotes.add(noteId)

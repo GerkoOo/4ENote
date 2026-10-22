@@ -326,4 +326,22 @@ class SyncEngineTest {
         b.sync()
         assertTrue(cloudDir.listFiles().orEmpty().none { it.name.contains("~") })
     }
+
+    @Test
+    fun aPhotoFillsTheFrameEvenIfTheFrameWasMovedMeanwhile() {
+        val frame = com.gerko.fourenote.data.ink.PageImage(id = "frame", file = "", x = 100f, y = 100f, width = 200f, height = 150f, requested = true)
+        val page = InkPage(id = "p1", images = listOf(frame))
+        a.save(Note(id = "n1", title = "Lab", inkData = InkSerializer.encode(InkDocument(listOf(page)))))
+        a.sync()
+        b.sync()
+
+        // The tablet (A) moves the empty frame; the phone (B) fills it, both before syncing.
+        a.save(a.notes.getValue("n1").copy(inkData = InkSerializer.encode(InkDocument(listOf(page.copy(images = listOf(frame.copy(x = 300f))))))))
+        b.save(b.notes.getValue("n1").copy(inkData = InkSerializer.encode(InkDocument(listOf(page.copy(images = listOf(frame.copy(file = "photo.jpg", height = 120f))))))))
+        b.sync()
+        a.sync()
+
+        val image = InkSerializer.decode(a.notes.getValue("n1").inkData).pages[0].images.single()
+        assertEquals("photo.jpg", image.file)
+    }
 }

@@ -109,7 +109,7 @@ object PdfExporter {
                 Matrix(box.width / page.width, 0f, 0f, -box.height / page.height, box.lowerLeftX, box.upperRightY),
             )
             if (copied == null) drawBackground(out, cs, page, doc.paper, noteId, attachments)
-            for (image in page.images) drawPicture(out, cs, attachments.file(noteId, image.file), image)
+            for (image in page.images) if (!image.waitingForPhoto) drawPicture(out, cs, attachments.file(noteId, image.file), image)
             for (stroke in doc.visibleStrokes(page)) drawStroke(cs, stroke)
             for (text in page.texts) if (text.text.isNotBlank()) drawText(out, cs, text)
         }

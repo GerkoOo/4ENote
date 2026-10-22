@@ -767,6 +767,29 @@ class NoteEditorViewModel(
         }
     }
 
+    /**
+     * Puts an empty frame on the page, waiting for a photo taken on another device (or later on
+     * this one). It is selected so it can be moved and resized to where the photo should go.
+     */
+    fun requestPhoto(pageId: String) {
+        val page = page(pageId) ?: return
+        recordUndo()
+        val frame = PageImage(
+            file = "",
+            x = page.width / 2,
+            y = page.height / 2,
+            width = page.width * 0.5f,
+            height = page.width * 0.375f,
+            requested = true,
+        )
+        page.images.add(frame)
+        persist()
+        tool = Tool.LASSO
+        clearSelection()
+        selectedImage = page.id to frame.id
+        message = "Move and size the frame; fill it from the camera button on your phone's notes list"
+    }
+
     fun selectImage(pageId: String, imageId: String?) {
         clearSelection()
         selectedImage = imageId?.let { pageId to it }

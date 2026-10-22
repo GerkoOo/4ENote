@@ -1,5 +1,7 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -815,6 +817,12 @@ fun InkCanvas(
             }
             for (stored in images) {
                 val image = liveImage?.takeIf { it.id == stored.id } ?: stored
+                if (image.waitingForPhoto) {
+                    withTransform({ rotate(image.rotation, pivot = Offset(image.x * scale, image.y * scale)) }) {
+                        drawPhotoRequest(image, scale, accent)
+                    }
+                    continue
+                }
                 val bitmap = imageBitmaps[image.file] ?: continue
                 withTransform({ rotate(image.rotation, pivot = Offset(image.x * scale, image.y * scale)) }) {
                     drawImage(
@@ -837,7 +845,8 @@ fun InkCanvas(
         // While a picture or the background is being moved, everything is drawn directly.
         val moving = adjustingBackground || liveImage != null
         if (!moving && size.width * size.height <= MAX_CACHED_PIXELS) {
-            val baseKey = listOf(paper, darkPaper, background, invertBackground, placement, images, imageBitmaps, scale)
+            // A copy of the pictures: the page's list changes in place, so the list itself would always compare equal.
+            val baseKey = listOf(paper, darkPaper, background, invertBackground, placement, images.toList(), imageBitmaps, scale)
             inkCache.draw(this, baseKey, unselected, { drawBase() }, { drawStrokes(it) })
         } else {
             drawBase()
@@ -1294,5 +1303,38 @@ private class InkBitmapCache {
         baseKey = key
         drawn = strokes
         scope.drawImage(picture)
+    }
+}
+
+/** An empty frame waiting for a photo from another device: dashed outline, a camera and a hint. */
+private fun DrawScope.drawPhotoRequest(image: PageImage, scale: Float, accent: Color) {
+    val topLeft = Offset((image.x - image.width / 2) * scale, (image.y - image.height / 2) * scale)
+    val box = Size(image.width * scale, image.height * scale)
+    drawRect(accent.copy(alpha = 0.08f), topLeft = topLeft, size = box)
+    drawRect(
+        accent,
+        topLeft = topLeft,
+        size = box,
+        style = Stroke(2.5f * scale, pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f * scale, 9f * scale))),
+    )
+    val center = Offset(image.x * scale, image.y * scale)
+    val unit = minOf(box.width, box.height) / 10f
+    // A simple camera: body, lens and viewfinder bump.
+    drawRoundRect(
+        accent,
+        topLeft = center - Offset(unit * 1.6f, unit * 1.1f),
+        size = Size(unit * 3.2f, unit * 2.2f),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(unit * 0.4f),
+        style = Stroke(unit * 0.25f),
+    )
+    drawCircle(accent, radius = unit * 0.6f, center = center, style = Stroke(unit * 0.25f))
+    drawRect(accent, topLeft = center - Offset(unit * 0.6f, unit * 1.5f), size = Size(unit * 1.2f, unit * 0.4f))
+    drawIntoCanvas { canvas ->
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = accent.toArgbInt()
+            textSize = (unit * 0.7f).coerceIn(9f * scale, 22f * scale)
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        canvas.nativeCanvas.drawText("Waiting for a photo from your phone", center.x, center.y + unit * 2.3f, paint)
     }
 }

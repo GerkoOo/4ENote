@@ -55,6 +55,9 @@ class InkStore(private val root: File) {
         doc.copy(pages = pages)
     }
 
+    /** Pages, pictures and layers without any ink: cheap to read for every note. */
+    suspend fun loadOutline(noteId: String): InkDocument? = locked(noteId) { readManifest(noteId) }
+
     /** Paper, layers and only the first page with its ink: enough for a thumbnail. */
     suspend fun loadFirstPage(noteId: String): InkDocument? = locked(noteId) {
         val doc = readManifest(noteId) ?: return@locked null

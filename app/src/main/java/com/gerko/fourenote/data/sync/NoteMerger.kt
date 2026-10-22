@@ -42,12 +42,14 @@ object NoteMerger {
                         // Pictures can be moved/resized in place, so for one edited on both sides pick per picture.
                         images = mergeById(basePage?.images.orEmpty(), localPage.images, remotePage.images) { it.id }
                             .map { image ->
-                                pick(
-                                    basePage?.images?.firstOrNull { it.id == image.id },
-                                    localPage.images.firstOrNull { it.id == image.id } ?: image,
-                                    remotePage.images.firstOrNull { it.id == image.id } ?: image,
-                                    localIsNewer,
-                                )
+                                val local = localPage.images.firstOrNull { it.id == image.id } ?: image
+                                val remote = remotePage.images.firstOrNull { it.id == image.id } ?: image
+                                when {
+                                    // A frame filled with a photo on one side always beats the same frame still empty.
+                                    local.waitingForPhoto && !remote.waitingForPhoto -> remote
+                                    remote.waitingForPhoto && !local.waitingForPhoto -> local
+                                    else -> pick(basePage?.images?.firstOrNull { it.id == image.id }, local, remote, localIsNewer)
+                                }
                             },
                         // Text boxes are edited in place too: per box, the newer side's version.
                         texts = mergeById(basePage?.texts.orEmpty(), localPage.texts, remotePage.texts) { it.id }

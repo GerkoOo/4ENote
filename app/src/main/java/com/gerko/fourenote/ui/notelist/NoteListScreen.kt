@@ -1,5 +1,9 @@
 package com.gerko.fourenote.ui.notelist
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Badge
 import com.gerko.fourenote.data.ink.InkDocument
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Delete
@@ -88,6 +92,10 @@ fun NoteListScreen(
     val cloud by syncManager.choice.collectAsState()
     val syncStatus by syncManager.status.collectAsState()
     var confirmingDelete by remember { mutableStateOf(false) }
+    val photoRequests by viewModel.photoRequests.collectAsState()
+    var showingRequests by remember { mutableStateOf(false) }
+    // The frame being filled with the scanner, if any.
+    var filling by remember { mutableStateOf<com.gerko.fourenote.data.NoteRepository.PhotoRequest?>(null) }
     val selecting = viewModel.selected.isNotEmpty()
     // Back leaves selecting before it leaves the app.
     BackHandler(enabled = selecting) { viewModel.clearSelection() }
@@ -117,6 +125,14 @@ fun NoteListScreen(
             } else TopAppBar(
                 title = { Text("4ENote") },
                 actions = {
+                    // Frames waiting for a photo (set on another device): fill them from here.
+                    if (photoRequests.isNotEmpty()) {
+                        IconButton(onClick = { showingRequests = true }) {
+                            BadgedBox(badge = { Badge { Text("${photoRequests.size}") } }) {
+                                Icon(Icons.Filled.AddAPhoto, contentDescription = "Photos requested: ${photoRequests.size}")
+                            }
+                        }
+                    }
                     IconButton(onClick = onToggleTheme) {
                         Icon(
                             if (darkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
@@ -171,6 +187,39 @@ fun NoteListScreen(
                 }
             }
         }
+    }
+
+    if (showingRequests) {
+        AlertDialog(
+            onDismissRequest = { showingRequests = false },
+            title = { Text("Photos requested") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Frames waiting for a photo. Take it now, even offline; it reaches your other devices with the next sync.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    photoRequests.forEach { request ->
+                        TextButton(onClick = { showingRequests = false; filling = request }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Filled.AddAPhoto, contentDescription = null)
+                            Text("  ${request.noteTitle} · page ${request.pageNumber}", modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showingRequests = false }) { Text("Close") } },
+        )
+    }
+    filling?.let { request ->
+        com.gerko.fourenote.ui.scan.ScanDialog(
+            decode = viewModel::decodePhoto,
+            onDone = { files ->
+                files.firstOrNull()?.let { viewModel.fillPhotoRequest(request, it) }
+                filling = null
+            },
+            onCancel = { filling = null },
+        )
     }
 
     if (confirmingDelete) {

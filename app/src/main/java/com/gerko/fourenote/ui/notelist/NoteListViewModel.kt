@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.NoteRepository
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -22,6 +23,22 @@ class NoteListViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     suspend fun thumbnail(noteId: String) = repository.loadThumbnail(noteId)
+
+    /** Frames in any note waiting for a photo; refreshed whenever a note changes or arrives by sync. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val photoRequests: StateFlow<List<NoteRepository.PhotoRequest>> = repository.observeAll()
+        .mapLatest { repository.photoRequests() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun decodePhoto(file: java.io.File) = repository.decodePhoto(file)
+
+    /** Puts [photo] into the waiting frame; it reaches the other devices with the next sync. */
+    fun fillPhotoRequest(request: NoteRepository.PhotoRequest, photo: ByteArray) {
+        viewModelScope.launch {
+            repository.fillPhotoRequest(request.noteId, request.frameId, photo)
+            onChanged()
+        }
+    }
 
     fun createNote(): Note {
         val note = Note(title = "Untitled")

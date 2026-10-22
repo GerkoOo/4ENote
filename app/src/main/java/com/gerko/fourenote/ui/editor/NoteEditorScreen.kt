@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.AddAPhoto
 import com.gerko.fourenote.ui.scan.ScanDialog
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -320,6 +321,10 @@ fun NoteEditorScreen(
                         onImportImages = { imagePicker.launch(arrayOf("image/*")) },
                         onScan = ::startScan,
                         onTable = { addingTable = true },
+                        onPhotoFromPhone = {
+                            viewModel.pages.getOrNull(gridState.firstVisibleItemIndex.coerceAtMost(viewModel.pages.lastIndex))
+                                ?.let { viewModel.requestPhoto(it.id) }
+                        },
                     )
                     IconButton(onClick = {
                         viewModel.exportPdf { file ->
@@ -1050,7 +1055,14 @@ private fun PageFooter(
 }
 
 @Composable
-private fun AddMenu(onBlankPage: () -> Unit, onImportPdf: () -> Unit, onImportImages: () -> Unit, onScan: () -> Unit, onTable: () -> Unit) {
+private fun AddMenu(
+    onBlankPage: () -> Unit,
+    onImportPdf: () -> Unit,
+    onImportImages: () -> Unit,
+    onScan: () -> Unit,
+    onTable: () -> Unit,
+    onPhotoFromPhone: () -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -1082,6 +1094,11 @@ private fun AddMenu(onBlankPage: () -> Unit, onImportPdf: () -> Unit, onImportIm
                 text = { Text("Table…") },
                 leadingIcon = { Icon(Icons.Filled.TableChart, contentDescription = null) },
                 onClick = { open = false; onTable() },
+            )
+            DropdownMenuItem(
+                text = { Text("Photo from phone") },
+                leadingIcon = { Icon(Icons.Filled.AddAPhoto, contentDescription = null) },
+                onClick = { open = false; onPhotoFromPhone() },
             )
         }
     }

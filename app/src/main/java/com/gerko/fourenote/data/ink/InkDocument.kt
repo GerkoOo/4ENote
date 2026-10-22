@@ -127,7 +127,15 @@ data class PageImage(
     val opacity: Float = 1f,
     /** Show with smart-inverted colors, e.g. a white-background diagram on dark paper. */
     val inverted: Boolean = false,
+    /**
+     * A frame waiting for a photo taken on another device (it has no [file] yet). Any device can
+     * fill it; the photo then syncs into this very frame, since it keeps the same [id].
+     */
+    val requested: Boolean = false,
 ) {
+    /** True if this is an empty frame waiting for a photo. */
+    val waitingForPhoto: Boolean get() = requested && file.isEmpty()
+
     /** True if the page point ([px], [py]) lies on the (rotated) image. */
     fun contains(px: Float, py: Float, margin: Float = 0f): Boolean {
         val (lx, ly) = toLocal(px, py)
@@ -286,7 +294,8 @@ object InkSerializer {
                             .put("x", img.x.toDouble()).put("y", img.y.toDouble())
                             .put("w", img.width.toDouble()).put("h", img.height.toDouble())
                             .put("r", img.rotation.toDouble()).put("o", img.opacity.toDouble())
-                            .apply { if (img.inverted) put("invert", true) },
+                            .apply { if (img.inverted) put("invert", true) }
+                            .apply { if (img.requested) put("req", true) },
                     )
                 }
                 json.put("images", images)
@@ -387,6 +396,7 @@ object InkSerializer {
                 rotation = o.optDouble("r", 0.0).toFloat(),
                 opacity = o.optDouble("o", 1.0).toFloat(),
                 inverted = o.optBoolean("invert"),
+                requested = o.optBoolean("req"),
             )
         }
         val textsJson = json.optJSONArray("texts") ?: JSONArray()
