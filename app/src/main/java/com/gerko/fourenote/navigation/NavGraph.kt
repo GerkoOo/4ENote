@@ -21,6 +21,7 @@ private object Routes {
     const val NOTE_LIST = "noteList"
     const val NOTE_EDITOR = "noteEditor/{noteId}"
     const val CLOUD_SETTINGS = "cloudSettings"
+    const val SUPPORT = "support"
     fun noteEditor(noteId: String) = "noteEditor/$noteId"
 }
 
@@ -52,7 +53,11 @@ fun FourENoteNavGraph(
                 onToggleTheme = onToggleTheme,
                 onOpenNote = { noteId -> navController.navigate(Routes.noteEditor(noteId)) },
                 onOpenCloudSettings = { navController.navigate(Routes.CLOUD_SETTINGS) },
+                onOpenSupport = { navController.navigate(Routes.SUPPORT) },
             )
+        }
+        composable(Routes.SUPPORT) {
+            com.gerko.fourenote.ui.settings.SupportScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.CLOUD_SETTINGS) {
             CloudSettingsScreen(syncManager = syncManager, onBack = { navController.popBackStack() })

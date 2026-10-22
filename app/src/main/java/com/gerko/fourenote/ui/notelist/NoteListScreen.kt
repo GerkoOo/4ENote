@@ -3,6 +3,7 @@ package com.gerko.fourenote.ui.notelist
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Badge
 import com.gerko.fourenote.data.ink.InkDocument
@@ -88,6 +89,7 @@ fun NoteListScreen(
     onToggleTheme: () -> Unit,
     onOpenNote: (String) -> Unit,
     onOpenCloudSettings: () -> Unit,
+    onOpenSupport: () -> Unit = {},
 ) {
     val notes by viewModel.notes.collectAsState()
     val cloud by syncManager.choice.collectAsState()
@@ -147,6 +149,9 @@ fun NoteListScreen(
                         } else {
                             Icon(Icons.Filled.DocumentScanner, contentDescription = "Scan for later")
                         }
+                    }
+                    IconButton(onClick = onOpenSupport) {
+                        Icon(Icons.Filled.LocalCafe, contentDescription = "Support 4ENote")
                     }
                     IconButton(onClick = onToggleTheme) {
                         Icon(
