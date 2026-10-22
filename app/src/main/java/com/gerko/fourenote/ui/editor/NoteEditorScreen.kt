@@ -1,5 +1,8 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
@@ -642,8 +645,43 @@ private fun PageList(
 
     // Bars for a selection sit just under the floating tool bar.
     val barsTop = if (fullScreen) 12.dp else TOOLBAR_SPACE
+    val currentOnTwoFingerHold by androidx.compose.runtime.rememberUpdatedState(onTwoFingerHold)
     BoxWithConstraints(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow).onGloballyPositioned { viewport = it.boundsInRoot() },
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .onGloballyPositioned { viewport = it.boundsInRoot() }
+            // Two fingers held still beside the pages open the dial too (on a page, the page does it).
+            // Only watches: scrolling there carries on as usual.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = true)
+                    var held = emptyMap<androidx.compose.ui.input.pointer.PointerId, Offset>()
+                    var since = 0L
+                    while (true) {
+                        val wait = if (held.isEmpty()) Long.MAX_VALUE else since + DIAL_HOLD_MS - System.currentTimeMillis()
+                        val event = withTimeoutOrNull(wait.coerceAtLeast(1)) { awaitPointerEvent() }
+                        if (event == null) {
+                            val fingers = currentEvent.changes.filter { it.pressed }
+                            val middle = fingers.fold(Offset.Zero) { sum, it -> sum + it.position } / fingers.size.toFloat()
+                            currentOnTwoFingerHold(viewport.topLeft + middle)
+                            while (currentEvent.changes.any { it.pressed }) awaitPointerEvent().changes.forEach { it.consume() }
+                            break
+                        }
+                        if (event.changes.any { it.isConsumed }) break
+                        val pressed = event.changes.filter { it.pressed }
+                        if (pressed.isEmpty()) break
+                        when {
+                            pressed.size >= 2 && held.isEmpty() -> {
+                                held = pressed.associate { it.id to it.position }
+                                since = System.currentTimeMillis()
+                            }
+                            pressed.size >= 2 -> if (pressed.any { p -> held[p.id]?.let { (p.position - it).getDistance() > DIAL_HOLD_SLOP_PX } != false }) break
+                            held.isNotEmpty() -> break
+                        }
+                    }
+                }
+            },
     ) {
         // At 100% a page fills the width (up to a comfortable maximum). Zooming out fits
         // several pages per row; zooming in makes pages wider than the screen, panned sideways.
@@ -1877,3 +1915,7 @@ private val TOOLBAR_SPACE = 136.dp
 
 /** How much fingers must spread or pinch (as a log of the scale) before a pinch starts zooming. */
 private const val PINCH_START = 0.03f
+
+// Two fingers held this long, and this still, beside the pages open the dial (as on a page).
+private const val DIAL_HOLD_MS = 450L
+private const val DIAL_HOLD_SLOP_PX = 24f
