@@ -540,6 +540,9 @@ private fun PageList(
     // and nothing moves when the fingers lift. Up and down is the page list's own scroll.
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     var panX by remember { mutableFloatStateOf(0f) }
+    // Up and down beyond where the page list can scroll (its top, its end, or a short note zoomed
+    // out), so the view never feels stuck: positive moves the pages up.
+    var panY by remember { mutableFloatStateOf(0f) }
     // Full screen opens at the fitting size on the page being looked at, and gives the zoom back after.
     var zoomBeforeFullScreen by rememberSaveable { mutableFloatStateOf(1f) }
     // A zoom saved by an older version may be outside today's range.
@@ -562,6 +565,20 @@ private fun PageList(
     fun viewZoom() = if (currentArranging) 1f else zoom
     // Arranging, the pages fill the width: no sideways position.
     fun viewPanX() = if (currentArranging) 0f else panX
+    fun viewPanY() = if (currentArranging) 0f else panY
+    // Moves the view up or down by [d] layout pixels: an offset past the list's ends is taken back
+    // first, then the list scrolls, and what it can't scroll becomes the offset (up to half a view).
+    fun panVertical(d: Float) {
+        var rest = d
+        if (panY != 0f && (rest > 0f) != (panY > 0f)) {
+            val back = if (abs(rest) >= abs(panY)) -panY else rest
+            panY += back
+            rest -= back
+        }
+        if (rest != 0f) rest -= gridState.dispatchRawDelta(rest)
+        val limit = viewport.height / viewZoom() / 2
+        panY = (panY + rest).coerceIn(-limit, limit)
+    }
     // Sideways: pages narrower than the view stay centred; wider ones pan between their edges.
     fun clampPan(x: Float, z: Float = viewZoom()): Float {
         val visible = viewport.width / z
@@ -584,11 +601,11 @@ private fun PageList(
         val x = panX + f.x / old
         zoom = new
         panX = clampPan(x - f.x / new, new)
-        gridState.dispatchRawDelta(f.y / old - f.y / new)
+        panVertical(f.y / old - f.y / new)
     }
     // Fingers moving the view (screen pixels).
     fun pan(dx: Float, dy: Float) {
-        gridState.dispatchRawDelta(dy / viewZoom())
+        panVertical(dy / viewZoom())
         panX = clampPan(panX + dx / viewZoom())
     }
     LaunchedEffect(fullScreen) {
@@ -600,6 +617,7 @@ private fun PageList(
             zoom = zoomBeforeFullScreen
         }
         gridState.scrollToItem(page)
+        panY = 0f
         withFrameNanos { } // once laid out for the new mode
         // Pages wider than the view start centred.
         panX = clampPan((contentWidthPx - viewport.width / viewZoom()) / 2)
@@ -642,6 +660,7 @@ private fun PageList(
     LaunchedEffect(zoomedToPage) {
         val index = zoomedToPage ?: return@LaunchedEffect
         gridState.scrollToItem(index)
+        panY = 0f
         withFrameNanos { }
         panX = clampPan(panX)
         zoomedToPage = null
@@ -741,7 +760,7 @@ private fun PageList(
             // Item offsets start inside the grid's padding (the room for the tool bar and the side margin).
             val padStart = if (fullScreen) 0f else with(density) { 16.dp.toPx() }
             val left = padStart + item.offset.x + (item.size.width - w) / 2 - viewPanX()
-            val top = gridState.layoutInfo.beforeContentPadding + item.offset.y + if (fullScreen) (item.size.height - h) / 2 else 0f
+            val top = gridState.layoutInfo.beforeContentPadding + item.offset.y - viewPanY() + if (fullScreen) (item.size.height - h) / 2 else 0f
             val z = viewZoom()
             return Rect(left * z, top * z, (left + w) * z, (top + h) * z)
         }
@@ -794,7 +813,7 @@ private fun PageList(
                 // Sideways position, without clipping: what lies beyond is still drawn.
                 .layout { measurable, constraints ->
                     val inner = measurable.measure(constraints.copy(minWidth = 0, maxWidth = androidx.compose.ui.unit.Constraints.Infinity))
-                    layout(constraints.maxWidth, constraints.maxHeight) { inner.place(-viewPanX().roundToInt(), 0) }
+                    layout(constraints.maxWidth, constraints.maxHeight) { inner.place(-viewPanX().roundToInt(), -viewPanY().roundToInt()) }
                 },
         ) {
             LazyVerticalGrid(
@@ -972,9 +991,26 @@ private fun PageList(
         }
         if (!arrange) turnedPage?.let { id ->
             AssistChip(
-                onClick = { pageRotations.remove(id) },
+                // Turns smoothly to the nearest of 0°, 45°, 90°, 135°…; from one of those, all the way straight.
+                onClick = {
+                    val from = pageRotations[id] ?: 0f
+                    val to = straightenTarget(from)
+                    // The short way round.
+                    val delta = ((to - from + 540f) % 360f) - 180f
+                    scope.launch {
+                        androidx.compose.animation.core.animate(0f, delta, animationSpec = androidx.compose.animation.core.tween(220)) { v, _ ->
+                            pageRotations[id] = ((from + v) % 360f + 360f) % 360f
+                        }
+                        if (to == 0f) pageRotations.remove(id) else pageRotations[id] = to
+                    }
+                },
                 // The angle is read in here only, so a twist redraws just this text, not the pages.
-                label = { Text("${(pageRotations[id] ?: 0f).roundToInt().let { if (it > 180) it - 360 else it }}° · straighten") },
+                label = {
+                    val now = pageRotations[id] ?: 0f
+                    val shown = now.roundToInt().let { if (it > 180) it - 360 else it }
+                    val target = straightenTarget(now).roundToInt().let { if (it > 180) it - 360 else it }
+                    Text(if (target == 0) "$shown° · straighten" else "$shown° · to $target°")
+                },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null) },
                 modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
             )
@@ -1925,3 +1961,9 @@ private val TOOLBAR_SPACE = 136.dp
 // Two fingers held this long, and this still, beside the pages open the dial (as on a page).
 private const val DIAL_HOLD_MS = 450L
 private const val DIAL_HOLD_SLOP_PX = 24f
+
+/** Where the straighten chip turns a page at [degrees]: the nearest multiple of 45°, or 0° if it is already on one. */
+private fun straightenTarget(degrees: Float): Float {
+    val nearest = ((degrees / 45f).roundToInt() * 45f) % 360f
+    return if (abs(degrees - nearest) < 0.5f || abs(degrees - nearest - 360f) < 0.5f) 0f else nearest
+}
