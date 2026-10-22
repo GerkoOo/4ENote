@@ -26,6 +26,12 @@ interface SyncStore {
      */
     suspend fun deliverFilledFrames(noteId: String, frames: List<PageImage>) {}
 
+    /** The home page's folders, tombstones included; null if this store has none (they don't sync). */
+    suspend fun foldersForSync(): List<com.gerko.fourenote.data.Folder>? = null
+
+    /** Stores the folders as merged with the cloud's. */
+    suspend fun saveFoldersFromSync(folders: List<com.gerko.fourenote.data.Folder>) {}
+
     /** True while the note is open in the editor; sync leaves it alone until it closes. */
     fun isOpen(noteId: String): Boolean
 
@@ -133,6 +139,7 @@ class SyncEngine(
         }
 
         runCatching { syncAttachments() }.onFailure { errors += "Pictures: ${it.message}" }
+        runCatching { syncFolders() }.onFailure { errors += "Folders: ${it.message}" }
         inbox?.let { runCatching { syncInbox(it) }.onFailure { errors += "Scans: ${it.message}" } }
         for ((noteId, frames) in fills) store.deliverFilledFrames(noteId, frames)
 
@@ -198,6 +205,24 @@ class SyncEngine(
         for ((name, file) in cloud) {
             if (name in localNames || name in used || !ScanInbox.isValidName(name)) continue
             inbox.saveFromCloud(name, provider.download(file.id))
+        }
+    }
+
+    /** The folders file: merged with what is here, and written back wherever it differs. */
+    private suspend fun syncFolders() {
+        val local = store.foldersForSync() ?: return
+        val cloud = provider.listFiles().firstOrNull { it.name == com.gerko.fourenote.data.FolderFile.NAME }
+        val remote = cloud?.let { com.gerko.fourenote.data.FolderFile.decode(provider.download(it.id).decodeToString()) }.orEmpty()
+        val merged = com.gerko.fourenote.data.FolderFile.merge(local, remote)
+        if (merged != local.sortedBy { it.id }) store.saveFoldersFromSync(merged)
+        if (merged != remote.sortedBy { it.id }) {
+            val text = com.gerko.fourenote.data.FolderFile.encode(merged)
+            provider.upload(
+                com.gerko.fourenote.data.FolderFile.NAME,
+                com.gerko.fourenote.data.FolderFile.MIME_TYPE,
+                UploadContent.of(text.encodeToByteArray()),
+                cloud?.id,
+            )
         }
     }
 

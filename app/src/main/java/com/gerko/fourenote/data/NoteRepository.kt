@@ -22,12 +22,63 @@ class NoteRepository(
     private val attachments: AttachmentStore,
     private val ink: InkStore,
     scope: CoroutineScope,
+    private val folders: FolderDao? = null,
 ) : SyncStore {
     private val openNotes = ConcurrentHashMap.newKeySet<String>()
 
     private val legacyMoved: Deferred<Unit> = scope.async { moveLegacyInk() }
 
     fun observeAll(): Flow<List<Note>> = dao.observeAll()
+
+    /** The home page's folders (not the deleted ones). */
+    fun observeFolders(): Flow<List<Folder>> = folders?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun createFolder(name: String, parentId: String?): Folder {
+        val folder = Folder(name = name.trim().ifEmpty { "New folder" }, parentId = parentId)
+        folders?.upsert(folder)
+        return folder
+    }
+
+    suspend fun renameFolder(folder: Folder, name: String) {
+        folders?.upsert(folder.copy(name = name.trim().ifEmpty { folder.name }, updatedAt = System.currentTimeMillis()))
+    }
+
+    /**
+     * Deletes a folder without losing anything: its notes and folders move up into the folder it
+     * was in. It stays as a tombstone so the deletion syncs.
+     */
+    suspend fun deleteFolder(folder: Folder) {
+        val dao = folders ?: return
+        val now = System.currentTimeMillis()
+        dao.getAll().filter { it.parentId == folder.id && !it.deleted }
+            .forEach { dao.upsert(it.copy(parentId = folder.parentId, updatedAt = now)) }
+        val inside = this.dao.getAllForSync().filter { it.folderId == folder.id && !it.deleted }.map { it.id }
+        if (inside.isNotEmpty()) this.dao.moveToFolder(inside, folder.parentId, now)
+        dao.upsert(folder.copy(deleted = true, updatedAt = now))
+    }
+
+    /** Moves notes into [folderId] (null: the top of the home page). */
+    suspend fun moveNotes(noteIds: Collection<String>, folderId: String?) {
+        if (noteIds.isNotEmpty()) dao.moveToFolder(noteIds.toList(), folderId, System.currentTimeMillis())
+    }
+
+    /** Moves a folder into another (null: the top), unless that would put it inside itself. */
+    suspend fun moveFolder(folder: Folder, parentId: String?) {
+        val dao = folders ?: return
+        val all = dao.getAll().associateBy { it.id }
+        var at = parentId
+        while (at != null) {
+            if (at == folder.id) return
+            at = all[at]?.parentId
+        }
+        dao.upsert(folder.copy(parentId = parentId, updatedAt = System.currentTimeMillis()))
+    }
+
+    override suspend fun foldersForSync(): List<Folder>? = folders?.getAll()
+
+    override suspend fun saveFoldersFromSync(folders: List<Folder>) {
+        this.folders?.upsertAll(folders)
+    }
 
     suspend fun getById(id: String): Note? = dao.getById(id)
 
@@ -66,7 +117,7 @@ class NoteRepository(
     /** A new note with the same pages, ink and pictures, titled as a copy. Uploads on the next sync. */
     suspend fun duplicate(note: Note): Note {
         legacyMoved.await()
-        val copy = Note(title = "${note.title.ifBlank { "Untitled" }} (copy)")
+        val copy = Note(title = "${note.title.ifBlank { "Untitled" }} (copy)", folderId = note.folderId)
         ink.copy(note.id, copy.id)
         attachments.copyAll(note.id, copy.id)
         dao.upsert(copy)
@@ -207,6 +258,7 @@ class NoteRepository(
             updatedAt = note.updatedAt,
             dirty = dirty,
             expectedUpdatedAt = expectedUpdatedAt,
+            folderId = note.folderId,
         ) > 0
         if (replaced) ink.save(note.id, InkSerializer.decode(note.inkData))
         return replaced

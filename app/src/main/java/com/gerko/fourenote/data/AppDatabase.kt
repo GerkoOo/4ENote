@@ -7,9 +7,11 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Note::class], version = 2, exportSchema = false)
+@Database(entities = [Note::class, Folder::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
+
+    abstract fun folderDao(): FolderDao
 
     companion object {
         @Volatile
@@ -26,13 +28,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Folders on the home page, and which folder each note is in. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN folderId TEXT")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS folders (id TEXT NOT NULL, name TEXT NOT NULL, parentId TEXT, " +
+                        "updatedAt INTEGER NOT NULL, deleted INTEGER NOT NULL, PRIMARY KEY(id))",
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "4enote.db",
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
     }
 }

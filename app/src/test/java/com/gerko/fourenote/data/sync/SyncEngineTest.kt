@@ -28,6 +28,11 @@ class SyncEngineTest {
     /** Mirrors the Room-backed repository: saving marks a note dirty with a fresh timestamp. */
     private inner class Device : SyncStore {
         val inbox = com.gerko.fourenote.data.scan.ScanInbox(tmp.newFolder())
+        var folders = listOf<com.gerko.fourenote.data.Folder>()
+        override suspend fun foldersForSync() = folders
+        override suspend fun saveFoldersFromSync(folders: List<com.gerko.fourenote.data.Folder>) {
+            this.folders = folders
+        }
         val notes = linkedMapOf<String, Note>()
         val open = mutableSetOf<String>()
         val engine = SyncEngine(
@@ -417,5 +422,25 @@ class SyncEngineTest {
         b.sync()
         a.sync()
         assertTrue(a.inbox.pending().isEmpty())
+    }
+
+    @Test
+    fun foldersAndTheNotesInThemReachTheOtherDevice() {
+        a.folders = listOf(com.gerko.fourenote.data.Folder("f1", "School", null, 100))
+        a.save(Note(id = "n1", title = "Maths", folderId = "f1"))
+        a.sync()
+        b.sync()
+        assertEquals("School", b.folders.single().name)
+        assertEquals("f1", b.notes.getValue("n1").folderId)
+
+        // Renamed on B, deleted later on A: the later change wins on both.
+        b.folders = listOf(b.folders.single().copy(name = "Uni", updatedAt = 200))
+        b.sync()
+        a.sync()
+        assertEquals("Uni", a.folders.single().name)
+        a.folders = listOf(a.folders.single().copy(deleted = true, updatedAt = 300))
+        a.sync()
+        b.sync()
+        assertTrue(b.folders.single().deleted)
     }
 }

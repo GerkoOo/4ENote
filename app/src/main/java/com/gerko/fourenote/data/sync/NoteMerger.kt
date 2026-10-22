@@ -81,6 +81,8 @@ object NoteMerger {
 
         return local.copy(
             title = title,
+            // Moved to a folder on one side (or both: the more recent move).
+            folderId = pick(base?.folderId, local.folderId, remote.folderId, localIsNewer),
             inkData = InkSerializer.encode(
                 InkDocument(pages.ifEmpty { listOf(InkPage()) }, paper, layers.ifEmpty { listOf(InkLayer.BASE) }),
             ),

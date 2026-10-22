@@ -1,5 +1,16 @@
 package com.gerko.fourenote.ui.notelist
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Folder
+import com.gerko.fourenote.data.Folder
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.DocumentScanner
@@ -103,8 +114,17 @@ fun NoteListScreen(
     // The frame number the next scans for later are for (0: the next empty frames); null when not scanning.
     var scanningForLater by remember { mutableStateOf<Int?>(null) }
     val selecting = viewModel.selected.isNotEmpty()
-    // Back leaves selecting before it leaves the app.
+    val folders by viewModel.folders.collectAsState()
+    val here = viewModel.folderId
+    // Folder dialogs: naming a new one, the one long-pressed, renaming it, and what is being moved.
+    var naming by remember { mutableStateOf(false) }
+    var folderMenu by remember { mutableStateOf<Folder?>(null) }
+    var renaming by remember { mutableStateOf<Folder?>(null) }
+    var movingFolder by remember { mutableStateOf<Folder?>(null) }
+    var movingNotes by remember { mutableStateOf(false) }
+    // Back leaves selecting first, then goes up a folder, before it leaves the app.
     BackHandler(enabled = selecting) { viewModel.clearSelection() }
+    BackHandler(enabled = !selecting && here != null) { viewModel.goUp() }
 
     Scaffold(
         topBar = {
@@ -120,6 +140,9 @@ fun NoteListScreen(
                         IconButton(onClick = viewModel::selectAll) {
                             Icon(Icons.Filled.SelectAll, contentDescription = "Select all")
                         }
+                        IconButton(onClick = { movingNotes = true }) {
+                            Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move to a folder")
+                        }
                         IconButton(onClick = viewModel::duplicateSelected) {
                             Icon(Icons.Filled.ContentCopy, contentDescription = "Duplicate")
                         }
@@ -129,8 +152,40 @@ fun NoteListScreen(
                     },
                 )
             } else TopAppBar(
-                title = { Text("4ENote") },
+                // Where you are: 4ENote › School › Maths; tap a part to go back to it.
+                title = {
+                    val path = viewModel.pathTo(here, folders)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            "4ENote",
+                            color = if (path.isEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable(enabled = path.isNotEmpty()) { viewModel.openFolder(null) },
+                        )
+                        path.forEachIndexed { i, folder ->
+                            Text("  ›  ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val last = i == path.lastIndex
+                            Text(
+                                folder.name,
+                                color = if (last) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clickable(enabled = !last) { viewModel.openFolder(folder.id) },
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    if (here != null) {
+                        IconButton(onClick = { viewModel.goUp() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up one folder")
+                        }
+                    }
+                },
                 actions = {
+                    IconButton(onClick = { naming = true }) {
+                        Icon(Icons.Filled.CreateNewFolder, contentDescription = "New folder")
+                    }
                     // Frames waiting for a photo (set on another device): fill them from here.
                     if (photoRequests.isNotEmpty()) {
                         IconButton(onClick = { showingRequests = true }) {
@@ -179,11 +234,16 @@ fun NoteListScreen(
             )
         },
     ) { padding ->
-        val notes = notes ?: return@Scaffold
-        if (notes.isEmpty()) {
+        val allNotes = notes ?: return@Scaffold
+        // A note whose folder is gone (deleted on another device) shows at the top.
+        val folderIds = folders.mapTo(HashSet()) { it.id }
+        fun placeOf(note: Note) = note.folderId?.takeIf { it in folderIds }
+        val notes = allNotes.filter { placeOf(it) == here }
+        val subfolders = folders.filter { it.parentId == here || (it.parentId != null && it.parentId !in folderIds && here == null) }
+        if (notes.isEmpty() && subfolders.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text(
-                    "No notes yet. Tap New note to start writing.",
+                    if (here == null) "No notes yet. Tap New note to start writing." else "This folder is empty. Tap New note to write in it.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -194,6 +254,15 @@ fun NoteListScreen(
                 contentPadding = PaddingValues(16.dp),
                 modifier = Modifier.padding(padding),
             ) {
+                items(subfolders, key = { "folder-" + it.id }) { folder ->
+                    val count = allNotes.count { placeOf(it) == folder.id } + folders.count { it.parentId == folder.id }
+                    FolderCard(
+                        folder = folder,
+                        count = count,
+                        onClick = { if (!selecting) viewModel.openFolder(folder.id) },
+                        onLongClick = { if (!selecting) folderMenu = folder },
+                    )
+                }
                 items(notes, key = { it.id }) { note ->
                     // Holding a note starts selecting; while selecting, taps tick and untick notes.
                     NoteCard(
@@ -209,6 +278,45 @@ fun NoteListScreen(
         }
     }
 
+    if (naming) {
+        NameDialog(title = "New folder", initial = "", confirm = "Create", onDone = { naming = false; if (it != null) viewModel.createFolder(it) })
+    }
+    renaming?.let { folder ->
+        NameDialog(title = "Rename folder", initial = folder.name, confirm = "Rename", onDone = { renaming = null; if (it != null) viewModel.renameFolder(folder, it) })
+    }
+    folderMenu?.let { folder ->
+        AlertDialog(
+            onDismissRequest = { folderMenu = null },
+            title = { Text(folder.name) },
+            text = { Text("Deleting a folder keeps everything in it: its notes and folders move up one level.") },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = { folderMenu = null; renaming = folder }) { Text("Rename") }
+                    TextButton(onClick = { folderMenu = null; movingFolder = folder }) { Text("Move") }
+                    TextButton(onClick = { folderMenu = null; viewModel.deleteFolder(folder) }) { Text("Delete") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { folderMenu = null }) { Text("Cancel") } },
+        )
+    }
+    if (movingNotes) {
+        MoveDialog(
+            title = "Move ${viewModel.selected.size} note${if (viewModel.selected.size == 1) "" else "s"} to",
+            folders = folders,
+            exclude = null,
+            onPick = { movingNotes = false; viewModel.moveSelected(it) },
+            onDismiss = { movingNotes = false },
+        )
+    }
+    movingFolder?.let { folder ->
+        MoveDialog(
+            title = "Move \"${folder.name}\" to",
+            folders = folders,
+            exclude = folder.id,
+            onPick = { movingFolder = null; viewModel.moveFolder(folder, it) },
+            onDismiss = { movingFolder = null },
+        )
+    }
     if (showingRequests) {
         AlertDialog(
             onDismissRequest = { showingRequests = false },
@@ -425,4 +533,87 @@ private fun NoteThumbnail(note: Note, backgrounds: BackgroundLoader, load: suspe
             for ((stroke, path) in paths) drawInkStroke(stroke, path, darkPaper)
         }
     }
+}
+
+/** A folder tile on the home page: tap to open it, hold for rename, move and delete. */
+@Composable
+private fun FolderCard(folder: Folder, count: Int, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .padding(8.dp)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Icon(
+                Icons.Filled.Folder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(56.dp),
+            )
+            Text(folder.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (count == 1) "1 item" else "$count items",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Asks for a name; [onDone] gets it, or null if cancelled. */
+@Composable
+private fun NameDialog(title: String, initial: String, confirm: String, onDone: (String?) -> Unit) {
+    var name by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = { onDone(null) },
+        title = { Text(title) },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                placeholder = { Text("Folder name") },
+            )
+        },
+        confirmButton = { TextButton(onClick = { onDone(name) }, enabled = name.isNotBlank()) { Text(confirm) } },
+        dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Cancel") } },
+    )
+}
+
+/** Picks where to move something: the top of the home page or any folder (indented by depth). */
+@Composable
+private fun MoveDialog(title: String, folders: List<Folder>, exclude: String?, onPick: (String?) -> Unit, onDismiss: () -> Unit) {
+    // The folder tree in order, without [exclude] and what is inside it.
+    val children = folders.groupBy { it.parentId }
+    val rows = ArrayList<Pair<Folder, Int>>()
+    fun walk(parent: String?, depth: Int) {
+        for (f in children[parent].orEmpty()) {
+            if (f.id == exclude) continue
+            rows += f to depth
+            walk(f.id, depth + 1)
+        }
+    }
+    walk(null, 0)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                TextButton(onClick = { onPick(null) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Home, contentDescription = null)
+                    Text("  Home (top)", modifier = Modifier.weight(1f))
+                }
+                rows.forEach { (folder, depth) ->
+                    TextButton(
+                        onClick = { onPick(folder.id) },
+                        modifier = Modifier.fillMaxWidth().padding(start = (depth * 20).dp),
+                    ) {
+                        Icon(Icons.Filled.Folder, contentDescription = null)
+                        Text("  ${folder.name}", modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

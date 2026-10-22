@@ -44,6 +44,7 @@ object NoteFile {
             // Stored as a string so the ink format can evolve independently.
             .put("ink", note.inkData)
             .put("pdf", pdfId ?: JSONObject.NULL)
+            .put("folder", note.folderId ?: JSONObject.NULL)
             .toString()
 
     /** Content fields and [Note.remotePdfId]; other sync bookkeeping is left for the caller. */
@@ -57,6 +58,7 @@ object NoteFile {
             createdAt = json.optLong("createdAt"),
             updatedAt = json.optLong("updatedAt"),
             remotePdfId = json.optString("pdf").takeUnless { json.isNull("pdf") || it.isEmpty() },
+            folderId = json.optString("folder").takeUnless { json.isNull("folder") || it.isEmpty() },
         )
     }
 }

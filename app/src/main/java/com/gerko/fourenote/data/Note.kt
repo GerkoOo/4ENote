@@ -33,4 +33,6 @@ data class Note(
     val remoteVersion: String? = null,
     val remotePdfId: String? = null,
     @ColumnInfo(defaultValue = "") val syncedSnapshot: String = "",
+    /** The folder the note is in; null is the top of the home page. */
+    val folderId: String? = null,
 )

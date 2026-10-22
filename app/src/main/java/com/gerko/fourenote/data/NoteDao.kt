@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
  */
 private const val META =
     "id, title, '' AS inkData, createdAt, updatedAt, driveFileId, lastSyncedAt, deleted, dirty, " +
-        "remoteVersion, remotePdfId, '' AS syncedSnapshot"
+        "remoteVersion, remotePdfId, '' AS syncedSnapshot, folderId"
 
 @Dao
 interface NoteDao {
@@ -66,7 +66,7 @@ interface NoteDao {
      */
     @Query(
         """UPDATE notes SET title = :title, createdAt = :createdAt,
-           updatedAt = :updatedAt, dirty = :dirty
+           updatedAt = :updatedAt, dirty = :dirty, folderId = :folderId
            WHERE id = :id AND updatedAt = :expectedUpdatedAt""",
     )
     suspend fun replaceContentIfUnchanged(
@@ -76,7 +76,12 @@ interface NoteDao {
         updatedAt: Long,
         dirty: Boolean,
         expectedUpdatedAt: Long,
+        folderId: String?,
     ): Int
+
+    /** Moves notes into a folder (null: the top); a move is an edit, so it syncs. */
+    @Query("UPDATE notes SET folderId = :folderId, updatedAt = :now, dirty = 1 WHERE id IN (:ids)")
+    suspend fun moveToFolder(ids: List<String>, folderId: String?, now: Long)
 
     /**
      * Records a successful sync. The note stays dirty if it was edited while

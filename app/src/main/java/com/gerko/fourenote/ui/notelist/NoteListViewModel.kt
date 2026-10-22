@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.gerko.fourenote.data.Folder
 import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.NoteRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -73,8 +74,80 @@ class NoteListViewModel(
         onChanged()
     }
 
+    /** All folders (not deleted). */
+    val folders: StateFlow<List<Folder>> = repository.observeFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** The folder being looked at; null is the top of the home page. */
+    var folderId by mutableStateOf<String?>(null)
+        private set
+
+    fun openFolder(id: String?) {
+        clearSelection()
+        folderId = id
+    }
+
+    /** The folders from the top down to [id], for the breadcrumb. */
+    fun pathTo(id: String?, all: List<Folder>): List<Folder> {
+        val byId = all.associateBy { it.id }
+        val path = ArrayList<Folder>()
+        var at = id
+        while (at != null && path.size < 64) {
+            val folder = byId[at] ?: break
+            path.add(0, folder)
+            at = folder.parentId
+        }
+        return path
+    }
+
+    /** Goes up one folder; false if already at the top. */
+    fun goUp(): Boolean {
+        val current = folderId ?: return false
+        openFolder(folders.value.firstOrNull { it.id == current }?.parentId)
+        return true
+    }
+
+    fun createFolder(name: String) {
+        val parent = folderId
+        viewModelScope.launch {
+            repository.createFolder(name, parent)
+            onChanged()
+        }
+    }
+
+    fun renameFolder(folder: Folder, name: String) {
+        viewModelScope.launch {
+            repository.renameFolder(folder, name)
+            onChanged()
+        }
+    }
+
+    fun deleteFolder(folder: Folder) {
+        viewModelScope.launch {
+            repository.deleteFolder(folder)
+            onChanged()
+        }
+    }
+
+    fun moveFolder(folder: Folder, parentId: String?) {
+        viewModelScope.launch {
+            repository.moveFolder(folder, parentId)
+            onChanged()
+        }
+    }
+
+    /** Moves the ticked notes into [target] (null: the top). */
+    fun moveSelected(target: String?) {
+        val chosen = selected
+        clearSelection()
+        viewModelScope.launch {
+            repository.moveNotes(chosen, target)
+            onChanged()
+        }
+    }
+
     fun createNote(): Note {
-        val note = Note(title = "Untitled")
+        val note = Note(title = "Untitled", folderId = folderId)
         viewModelScope.launch { repository.create(note) }
         return note
     }
@@ -87,8 +160,9 @@ class NoteListViewModel(
         selected = if (noteId in selected) selected - noteId else selected + noteId
     }
 
+    /** Ticks every note in the folder being looked at. */
     fun selectAll() {
-        selected = notes.value.orEmpty().mapTo(HashSet()) { it.id }
+        selected = notes.value.orEmpty().filter { it.folderId == folderId }.mapTo(HashSet()) { it.id }
     }
 
     fun clearSelection() {
