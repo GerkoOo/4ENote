@@ -211,9 +211,12 @@ fun NoteEditorScreen(
     if (scanning) {
         ScanDialog(
             decode = viewModel::decodePhoto,
+            // Scans go onto the page on screen, as pictures to move and resize like any other.
             onDone = { files ->
                 scanning = false
-                viewModel.importImages(files.map { bytes -> { bytes.inputStream() } }, ::scrollToPage)
+                viewModel.pages.getOrNull(gridState.firstVisibleItemIndex.coerceAtMost(viewModel.pages.lastIndex))?.let { page ->
+                    viewModel.insertImages(page.id, files.map { bytes -> { bytes.inputStream() } })
+                }
             },
             onCancel = { scanning = false },
         )

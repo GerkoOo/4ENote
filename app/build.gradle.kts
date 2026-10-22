@@ -77,6 +77,10 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // Runs the open-source Pix2Text formula model that turns handwritten maths into LaTeX (MIT).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
+    // The scanner's in-app camera: live preview, page detection on frames, capture (AndroidX, Apache 2.0).
+    implementation("androidx.camera:camera-camera2:1.6.1")
+    implementation("androidx.camera:camera-lifecycle:1.6.1")
+    implementation("androidx.camera:camera-view:1.6.1")
     // Draws LaTeX as a typeset formula, offline (JLaTeXMath, GPL-2.0-or-later).
     implementation("ru.noties:jlatexmath-android:0.2.0")
 

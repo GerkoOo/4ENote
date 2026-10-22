@@ -27,7 +27,7 @@ class PageScannerTest {
         for (i in 0 until 8) assertEquals("coordinate $i", expected[i], corners[i], 30f)
 
         val started = System.currentTimeMillis()
-        val clean = PageScanner.process(photo, PageFinder.Corners(corners), ScanFilter.CLEAN)
+        val clean = PageScanner.process(photo, PageFinder.Corners(corners), ScanSettings(ScanFilter.CLEAN))
         println("PageScannerTest: ${clean.width} x ${clean.height} in ${System.currentTimeMillis() - started} ms")
         // Upright and about the sheet's proportions (roughly 1100 x 1500).
         assertTrue(clean.height > clean.width)
@@ -35,5 +35,19 @@ class PageScannerTest {
         val paperInShadow = clean.getPixel(clean.width / 6, clean.height * 9 / 10)
         assertTrue("paper ${Integer.toHexString(paperInShadow)}", android.graphics.Color.red(paperInShadow) > 225)
         File(dir, "scan-result.png").outputStream().use { clean.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Test
+    fun trainedModelFindsTheSheet() {
+        val file = File(dir, "scan-test.jpg")
+        assumeTrue("scan-test.jpg not on the device", file.isFile)
+        val photo = BitmapFactory.decodeFile(file.path)
+        val model = EdgeModel(InstrumentationRegistry.getInstrumentation().targetContext)
+        val started = System.currentTimeMillis()
+        val corners = model.find(photo)
+        println("PageScannerTest model: ${corners?.points?.joinToString()} in ${System.currentTimeMillis() - started} ms")
+        val expected = floatArrayOf(260f, 220f, 1340f, 300f, 1420f, 1800f, 180f, 1720f)
+        for (i in 0 until 8) assertEquals("coordinate $i", expected[i], corners!!.points[i], 45f)
+        model.close()
     }
 }

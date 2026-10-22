@@ -28,8 +28,9 @@ not ready yet.
 - Kotlin, Jetpack Compose (Material 3), Room
 - Only open-source libraries, no Google services and no tracking: PdfBox-Android
   for PDF export, ONNX Runtime running the open TrOCR (handwriting, English) and
-  Pix2Text (maths) models on the device, JLaTeXMath for typesetting; the
-  document scanner, scribble-to-erase and shape recognition are 4ENote's own code
+  Pix2Text (maths) models on the device, JLaTeXMath for typesetting, CameraX for
+  the scanner's camera; scribble-to-erase, shape recognition and the scanner's
+  straightening and clean-up are 4ENote's own code
 
 ## Building
 
@@ -50,3 +51,10 @@ license.
 
 Versions published before this license change were released under the MIT
 License, and those copies remain under MIT.
+
+### Third-party notices
+
+The document scanner finds page corners with **DocQuadNet** from the
+[MakeACopy](https://github.com/egdels/makeacopy) project, licensed under the
+Apache License 2.0. The model file `app/src/main/assets/docquad/docquadnet256_trained_opset17.ort`
+is included unchanged from MakeACopy commit `cdf0e66`.

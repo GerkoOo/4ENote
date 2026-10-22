@@ -59,4 +59,21 @@ class PageFinderTest {
         val all = floatArrayOf(-5f, -5f, 305f, -5f, 305f, 405f, -5f, 405f)
         assertNull(PageFinder.find(photo(all), width, height))
     }
+
+    @Test
+    fun cropsToTheWritingWhenThePageFillsThePhoto() {
+        // Paper everywhere, writing in the middle block only.
+        val luma = IntArray(width * height) { i ->
+            val x = i % width
+            val y = i / width
+            val writing = x in 80..220 && y in 120..300 && y % 12 < 2
+            if (writing) 50 else 225
+        }
+        val box = checkNotNull(PageScanner.writingBounds(luma, width, height)).points
+        // Around the writing (x 80..220, y 120..300) with a margin of about 16 pixels.
+        assertEquals(64f, box[0], 6f)
+        assertEquals(104f, box[1], 6f)
+        assertEquals(236f, box[4], 6f)
+        assertEquals(316f, box[5], 6f)
+    }
 }
