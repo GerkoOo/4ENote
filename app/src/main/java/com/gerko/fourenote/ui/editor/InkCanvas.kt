@@ -74,6 +74,9 @@ const val HIGHLIGHTER_ALPHA = 0.35f
 const val ERASER_RADIUS_DP = 12f
 private const val SELECTION_PADDING_DP = 10f
 private const val HANDLE_RADIUS_DP = 8f
+
+/** Above this many pixels (a page zoomed in far) the ink is drawn directly instead of kept as a picture. */
+private const val MAX_CACHED_PIXELS = 16_000_000f
 private const val HANDLE_TOUCH_DP = 28f
 private const val MIN_SCALE = 0.2f
 private const val TWO_FINGER_HOLD_MS = 450L
@@ -194,6 +197,7 @@ fun InkCanvas(
     var dragScaleY by remember { mutableStateOf(1f) }
     var eraserAt by remember { mutableStateOf<Offset?>(null) }
     val pathCache = remember { WeakHashMap<InkStroke, Path>() }
+    val inkCache = remember { InkBitmapCache() }
     val bounds = remember(selection) { selectionBounds(selection) }
     val accent = MaterialTheme.colorScheme.primary
 
@@ -783,59 +787,79 @@ fun InkCanvas(
         },
     ) {
         // Paper, pictures and finished ink live on their own layer, so they are not redrawn
-        // for every pen movement while a stroke is being drawn.
+        // for every pen movement while a stroke is being drawn. That layer is itself kept as one
+        // picture (see InkBitmapCache): a new stroke is painted onto it, so a full page costs no
+        // more per frame than an empty one.
         Spacer(Modifier.matchParentSize().graphicsLayer().drawBehind {
         val shownPlacement = livePlacement ?: placement
-        if (background != null) {
-            drawRect(if (invertBackground) Color.Black else Color.White)
-            drawImage(
-                background,
-                dstOffset = IntOffset((shownPlacement.x * scale).roundToInt(), (shownPlacement.y * scale).roundToInt()),
-                dstSize = IntSize(
-                    (size.width * shownPlacement.scale).roundToInt(),
-                    (size.height * shownPlacement.scale).roundToInt(),
-                ),
-                filterQuality = FilterQuality.Medium,
-                colorFilter = if (invertBackground) SmartInvert else null,
-            )
-            if (adjustingBackground) {
-                val topLeft = Offset(shownPlacement.x * scale, shownPlacement.y * scale)
-                val box = Size(size.width * shownPlacement.scale, size.height * shownPlacement.scale)
-                drawRect(
-                    accent,
-                    topLeft = topLeft,
-                    size = box,
-                    style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))),
-                )
-                val handle = topLeft + Offset(box.width, box.height)
-                drawCircle(Color.White, radius = (HANDLE_RADIUS_DP + 2f) * scale, center = handle)
-                drawCircle(accent, radius = HANDLE_RADIUS_DP * scale, center = handle)
-            }
-        } else {
-            drawPaper(paper, scale, dark = darkPaper)
-        }
         // Scans and PDF pages stay white, so ink on them keeps its real color.
         val dark = darkPaper && background == null
-        for (stored in images) {
-            val image = liveImage?.takeIf { it.id == stored.id } ?: stored
-            val bitmap = imageBitmaps[image.file] ?: continue
-            withTransform({ rotate(image.rotation, pivot = Offset(image.x * scale, image.y * scale)) }) {
+        val unselected = if (selection.isEmpty()) strokes else strokes.filter { it !in selection }
+
+        fun DrawScope.drawBase() {
+            if (background != null) {
+                drawRect(if (invertBackground) Color.Black else Color.White)
                 drawImage(
-                    bitmap,
-                    dstOffset = IntOffset(((image.x - image.width / 2) * scale).roundToInt(), ((image.y - image.height / 2) * scale).roundToInt()),
-                    dstSize = IntSize((image.width * scale).roundToInt(), (image.height * scale).roundToInt()),
-                    alpha = image.opacity,
+                    background,
+                    dstOffset = IntOffset((shownPlacement.x * scale).roundToInt(), (shownPlacement.y * scale).roundToInt()),
+                    dstSize = IntSize(
+                        (size.width * shownPlacement.scale).roundToInt(),
+                        (size.height * shownPlacement.scale).roundToInt(),
+                    ),
                     filterQuality = FilterQuality.Medium,
-                    colorFilter = if (image.inverted) SmartInvert else null,
+                    colorFilter = if (invertBackground) SmartInvert else null,
                 )
+            } else {
+                drawPaper(paper, scale, dark = darkPaper)
             }
-            if (image.id == selectedImageId) drawImageFrame(image, scale, accent)
+            for (stored in images) {
+                val image = liveImage?.takeIf { it.id == stored.id } ?: stored
+                val bitmap = imageBitmaps[image.file] ?: continue
+                withTransform({ rotate(image.rotation, pivot = Offset(image.x * scale, image.y * scale)) }) {
+                    drawImage(
+                        bitmap,
+                        dstOffset = IntOffset(((image.x - image.width / 2) * scale).roundToInt(), ((image.y - image.height / 2) * scale).roundToInt()),
+                        dstSize = IntSize((image.width * scale).roundToInt(), (image.height * scale).roundToInt()),
+                        alpha = image.opacity,
+                        filterQuality = FilterQuality.Medium,
+                        colorFilter = if (image.inverted) SmartInvert else null,
+                    )
+                }
+            }
+        }
+        fun DrawScope.drawStrokes(list: List<InkStroke>) {
+            withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
+                for (stroke in list) drawInkStroke(stroke, pathCache.getOrPut(stroke) { stroke.toPath() }, dark)
+            }
+        }
+
+        // While a picture or the background is being moved, everything is drawn directly.
+        val moving = adjustingBackground || liveImage != null
+        if (!moving && size.width * size.height <= MAX_CACHED_PIXELS) {
+            val baseKey = listOf(paper, darkPaper, background, invertBackground, placement, images, imageBitmaps, scale)
+            inkCache.draw(this, baseKey, unselected, { drawBase() }, { drawStrokes(it) })
+        } else {
+            drawBase()
+            drawStrokes(unselected)
+        }
+
+        if (adjustingBackground && background != null) {
+            val topLeft = Offset(shownPlacement.x * scale, shownPlacement.y * scale)
+            val box = Size(size.width * shownPlacement.scale, size.height * shownPlacement.scale)
+            drawRect(
+                accent,
+                topLeft = topLeft,
+                size = box,
+                style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))),
+            )
+            val handle = topLeft + Offset(box.width, box.height)
+            drawCircle(Color.White, radius = (HANDLE_RADIUS_DP + 2f) * scale, center = handle)
+            drawCircle(accent, radius = HANDLE_RADIUS_DP * scale, center = handle)
+        }
+        images.firstOrNull { it.id == selectedImageId }?.let { stored ->
+            drawImageFrame(liveImage?.takeIf { it.id == stored.id } ?: stored, scale, accent)
         }
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
-            for (stroke in strokes) {
-                if (stroke !in selection) drawInkStroke(stroke, pathCache.getOrPut(stroke) { stroke.toPath() }, dark)
-            }
-
             if (bounds != null) {
                 val pivot = bounds.topLeft
                 withTransform({
@@ -868,7 +892,6 @@ fun InkCanvas(
                     drawCircle(accent, radius = HANDLE_RADIUS_DP, center = handle)
                 }
             }
-
         }
         })
         // Only what changes with every movement: the stroke in progress, the lasso loop, the eraser ring.
@@ -1230,4 +1253,45 @@ private fun pointedWidths(points: FloatArray, pressures: FloatArray): FloatArray
     val direction = Calligraphy.pointedFactors(points)
     val pressure = Calligraphy.pressureFactors(pressures)
     return FloatArray(direction.size) { i -> direction[i] * (pressure.getOrNull(i) ?: 1f).coerceIn(0.6f, 1.2f) }
+}
+
+/**
+ * A page's paper, pictures and finished ink, kept as one picture at screen resolution. When the
+ * strokes only grew (a stroke was added) just the new ones are painted onto it; anything else
+ * (erasing, undo, zoom, paper or pictures changing) paints it afresh.
+ */
+private class InkBitmapCache {
+    private var bitmap: ImageBitmap? = null
+    private var baseKey: Any? = null
+    private var drawn: List<InkStroke> = emptyList()
+    private val painter = androidx.compose.ui.graphics.drawscope.CanvasDrawScope()
+
+    fun draw(
+        scope: DrawScope,
+        key: Any,
+        strokes: List<InkStroke>,
+        drawBase: DrawScope.() -> Unit,
+        drawStrokes: DrawScope.(List<InkStroke>) -> Unit,
+    ) {
+        val width = scope.size.width.roundToInt().coerceAtLeast(1)
+        val height = scope.size.height.roundToInt().coerceAtLeast(1)
+        var picture = bitmap
+        val sameSize = picture != null && picture.width == width && picture.height == height
+        if (!sameSize) picture = ImageBitmap(width, height)
+        val grown = sameSize && key == baseKey && drawn.size <= strokes.size && drawn.indices.all { drawn[it] === strokes[it] }
+        val canvas = androidx.compose.ui.graphics.Canvas(picture!!)
+        painter.draw(scope, scope.layoutDirection, canvas, scope.size) {
+            if (grown) {
+                if (strokes.size > drawn.size) drawStrokes(strokes.subList(drawn.size, strokes.size))
+            } else {
+                drawRect(Color.Transparent, blendMode = BlendMode.Clear)
+                drawBase()
+                drawStrokes(strokes)
+            }
+        }
+        bitmap = picture
+        baseKey = key
+        drawn = strokes
+        scope.drawImage(picture)
+    }
 }
