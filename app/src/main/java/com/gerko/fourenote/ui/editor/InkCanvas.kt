@@ -113,6 +113,8 @@ private enum class LassoGesture { DRAW, MOVE, RESIZE_XY, RESIZE_X, RESIZE_Y }
 fun InkCanvas(
     strokes: List<InkStroke>,
     scale: Float,
+    /** How much the view is zoomed (see PageList's camera): the ink is kept sharp at that size. */
+    renderZoom: Float = 1f,
     background: ImageBitmap?,
     darkPaper: Boolean,
     selection: Set<InkStroke>,
@@ -933,7 +935,7 @@ fun InkCanvas(
         if (!moving && size.width * size.height <= MAX_CACHED_PIXELS) {
             // A copy of the pictures: the page's list changes in place, so the list itself would always compare equal.
             val baseKey = listOf(paper, darkPaper, background, invertBackground, placement, images.toList(), imageBitmaps, scale)
-            inkCache.draw(this, baseKey, unselected, { drawBase() }, { drawStrokes(it) })
+            inkCache.draw(this, baseKey, unselected, { drawBase() }, { drawStrokes(it) }, renderZoom)
         } else {
             drawBase()
             drawStrokes(unselected)
@@ -1369,14 +1371,22 @@ private class InkBitmapCache {
         strokes: List<InkStroke>,
         drawBase: DrawScope.() -> Unit,
         drawStrokes: DrawScope.(List<InkStroke>) -> Unit,
+        zoom: Float = 1f,
     ) {
-        val width = scope.size.width.roundToInt().coerceAtLeast(1)
-        val height = scope.size.height.roundToInt().coerceAtLeast(1)
+        // Painted at the zoomed size so it stays sharp, but never bigger than about 16 million
+        // pixels (a whole page at high zoom would take too much memory).
+        val logical = scope.size.width * scope.size.height
+        val resolution = minOf(zoom.coerceAtLeast(1f), kotlin.math.sqrt(MAX_CACHE_PIXELS / logical.coerceAtLeast(1f)))
+            .coerceAtLeast(1f)
+        val width = (scope.size.width * resolution).roundToInt().coerceAtLeast(1)
+        val height = (scope.size.height * resolution).roundToInt().coerceAtLeast(1)
         var picture = bitmap
         val sameSize = picture != null && picture.width == width && picture.height == height
         if (!sameSize) picture = ImageBitmap(width, height)
         val grown = sameSize && key == baseKey && drawn.size <= strokes.size && drawn.indices.all { drawn[it] === strokes[it] }
         val canvas = androidx.compose.ui.graphics.Canvas(picture!!)
+        canvas.save()
+        canvas.scale(width / scope.size.width, height / scope.size.height)
         painter.draw(scope, scope.layoutDirection, canvas, scope.size) {
             if (grown) {
                 if (strokes.size > drawn.size) drawStrokes(strokes.subList(drawn.size, strokes.size))
@@ -1386,10 +1396,15 @@ private class InkBitmapCache {
                 drawStrokes(strokes)
             }
         }
+        canvas.restore()
         bitmap = picture
         baseKey = key
         drawn = strokes
-        scope.drawImage(picture)
+        scope.drawImage(
+            picture,
+            dstSize = androidx.compose.ui.unit.IntSize(scope.size.width.roundToInt(), scope.size.height.roundToInt()),
+            filterQuality = FilterQuality.Medium,
+        )
     }
 }
 
@@ -1436,3 +1451,6 @@ private const val TAP_SLOP_DP = 8f
 
 // How far two fingers must twist before the page turns with them, so pinching and scrolling don't turn it.
 private const val ROTATE_START_DEG = 6f
+
+/** The largest ink picture kept for a page, in pixels. */
+private const val MAX_CACHE_PIXELS = 16_000_000f

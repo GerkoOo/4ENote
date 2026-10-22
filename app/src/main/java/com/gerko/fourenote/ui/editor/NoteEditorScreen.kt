@@ -1,5 +1,8 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.ui.layout.layout
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -531,23 +534,60 @@ private fun PageList(
         Tool.CALLIGRAPHY -> viewModel.calligraphyWidth
         else -> viewModel.penWidth
     }
+    // The camera: the pages are laid out once, at their normal size, and shown through it. [zoom]
+    // scales the view and [panX] (layout pixels) is how far it is moved sideways. A pinch or a pan
+    // only changes these two numbers, so nothing is laid out again: no jitter, nothing cut off,
+    // and nothing moves when the fingers lift. Up and down is the page list's own scroll.
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
-    val horizontal = rememberScrollState()
+    var panX by remember { mutableFloatStateOf(0f) }
     // Full screen opens at the fitting size on the page being looked at, and gives the zoom back after.
     var zoomBeforeFullScreen by rememberSaveable { mutableFloatStateOf(1f) }
-    // A zoom saved by an older version may be below today's smallest.
+    // A zoom saved by an older version may be outside today's range.
     LaunchedEffect(Unit) { zoom = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM) }
+    // The zoom once a pinch has stopped: ink and pictures are then drawn sharp at it.
+    var settledZoom by remember { mutableFloatStateOf(zoom) }
+    LaunchedEffect(zoom) {
+        kotlinx.coroutines.delay(150)
+        settledZoom = zoom
+    }
     // How far each page is turned (degrees clockwise, by page id) by a two-finger twist on it, like
-    // turning paper to write. Only the page twisted turns.
+    // turning paper to write. Only the page twisted turns; it is a way of looking, not saved.
     val pageRotations = remember { mutableStateMapOf<String, Float>() }
-    // The turn each page is laid out for (the room around it). It follows [pageRotations] once a
-    // twist ends, not during it, so the pages don't shift under the fingers while turning.
-    val layoutRotations = remember { mutableStateMapOf<String, Float>() }
-    // The last zoom change came from a pinch (not the buttons or full screen).
-    var zoomByPinch by remember { mutableStateOf(false) }
+    var viewport by remember { mutableStateOf(Rect.Zero) }
+    // The width of the laid-out pages (layout pixels), from the layout.
+    var contentWidthPx by remember { mutableFloatStateOf(0f) }
+    val currentArranging by androidx.compose.runtime.rememberUpdatedState(arranging)
+    fun viewZoom() = if (currentArranging) 1f else zoom
+    // Arranging, the pages fill the width: no sideways position.
+    fun viewPanX() = if (currentArranging) 0f else panX
+    // Sideways: pages narrower than the view stay centred; wider ones pan between their edges.
+    fun clampPan(x: Float, z: Float = viewZoom()): Float {
+        val visible = viewport.width / z
+        return if (contentWidthPx <= visible) (contentWidthPx - visible) / 2 else x.coerceIn(0f, contentWidthPx - visible)
+    }
+    val panState = androidx.compose.foundation.gestures.rememberScrollableState { delta ->
+        val before = panX
+        panX = clampPan(panX + delta)
+        panX - before
+    }
+    // Zooms by [factor] around [focus] (root pixels): the page point under the fingers stays there.
+    fun zoomAround(factor: Float, focus: Offset) {
+        val old = zoom
+        val new = (old * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        if (new == old) return
+        val f = focus - viewport.topLeft
+        val x = panX + f.x / old
+        zoom = new
+        panX = clampPan(x - f.x / new, new)
+        gridState.dispatchRawDelta(f.y / old - f.y / new)
+    }
+    // Fingers moving the view (screen pixels).
+    fun pan(dx: Float, dy: Float) {
+        gridState.dispatchRawDelta(dy / viewZoom())
+        panX = clampPan(panX + dx / viewZoom())
+    }
     LaunchedEffect(fullScreen) {
         val page = gridState.firstVisibleItemIndex
-        zoomByPinch = false
         if (fullScreen) {
             zoomBeforeFullScreen = zoom
             zoom = 1f
@@ -555,65 +595,9 @@ private fun PageList(
             zoom = zoomBeforeFullScreen
         }
         gridState.scrollToItem(page)
-        horizontal.scrollTo(0)
-    }
-    // A pinch only scales and moves a picture of the pages (screen = layout * pinchScale + pinchShift),
-    // which is smooth; the pages are laid out at the new zoom once, when the fingers lift.
-    var pinchScale by remember { mutableFloatStateOf(1f) }
-    var pinchShift by remember { mutableStateOf(Offset.Zero) }
-    // A tiny spread doesn't start a pinch, so two-finger scrolling still scrolls the pages for real.
-    var pendingFactor by remember { mutableFloatStateOf(1f) }
-    // After the fingers lift: the scroll that keeps everything where it was, applied once the pages
-    // are laid out at the new zoom; until then [pinchShift] stands in for it.
-    var settleScroll by remember { mutableStateOf<Offset?>(null) }
-    var viewport by remember { mutableStateOf(Rect.Zero) }
-    fun zoomAround(factor: Float, focus: Offset) {
-        var f = factor
-        if (pinchScale == 1f) {
-            pendingFactor *= factor
-            if (abs(ln(pendingFactor)) < PINCH_START) return
-            f = pendingFactor
-            pendingFactor = 1f
-        }
-        // Never past the zoom limits.
-        val scale = (pinchScale * f).coerceIn(MIN_ZOOM / zoom, MAX_ZOOM / zoom)
-        val k = scale / pinchScale
-        val p = focus - viewport.topLeft
-        pinchShift = p - (p - pinchShift) * k
-        pinchScale = scale
-    }
-    // Moving the fingers during a pinch scrolls the pages for real (scaled to the picture), so what
-    // comes into view is drawn rather than cut off at the edges of what was on screen.
-    fun panWhilePinching(dx: Float, dy: Float): Boolean {
-        if (pinchScale == 1f) return false
-        gridState.dispatchRawDelta(dy / pinchScale)
-        horizontal.dispatchRawDelta(dx / pinchScale)
-        return true
-    }
-    fun endPinch() {
-        pendingFactor = 1f
-        if (pinchScale == 1f) return
-        val s = pinchScale
-        val t = pinchShift
-        val oldX = horizontal.value.toFloat()
-        // Each page grows by s; the scroll grows with it, less what the pinch moved the view.
-        val dx = oldX * s - t.x - oldX
-        val dy = gridState.firstVisibleItemScrollOffset * (s - 1) - t.y
-        zoomByPinch = true
-        zoom *= s
-        pinchScale = 1f
-        pinchShift = Offset(-dx, -dy)
-        settleScroll = Offset(dx, dy)
-    }
-    // The point of a page that was in the middle of the screen when a pinch or twist ended (page
-    // index, where on the page as fractions, where on screen): after the new layout it is put back there.
-    var settleAnchor by remember { mutableStateOf<Triple<Int, Offset, Offset>?>(null) }
-    var settleTick by remember { mutableIntStateOf(0) }
-    // Zoom buttons and full screen: pages wider than the screen start centered rather than pinned to the left edge.
-    LaunchedEffect(zoom, fullScreen) {
-        if (zoomByPinch) return@LaunchedEffect
-        withFrameNanos { } // once laid out at the new size
-        horizontal.scrollTo(horizontal.maxValue / 2)
+        withFrameNanos { } // once laid out for the new mode
+        // Pages wider than the view start centred.
+        panX = clampPan((contentWidthPx - viewport.width / viewZoom()) / 2)
     }
     val scope = rememberCoroutineScope()
     // The page opened from Arrange pages. Scrolled to once the pages are laid out at full size:
@@ -653,7 +637,8 @@ private fun PageList(
     LaunchedEffect(zoomedToPage) {
         val index = zoomedToPage ?: return@LaunchedEffect
         gridState.scrollToItem(index)
-        horizontal.scrollTo(0)
+        withFrameNanos { }
+        panX = clampPan(panX)
         zoomedToPage = null
     }
 
@@ -720,8 +705,8 @@ private fun PageList(
         fun fitWidth(aspect: Float) = minOf(maxWidth, maxHeight * aspect)
         val arrange = arranging
         val fullWidth = if (fullScreen && !arrange) fitWidth(A4_ASPECT) else minOf(maxWidth - 32.dp, MAX_PAGE_WIDTH)
-        fun viewZoom() = if (arrange) ARRANGE_ZOOM else zoom
-        val pageWidth = fullWidth * viewZoom()
+        // Laid out once at normal size (small while arranging); the camera does the zooming.
+        val pageWidth = if (arrange) fullWidth * ARRANGE_ZOOM else fullWidth
         val columns = if (arrange) maxOf(1, ((maxWidth - 16.dp) / (pageWidth + 16.dp)).toInt()) else 1
         val fullScreen = fullScreen && !arrange
         // Arranging, a tap on a page opens it at its place.
@@ -729,59 +714,28 @@ private fun PageList(
             onArranged()
             zoomedToPage = index
         }
-        // A turned page reaches past its own box; this much room on each side keeps all of it in reach.
-        fun turnedMargin(width: Dp, aspect: Float, degrees: Float): Pair<Dp, Dp> {
-            val turn = Math.toRadians(degrees.toDouble())
-            val cos = abs(kotlin.math.cos(turn)).toFloat()
-            val sin = abs(kotlin.math.sin(turn)).toFloat()
-            val height = width / aspect
-            // Never negative: an upright page turned on its side is less tall than before, and the
-            // page keeps its own room rather than overlapping its neighbours.
-            return ((width * cos + height * sin - width) / 2).coerceAtLeast(0.dp) to
-                ((width * sin + height * cos - height) / 2).coerceAtLeast(0.dp)
-        }
-        val gridMargin = layoutRotations.values.maxOfOrNull { turnedMargin(pageWidth, A4_ASPECT, it).first } ?: 0.dp
-        val gridWidth = if (fullScreen) maxOf(maxWidth, pageWidth + gridMargin * 2) else maxOf(maxWidth, pageWidth + gridMargin * 2 + 32.dp)
+        val gridWidth = maxWidth
         val density = LocalDensity.current
-        // Where page [index] is laid out now, in pixels from the top left of the view (before any
-        // pinch scaling). Reads the zoom and turn live, so it is right even straight after they change.
+        SideEffect { contentWidthPx = with(density) { gridWidth.toPx() } }
+        // Where page [index] is on screen, in pixels from the top left of the view.
         fun pageRect(index: Int): Rect? {
             val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
             val page = viewModel.pages.getOrNull(index) ?: return null
             val aspect = page.width / page.height
-            val w = with(density) { (if (fullScreen) fitWidth(aspect) * viewZoom() else fullWidth * viewZoom()).toPx() }
+            val w = with(density) { (if (fullScreen) fitWidth(aspect) else pageWidth).toPx() }
             val h = w / aspect
             // Item offsets start inside the grid's padding (the room for the tool bar and the side margin).
             val padStart = if (fullScreen) 0f else with(density) { 16.dp.toPx() }
-            val left = padStart + item.offset.x - horizontal.value + (item.size.width - w) / 2
-            val top = gridState.layoutInfo.beforeContentPadding + item.offset.y + if (fullScreen) {
-                (item.size.height - h) / 2
-            } else {
-                val t = Math.toRadians((layoutRotations[page.id] ?: 0f).toDouble())
-                (((w * abs(kotlin.math.sin(t)) + h * abs(kotlin.math.cos(t))).toFloat() - h) / 2).coerceAtLeast(0f)
-            }
-            return Rect(left, top, left + w, top + h)
-        }
-        val currentPageRect by androidx.compose.runtime.rememberUpdatedState<(Int) -> Rect?>(::pageRect)
-        // Notes the page point in the middle of the screen, then lets [change] alter the layout; the
-        // point is put back in the middle once the pages are laid out again.
-        fun keepCenterWhile(change: () -> Unit) {
-            val center = Offset(viewport.width / 2, viewport.height / 2)
-            val atLayout = (center - pinchShift) / pinchScale
-            val nearest = gridState.layoutInfo.visibleItemsInfo.filter { it.index < viewModel.pages.size }
-                .mapNotNull { info -> pageRect(info.index)?.let { info.index to it } }
-                .minByOrNull { (_, r) -> abs(r.center.y - atLayout.y) }
-            settleAnchor = nearest?.let { (index, r) ->
-                Triple(index, Offset((atLayout.x - r.left) / r.width, (atLayout.y - r.top) / r.height), center)
-            }
-            change()
-            settleTick++
+            val left = padStart + item.offset.x + (item.size.width - w) / 2 - viewPanX()
+            val top = gridState.layoutInfo.beforeContentPadding + item.offset.y + if (fullScreen) (item.size.height - h) / 2 else 0f
+            val z = viewZoom()
+            return Rect(left * z, top * z, (left + w) * z, (top + h) * z)
         }
         // Glides page [index] to the middle of the screen (only ever on request: a finger held still).
         fun centerPage(index: Int) {
             val r = pageRect(index) ?: return
-            val by = r.center - Offset(viewport.width / 2, viewport.height / 2)
-            scope.launch { horizontal.animateScrollBy(by.x) }
+            val by = (r.center - Offset(viewport.width / 2, viewport.height / 2)) / viewZoom()
+            scope.launch { panState.animateScrollBy(by.x) }
             scope.launch { gridState.animateScrollBy(by.y) }
         }
         // A finger held still beside the pages centers the page nearest to it.
@@ -793,40 +747,41 @@ private fun PageList(
                 .minByOrNull { (_, r) -> (r.center - at).getDistance() }
                 ?.let { (index, _) -> centerPage(index) }
         }
-        LaunchedEffect(settleTick) {
-            if (settleTick == 0) return@LaunchedEffect
-            withFrameNanos { } // once laid out anew
-            val anchor = settleAnchor
-            val r = anchor?.let { currentPageRect(it.first) }
-            val by = if (anchor != null && r != null) {
-                Offset(r.left + anchor.second.x * r.width, r.top + anchor.second.y * r.height) - anchor.third
-            } else {
-                settleScroll ?: Offset.Zero
-            }
-            horizontal.scrollBy(by.x)
-            gridState.scrollBy(by.y)
-            pinchShift = Offset.Zero
-            settleScroll = null
-            settleAnchor = null
-        }
         val pageWidthPx = with(density) { pageWidth.toPx() }
-        // Backgrounds are re-rendered in size steps, not on every frame of a pinch.
-        val backgroundWidthPx = ((pageWidthPx / 128f).roundToInt().coerceAtLeast(1)) * 128
+        // Pictures are loaded sharp for the zoom once a pinch stops, in size steps, and never huge.
+        val renderZoom = if (arrange) 1f else settledZoom
+        val backgroundWidthPx = (((pageWidthPx * renderZoom).coerceAtMost(4096f) / 128f).roundToInt().coerceAtLeast(1)) * 128
 
         Box(
             Modifier
-                // Pinched smaller, the pages lay out over a taller area, so the pages below are drawn
-                // as they come into view instead of ending at the old bottom edge.
-                .fillMaxWidth()
-                .height(maxHeight / minOf(1f, pinchScale))
+                .fillMaxSize()
+                // The camera: everything inside is drawn scaled by the zoom...
                 .graphicsLayer {
-                    scaleX = pinchScale
-                    scaleY = pinchScale
-                    translationX = pinchShift.x
-                    translationY = pinchShift.y
+                    val z = viewZoom()
+                    scaleX = z
+                    scaleY = z
                     transformOrigin = TransformOrigin(0f, 0f)
                 }
-                .horizontalScroll(horizontal, enabled = gridWidth > maxWidth),
+                // ...and laid out over the area that then fills the window exactly (bigger when
+                // zoomed out, so the pages around are there too). Read here, a zoom change only
+                // measures again, it doesn't rebuild anything.
+                .layout { measurable, constraints ->
+                    val z = viewZoom()
+                    val inner = measurable.measure(
+                        androidx.compose.ui.unit.Constraints.fixed(
+                            (constraints.maxWidth / z).roundToInt().coerceAtLeast(1),
+                            (constraints.maxHeight / z).roundToInt().coerceAtLeast(1),
+                        ),
+                    )
+                    layout(constraints.maxWidth, constraints.maxHeight) { inner.place(0, 0) }
+                }
+                // One finger (where fingers don't write) drags sideways too.
+                .scrollable(panState, androidx.compose.foundation.gestures.Orientation.Horizontal, reverseDirection = true)
+                // Sideways position, without clipping: what lies beyond is still drawn.
+                .layout { measurable, constraints ->
+                    val inner = measurable.measure(constraints.copy(minWidth = 0, maxWidth = androidx.compose.ui.unit.Constraints.Infinity))
+                    layout(constraints.maxWidth, constraints.maxHeight) { inner.place(-viewPanX().roundToInt(), 0) }
+                },
         ) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
@@ -841,9 +796,8 @@ private fun PageList(
                     // Grid cells are stretched to fill their column; keep the page at its zoomed
                     // width so the ink's scale and the page's on-screen size always agree.
                     val dragged = draggingPage == page.id
-                    val itemWidth = if (fullScreen) fitWidth(page.width / page.height) * viewZoom() else pageWidth
+                    val itemWidth = if (fullScreen) fitWidth(page.width / page.height) else pageWidth
                     val itemWidthPx = with(density) { itemWidth.toPx() }
-                    val (marginX, marginY) = turnedMargin(itemWidth, page.width / page.height, layoutRotations[page.id] ?: 0f)
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -856,7 +810,6 @@ private fun PageList(
                     ) {
                     Column(
                         Modifier
-                            .padding(horizontal = marginX, vertical = marginY)
                             // Before the graphics layer, so the bounds are the page's place in the grid, not where it's dragged.
                             .onGloballyPositioned { pageBounds[page.id] = it.boundsInRoot() }
                             .graphicsLayer {
@@ -903,6 +856,7 @@ private fun PageList(
                         InkCanvas(
                             strokes = visibleStrokes,
                             scale = itemWidthPx / page.width,
+                            renderZoom = renderZoom,
                             background = background,
                             darkPaper = darkPaper,
                             selection = if (viewModel.selectionPageId == page.id) viewModel.selection else emptySet(),
@@ -919,52 +873,7 @@ private fun PageList(
                             onEraseEnd = viewModel::endErase,
                             onLasso = { viewModel.selectWithLasso(page.id, it) },
                             onTransformSelection = viewModel::transformSelection,
-                            onScroll = { dx, dy ->
-                                if (!panWhilePinching(dx, dy)) {
-                                    gridState.dispatchRawDelta(dy)
-                                    horizontal.dispatchRawDelta(dx)
-                                }
-                            },
-                            onScrollEnd = {
-                                // After a pinch or twist the view stays where the fingers left it; page snapping is for scrolling.
-                                val pinched = pinchScale != 1f
-                                val turned = (layoutRotations[page.id] ?: 0f) != (pageRotations[page.id] ?: 0f)
-                                if (pinched || turned) {
-                                    // How far the new room around a turned page will move it, so the picture can be
-                                    // held still for the frame before the scroll catches up (no visible jump).
-                                    val newTurn = pageRotations[page.id] ?: 0f
-                                    val aspect = page.width / page.height
-                                    fun top(deg: Float): Dp {
-                                        val my = turnedMargin(itemWidth, aspect, deg).second
-                                        return if (fullScreen) maxOf((this@BoxWithConstraints.maxHeight - itemWidth / aspect) / 2, my) else my
-                                    }
-                                    fun width(turns: Collection<Float>): Dp {
-                                        val gm = turns.maxOfOrNull { turnedMargin(pageWidth, A4_ASPECT, it).first } ?: 0.dp
-                                        return maxOf(this@BoxWithConstraints.maxWidth, pageWidth + gm * 2 + if (fullScreen) 0.dp else 32.dp)
-                                    }
-                                    val oldTurns = layoutRotations.toMap()
-                                    val newTurns = oldTurns + (page.id to newTurn)
-                                    val moved = with(density) {
-                                        Offset(
-                                            ((width(newTurns.values) - width(oldTurns.values)) / 2).toPx(),
-                                            (top(newTurn) - top(oldTurns[page.id] ?: 0f)).toPx(),
-                                        )
-                                    }
-                                    // For now a twist leaves the layout alone (no room is made around the turned
-                                    // page), so nothing moves when the fingers lift; only a pinch is settled.
-                                    if (TURNED_PAGE_ROOM) {
-                                        keepCenterWhile {
-                                            layoutRotations[page.id] = newTurn
-                                            endPinch()
-                                            if (turned) pinchShift -= moved
-                                        }
-                                    } else if (pinched) {
-                                        keepCenterWhile { endPinch() }
-                                    }
-                                } else {
-                                    pendingFactor = 1f
-                                }
-                            },
+                            onScroll = ::pan,
                             onFingerHold = { centerPage(index) },
                             onRotate = { if (!arrange) pageRotations[page.id] = (((pageRotations[page.id] ?: 0f) + it) % 360f + 360f) % 360f },
                             onZoom = { factor, focus -> if (!arrange) zoomAround(factor, focus) },
@@ -1046,11 +955,9 @@ private fun PageList(
                 }
             }
         }
-        turnedPage?.let { id ->
+        if (!arrange) turnedPage?.let { id ->
             AssistChip(
-                onClick = {
-                    if (TURNED_PAGE_ROOM) keepCenterWhile { pageRotations.remove(id); layoutRotations.remove(id) } else pageRotations.remove(id)
-                },
+                onClick = { pageRotations.remove(id) },
                 // The angle is read in here only, so a twist redraws just this text, not the pages.
                 label = { Text("${(pageRotations[id] ?: 0f).roundToInt().let { if (it > 180) it - 360 else it }}° · straighten") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null) },
@@ -1074,7 +981,7 @@ private fun PageList(
         if (!fullScreen && !arrange) {
             ZoomControl(
                 zoom = zoom,
-                onZoom = { zoomByPinch = false; zoom = it.coerceIn(MIN_ZOOM, MAX_ZOOM) },
+                onZoom = { target -> zoomAround(target / zoom, viewport.center) },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
             )
         }
@@ -2000,12 +1907,6 @@ private fun PenButtonChoice(label: String, action: PenButtonAction, onChange: (P
 /** The floating tool bar's height plus its margins: the pages start below it. */
 private val TOOLBAR_SPACE = 136.dp
 
-/** How much fingers must spread or pinch (as a log of the scale) before a pinch starts zooming. */
-private const val PINCH_START = 0.03f
-
 // Two fingers held this long, and this still, beside the pages open the dial (as on a page).
 private const val DIAL_HOLD_MS = 450L
 private const val DIAL_HOLD_SLOP_PX = 24f
-
-/** Whether a turned page gets room around it once the twist ends (off for now: it moved the view). */
-private const val TURNED_PAGE_ROOM = false
