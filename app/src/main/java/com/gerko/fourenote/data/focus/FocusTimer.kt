@@ -21,6 +21,15 @@ class FocusTimer(context: Context) {
     )
     val plan: StateFlow<FocusPlan> = _plan
 
+    /** The bar's colours (ARGB): while focusing, and on a break. */
+    private val _colors = MutableStateFlow(prefs.getInt("focusColor", DEFAULT_FOCUS_COLOR) to prefs.getInt("breakColor", DEFAULT_BREAK_COLOR))
+    val colors: StateFlow<Pair<Int, Int>> = _colors
+
+    fun setColors(focus: Int, rest: Int) {
+        _colors.value = focus to rest
+        prefs.edit().putInt("focusColor", focus).putInt("breakColor", rest).apply()
+    }
+
     /** The running cycle, or null while the timer is off. */
     private val _cycle = MutableStateFlow(
         if (!prefs.getBoolean("on", false)) null else FocusCycle(
@@ -59,6 +68,11 @@ class FocusTimer(context: Context) {
             .putInt("long", plan.longBreakMinutes)
             .putInt("sessions", plan.sessionsBeforeLongBreak)
             .apply()
+    }
+
+    companion object {
+        const val DEFAULT_FOCUS_COLOR = 0xFFE5533D.toInt()
+        const val DEFAULT_BREAK_COLOR = 0xFF3FA66B.toInt()
     }
 
     private fun update(change: (FocusCycle) -> FocusCycle) {

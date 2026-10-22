@@ -1,5 +1,15 @@
 package com.gerko.fourenote.ui.focus
 
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
 import android.content.Context
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -44,10 +54,13 @@ import com.gerko.fourenote.data.focus.FocusPhase
 import com.gerko.fourenote.data.focus.FocusTimer
 import kotlinx.coroutines.delay
 
-private val FocusColor = Color(0xFFE5533D)
-private val BreakColor = Color(0xFF3FA66B)
+/** Colours to choose from for the bar. */
+private val BarColors = listOf(
+    0xFFE5533D, 0xFFF39C12, 0xFFF1C40F, 0xFF3FA66B, 0xFF1ABC9C, 0xFF3498DB, 0xFF5C6BC0, 0xFF9B59B6, 0xFFE91E63, 0xFF9E9E9E,
+).map { it.toInt() }
 
-fun FocusPhase.color() = if (this == FocusPhase.WORK) FocusColor else BreakColor
+/** The colour of [phase] with the chosen [colors] (focus, break). */
+private fun color(phase: FocusPhase, colors: Pair<Int, Int>) = Color(if (phase == FocusPhase.WORK) colors.first else colors.second)
 
 /** The clock, ticking twice a second while shown; also moves the timer on to the next phase. */
 @Composable
@@ -65,35 +78,57 @@ private fun rememberNow(timer: FocusTimer, onPhase: (FocusPhase) -> Unit): Long 
 }
 
 /**
- * The focus timer as a thin bar that starts full and runs down to the end of the phase: red while
- * focusing, green on a break. Across the top on an upright screen, down the side ([vertical]) on a
- * sideways one, so it takes almost no room. Tap it for the timer's controls. Nothing while off.
+ * The focus timer as a slim bar that starts full and runs down to the end of the phase, in the
+ * focus or break colour, with the phase and time left written in it. Across the top on an upright
+ * screen, down the side ([vertical]) on a sideways one, so it takes little room. Tap it for the
+ * timer's controls. Nothing while off.
  */
 @Composable
 fun FocusBar(timer: FocusTimer, vertical: Boolean, onOpen: () -> Unit, onPhase: (FocusPhase) -> Unit, modifier: Modifier = Modifier) {
     val cycle by timer.cycle.collectAsState()
     val plan by timer.plan.collectAsState()
+    val colors by timer.colors.collectAsState()
     val c = cycle ?: return
     val now = rememberNow(timer, onPhase)
     val left = c.fractionLeft(plan, now)
-    val color = c.phase.color().copy(alpha = if (c.running) 1f else 0.45f)
-    // A wider strip than the bar itself, so it is easy to tap.
+    val color = color(c.phase, colors).copy(alpha = if (c.running) 1f else 0.45f)
+    val secondsLeft = c.remaining(plan, now) / 1000
+    val label = "${c.phase.label}${if (c.running) "" else " (paused)"} · ${secondsLeft / 60}:${"%02d".format(secondsLeft % 60)}"
+    // Light or dark text, whichever reads better on the bar's colour.
+    val ink = if (color.copy(alpha = 1f).luminance() > 0.5f) Color.Black else Color.White
     Box(
         modifier
-            .then(if (vertical) Modifier.fillMaxHeight().width(TOUCH) else Modifier.fillMaxWidth().height(TOUCH))
+            .then(if (vertical) Modifier.fillMaxHeight().width(THICKNESS) else Modifier.fillMaxWidth().height(THICKNESS))
+            .background(color.copy(alpha = 0.3f))
             .clickable(onClick = onOpen),
-        contentAlignment = if (vertical) Alignment.CenterStart else Alignment.TopCenter,
+        contentAlignment = if (vertical) Alignment.BottomCenter else Alignment.CenterStart,
     ) {
         Box(
-            (if (vertical) Modifier.fillMaxHeight().width(THICKNESS) else Modifier.fillMaxWidth().height(THICKNESS))
-                .background(color.copy(alpha = 0.18f)),
-            contentAlignment = if (vertical) Alignment.BottomCenter else Alignment.CenterStart,
-        ) {
-            Box(
-                (if (vertical) Modifier.fillMaxWidth().fillMaxHeight(left) else Modifier.fillMaxHeight().fillMaxWidth(left))
-                    .background(color),
-            )
-        }
+            (if (vertical) Modifier.fillMaxWidth().fillMaxHeight(left) else Modifier.fillMaxHeight().fillMaxWidth(left))
+                .background(color),
+        )
+        // The phase and the time left, along the bar (turned to run down a side bar).
+        Text(
+            label,
+            color = ink,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .then(if (vertical) Modifier.sideways() else Modifier),
+        )
+    }
+}
+
+// Lays the text out lying on its side: measured as if the side bar were a top bar, then turned.
+private fun Modifier.sideways() = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = constraints.maxHeight, minHeight = 0, maxHeight = constraints.maxWidth))
+    layout(placeable.height, placeable.width) {
+        placeable.placeWithLayer(
+            x = (placeable.height - placeable.width) / 2,
+            y = (placeable.width - placeable.height) / 2,
+        ) { rotationZ = -90f }
     }
 }
 
@@ -109,6 +144,7 @@ fun buzz(context: Context) {
 fun FocusDialog(timer: FocusTimer, onDismiss: () -> Unit) {
     val cycle by timer.cycle.collectAsState()
     val plan by timer.plan.collectAsState()
+    val colors by timer.colors.collectAsState()
     val context = LocalContext.current
     val now = rememberNow(timer) { buzz(context) }
     AlertDialog(
@@ -128,11 +164,11 @@ fun FocusDialog(timer: FocusTimer, onDismiss: () -> Unit) {
                     Text(
                         "${c.phase.label}${if (c.running) "" else " (paused)"} · ${left / 60}:${"%02d".format(left % 60)} left",
                         style = MaterialTheme.typography.titleMedium,
-                        color = c.phase.color(),
+                        color = color(c.phase, colors),
                     )
                     LinearProgressIndicator(
                         progress = { c.fractionLeft(plan, now) },
-                        color = c.phase.color(),
+                        color = color(c.phase, colors),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
@@ -156,6 +192,10 @@ fun FocusDialog(timer: FocusTimer, onDismiss: () -> Unit) {
                 Stepper("Long break after", plan.sessionsBeforeLongBreak, "focus phases", 1..12) {
                     timer.setPlan(plan.copy(sessionsBeforeLongBreak = it))
                 }
+                HorizontalDivider()
+                Text("Bar colours", style = MaterialTheme.typography.labelLarge)
+                ColorChoice("Focus", colors.first) { timer.setColors(it, colors.second) }
+                ColorChoice("Break", colors.second) { timer.setColors(colors.first, it) }
             }
         },
         confirmButton = {
@@ -180,8 +220,29 @@ private fun Stepper(label: String, value: Int, unit: String, range: IntRange, on
     }
 }
 
+@Composable
+private fun ColorChoice(label: String, selected: Int, onPick: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.width(56.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            BarColors.forEach { c ->
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(c))
+                        .then(if (c == selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+                        .clickable { onPick(c) },
+                )
+            }
+        }
+    }
+}
+
 // Minutes go by 1 up to 10, then by 5.
 private fun step(value: Int) = if (value < 10) 1 else 5
 
-private val THICKNESS = 5.dp
-private val TOUCH = 12.dp
+private val THICKNESS = 18.dp
