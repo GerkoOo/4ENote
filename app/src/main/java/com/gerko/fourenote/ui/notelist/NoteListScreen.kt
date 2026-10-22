@@ -1,5 +1,7 @@
 package com.gerko.fourenote.ui.notelist
 
+import androidx.compose.material.icons.automirrored.filled.Note
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInRoot
@@ -135,7 +137,12 @@ fun NoteListScreen(
     var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     var dragFinger by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val dropTargets = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.ui.geometry.Rect>() }
-    val dropTarget = if (draggingNote == null) null else dropTargets.entries.firstOrNull { dragFinger in it.value }?.key
+    // Changes only when the finger crosses into another target, so dragging doesn't redraw the page.
+    val dropTarget by remember {
+        androidx.compose.runtime.derivedStateOf {
+            if (draggingNote == null) null else dropTargets.entries.firstOrNull { dragFinger in it.value }?.key
+        }
+    }
     // Back leaves selecting first, then goes up a folder, before it leaves the app.
     BackHandler(enabled = selecting) { viewModel.clearSelection() }
     BackHandler(enabled = !selecting && here != null) { viewModel.goUp() }
@@ -307,24 +314,41 @@ fun NoteListScreen(
                             draggingNote = null
                             if (target != null) viewModel.dropNote(note.id, target.ifEmpty { null })
                         },
-                        modifier = Modifier
-                            .zIndex(if (dragged) 1f else 0f)
-                            .graphicsLayer {
-                                if (dragged) {
-                                    translationX = dragOffset.x
-                                    translationY = dragOffset.y
-                                    scaleX = 0.9f
-                                    scaleY = 0.9f
-                                    alpha = 0.85f
-                                    shadowElevation = 12.dp.toPx()
-                                }
-                            },
+                        // While dragged, the note stays faded in its place; a floating copy follows the finger.
+                        modifier = Modifier.graphicsLayer { alpha = if (dragged) 0.35f else 1f },
                     )
                 }
             }
         }
     }
 
+    // The dragged note, floating above everything (the top bar too), under the finger.
+    draggingNote?.let { id ->
+        val note = notes?.firstOrNull { it.id == id }
+        val count = if (id in viewModel.selected) viewModel.selected.size else 1
+        Box(Modifier.fillMaxSize()) {
+            androidx.compose.material3.Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                modifier = Modifier.offset {
+                    androidx.compose.ui.unit.IntOffset(
+                        (dragFinger.x - 40.dp.toPx()).toInt(),
+                        (dragFinger.y - 36.dp.toPx()).toInt(),
+                    )
+                },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.Note, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Text(
+                        "  " + (note?.title?.ifBlank { "Untitled" } ?: "Note") + if (count > 1) "  +${count - 1}" else "",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
     if (naming) {
         NameDialog(title = "New folder", initial = "", confirm = "Create", onDone = { naming = false; if (it != null) viewModel.createFolder(it) })
     }
@@ -526,19 +550,22 @@ private fun NoteCard(
                         @Suppress("UNREACHABLE_CODE") false
                     } == null
                     if (!held) return@awaitEachGesture
+                    // Measured on the screen, not on the card: the card moves with the finger, so its own
+                    // coordinates would shift under it and the card would jump back and forth.
                     fun root(p: androidx.compose.ui.geometry.Offset) = coordinates?.localToRoot(p) ?: p
-                    currentOnDragStart(root(down.position))
-                    var last = down.position
+                    var last = root(down.position)
+                    currentOnDragStart(last)
                     var moved = 0f
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                         change.consume()
                         if (!change.pressed) break
-                        val delta = change.position - last
-                        last = change.position
+                        val now = root(change.position)
+                        val delta = now - last
+                        last = now
                         moved += delta.getDistance()
-                        currentOnDrag(delta, root(change.position))
+                        currentOnDrag(delta, now)
                     }
                     currentOnDrop()
                     // Held without moving: tick it, as before.
