@@ -57,4 +57,21 @@ class SmoothingTest {
         assertEquals(shaky[0], smooth[0], 0.01f)
         assertEquals(shaky[shaky.size - 2], smooth[smooth.size - 2], 0.01f)
     }
+
+    @Test
+    fun sharpCornersDontOvershoot() {
+        // A "V" with a long and a short arm, densely sampled, like a fast pen stroke.
+        val points = ArrayList<Float>()
+        for (k in 0..60) { points += k * 2f; points += k * 3f }          // long arm down
+        for (k in 1..8) { points += 120f + k * 2f; points += 180f - k * 6f } // short arm back up
+        val raw = points.toFloatArray()
+        for (level in listOf(4, 10)) {
+            val smooth = Smoothing.smoothStroke(raw, level)
+            var maxY = -Float.MAX_VALUE
+            for (i in 1 until smooth.size step 2) maxY = maxOf(maxY, smooth[i])
+            // The bottom of the V is at y = 180: the curve shouldn't dip far below it.
+            println("level $level: lowest point ${maxY - 180f} below the corner")
+            assertTrue("level $level overshoots by ${maxY - 180f}", maxY - 180f < 1.5f)
+        }
+    }
 }

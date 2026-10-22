@@ -10,7 +10,8 @@ import kotlin.math.hypot
  *  - [Stabilizer] smooths points live while the pen moves, so the ink on
  *    screen already looks steady.
  *  - [smoothStroke] cleans the finished stroke: it drops jitter with
- *    Ramer–Douglas–Peucker, then rebuilds the line as a Catmull-Rom spline.
+ *    Ramer–Douglas–Peucker, then rebuilds the line as a centripetal Catmull-Rom
+ *    spline that keeps sharp corners sharp.
  */
 object Smoothing {
     const val MAX_LEVEL = 10
@@ -89,37 +90,69 @@ object Smoothing {
         return out.toFloatArray()
     }
 
-    /** Uniform Catmull-Rom spline through every point, sampled about every [SAMPLE_SPACING_DP]. */
+    /**
+     * A turn sharper than this (cosine of the angle between one segment and the next) is a real
+     * corner, as in N, V or k: the curve passes through it without rounding it off.
+     */
+    private const val CORNER_COS = 0.35f
+
+    /**
+     * Centripetal Catmull-Rom spline through every point, sampled about every [SAMPLE_SPACING_DP].
+     * Unlike the plain (uniform) kind it never forms loops or cusps where points are unevenly
+     * spaced, and the curve is not carried round sharp corners, so they stay crisp instead of
+     * bulging out.
+     */
     private fun catmullRom(points: FloatArray): FloatArray {
         val n = points.size / 2
         if (n < 3) return points
         fun px(i: Int) = points[2 * i.coerceIn(0, n - 1)]
         fun py(i: Int) = points[2 * i.coerceIn(0, n - 1) + 1]
+        val corner = BooleanArray(n) { i ->
+            if (i == 0 || i == n - 1) {
+                false
+            } else {
+                val ax = px(i) - px(i - 1); val ay = py(i) - py(i - 1)
+                val bx = px(i + 1) - px(i); val by = py(i + 1) - py(i)
+                val lengths = hypot(ax, ay) * hypot(bx, by)
+                lengths > 0f && (ax * bx + ay * by) / lengths < CORNER_COS
+            }
+        }
 
         val out = ArrayList<Float>()
         out.add(px(0))
         out.add(py(0))
         for (i in 0 until n - 1) {
+            // At a corner the neighbour beyond it is ignored, so the curve doesn't swing past it.
+            val before = if (corner[i]) i else i - 1
+            val after = if (corner[i + 1]) i + 1 else i + 2
             val steps = ceil(hypot(px(i + 1) - px(i), py(i + 1) - py(i)) / SAMPLE_SPACING_DP)
                 .toInt().coerceAtLeast(1)
             for (s in 1..steps) {
                 val t = s.toFloat() / steps
-                out.add(spline(px(i - 1), px(i), px(i + 1), px(i + 2), t))
-                out.add(spline(py(i - 1), py(i), py(i + 1), py(i + 2), t))
+                val (x, y) = centripetal(px(before), py(before), px(i), py(i), px(i + 1), py(i + 1), px(after), py(after), t)
+                out.add(x)
+                out.add(y)
             }
         }
         return out.toFloatArray()
     }
 
-    private fun spline(p0: Float, p1: Float, p2: Float, p3: Float, t: Float): Float {
-        val t2 = t * t
-        val t3 = t2 * t
-        return 0.5f * (
-            2 * p1 +
-                (p2 - p0) * t +
-                (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-                (3 * p1 - p0 - 3 * p2 + p3) * t3
-            )
+    // The centripetal (alpha = 1/2) Catmull-Rom point at [t] (0..1) between p1 and p2, by the Barry-Goldman construction.
+    private fun centripetal(
+        x0: Float, y0: Float, x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float, t: Float,
+    ): Pair<Float, Float> {
+        fun knot(ax: Float, ay: Float, bx: Float, by: Float) = kotlin.math.sqrt(hypot(bx - ax, by - ay)).coerceAtLeast(1e-4f)
+        val t1 = knot(x0, y0, x1, y1)
+        val t2 = t1 + knot(x1, y1, x2, y2)
+        val t3 = t2 + knot(x2, y2, x3, y3)
+        val u = t1 + (t2 - t1) * t
+        fun lerp(a: Float, b: Float, ta: Float, tb: Float) = (tb - u) / (tb - ta) * a + (u - ta) / (tb - ta) * b
+        val a1x = lerp(x0, x1, 0f, t1); val a1y = lerp(y0, y1, 0f, t1)
+        val a2x = lerp(x1, x2, t1, t2); val a2y = lerp(y1, y2, t1, t2)
+        val a3x = lerp(x2, x3, t2, t3); val a3y = lerp(y2, y3, t2, t3)
+        val b1x = lerp(a1x, a2x, 0f, t2); val b1y = lerp(a1y, a2y, 0f, t2)
+        val b2x = lerp(a2x, a3x, t1, t3); val b2y = lerp(a2y, a3y, t1, t3)
+        return lerp(b1x, b2x, t1, t2) to lerp(b1y, b2y, t1, t2)
     }
 
     private fun distanceToLine(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
