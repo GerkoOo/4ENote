@@ -1,5 +1,11 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.WindowInsets
 import kotlin.math.ln
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.layout.RowScope
@@ -298,6 +304,8 @@ fun NoteEditorScreen(
     }
 
     val darkPaper = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val focusTimer = (context.applicationContext as com.gerko.fourenote.FourENoteApp).focusTimer
+    var showingFocus by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -353,6 +361,9 @@ fun NoteEditorScreen(
                     }
                     IconButton(onClick = { showingSettings = true }) {
                         Icon(Icons.Filled.Tune, contentDescription = "Pen and gesture settings")
+                    }
+                    IconButton(onClick = { showingFocus = true }) {
+                        Icon(Icons.Filled.Timer, contentDescription = "Focus timer")
                     }
                     IconButton(onClick = { fullScreen = true }) {
                         Icon(Icons.Filled.Fullscreen, contentDescription = "Full screen")
@@ -413,6 +424,28 @@ fun NoteEditorScreen(
             }
         }
     }
+    // The focus timer's bar: across the top, or down the side when the screen is sideways.
+    val sideways = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    com.gerko.fourenote.ui.focus.FocusBar(
+        timer = focusTimer,
+        vertical = sideways,
+        onOpen = { showingFocus = true },
+        onPhase = { phase ->
+            com.gerko.fourenote.ui.focus.buzz(context)
+            viewModel.showMessage(
+                when (phase) {
+                    com.gerko.fourenote.data.focus.FocusPhase.WORK -> "Break over: back to focus"
+                    com.gerko.fourenote.data.focus.FocusPhase.BREAK -> "Time for a short break"
+                    com.gerko.fourenote.data.focus.FocusPhase.LONG_BREAK -> "Time for a long break"
+                },
+            )
+        },
+        modifier = Modifier
+            .align(if (sideways) Alignment.CenterStart else Alignment.TopCenter)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(if (sideways) WindowInsetsSides.Start else WindowInsetsSides.Top)),
+    )
+    if (showingFocus) com.gerko.fourenote.ui.focus.FocusDialog(focusTimer, onDismiss = { showingFocus = false })
     if (fullScreen) {
         FilledTonalIconButton(
             onClick = { fullScreen = false },
@@ -907,10 +940,10 @@ private fun PageList(
             }
         }
         turnedPage?.let { id ->
-            val degrees = pageRotations[id] ?: 0f
             AssistChip(
                 onClick = { keepCenterWhile { pageRotations.remove(id); layoutRotations.remove(id) } },
-                label = { Text("${degrees.roundToInt().let { if (it > 180) it - 360 else it }}° · straighten") },
+                // The angle is read in here only, so a twist redraws just this text, not the pages.
+                label = { Text("${(pageRotations[id] ?: 0f).roundToInt().let { if (it > 180) it - 360 else it }}° · straighten") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null) },
                 modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
             )

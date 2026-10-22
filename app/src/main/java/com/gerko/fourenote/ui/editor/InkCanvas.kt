@@ -1423,4 +1423,4 @@ private fun DrawScope.drawPhotoRequest(image: PageImage, scale: Float, accent: C
 private const val TAP_SLOP_DP = 8f
 
 // How far two fingers must twist before the page turns with them, so pinching and scrolling don't turn it.
-private const val ROTATE_START_DEG = 15f
+private const val ROTATE_START_DEG = 10f

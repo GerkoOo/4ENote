@@ -30,6 +30,9 @@ class FourENoteApp : Application() {
 
     val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }
 
+    /** The focus (Pomodoro) timer shown as a bar in the editor. */
+    val focusTimer: com.gerko.fourenote.data.focus.FocusTimer by lazy { com.gerko.fourenote.data.focus.FocusTimer(this) }
+
     /** Scans taken from the home page, waiting for the note with their photo frame. */
     val scanInbox: ScanInbox by lazy { ScanInbox(java.io.File(filesDir, "inbox")) }
 
