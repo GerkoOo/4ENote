@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.runtime.mutableIntStateOf
@@ -377,6 +378,7 @@ fun NoteEditorScreen(
                         images = { imagePicker.launch(arrayOf("image/*")) },
                         scan = ::startScan,
                     ),
+                    fullScreen = fullScreen,
                 )
             } else {
                 Box(Modifier.fillMaxSize())
@@ -445,6 +447,7 @@ private fun PageList(
     onMultiFingerTap: (Int) -> Unit,
     onPenButton: (PenButtonAction, Offset) -> Unit,
     addPages: AddPageActions,
+    fullScreen: Boolean,
 ) {
     val drawingColor = if (viewModel.tool == Tool.HIGHLIGHTER) viewModel.highlighterColor else viewModel.penColor
     val drawingWidth = when (viewModel.tool) {
@@ -638,7 +641,7 @@ private fun PageList(
                                 .aspectRatio(page.width / page.height)
                                 .shadow(2.dp),
                         )
-                        PageFooter(
+                        if (!fullScreen) PageFooter(
                             number = index + 1,
                             count = viewModel.pages.size,
                             hasImage = page.background != null,
@@ -659,11 +662,14 @@ private fun PageList(
                 }
             }
         }
-        ZoomControl(
-            zoom = zoom,
-            onZoom = { zoom = it.coerceIn(MIN_ZOOM, MAX_ZOOM) },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-        )
+        // Hidden in full screen; pinching still zooms.
+        if (!fullScreen) {
+            ZoomControl(
+                zoom = zoom,
+                onZoom = { zoom = it.coerceIn(MIN_ZOOM, MAX_ZOOM) },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+            )
+        }
         viewModel.adjustingPageId?.let { pageId ->
             AdjustImageBar(
                 onFit = { viewModel.setBackgroundPlacement(pageId, BackgroundPlacement()) },
@@ -818,12 +824,25 @@ private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, modifier:
 /** − / percentage / + ; tapping the percentage returns to 100%. Pinching zooms too. */
 @Composable
 private fun ZoomControl(zoom: Float, onZoom: (Float) -> Unit, modifier: Modifier = Modifier) {
-    Surface(shape = RoundedCornerShape(24.dp), tonalElevation = 6.dp, shadowElevation = 4.dp, modifier = modifier) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onZoom(zoom / ZOOM_STEP) }) { Icon(Icons.Filled.ZoomOut, contentDescription = "Zoom out") }
-            TextButton(onClick = { onZoom(1f) }) { Text("${(zoom * 100).roundToInt()}%") }
-            IconButton(onClick = { onZoom(zoom * ZOOM_STEP) }) { Icon(Icons.Filled.ZoomIn, contentDescription = "Zoom in") }
+    // Small and slightly see-through, so it covers as little of the page as possible.
+    Surface(shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp, shadowElevation = 2.dp, modifier = modifier.alpha(0.85f)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(36.dp)) {
+            ZoomButton(Icons.Filled.ZoomOut, "Zoom out") { onZoom(zoom / ZOOM_STEP) }
+            Text(
+                "${(zoom * 100).roundToInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onZoom(1f) }.padding(horizontal = 6.dp, vertical = 4.dp),
+            )
+            ZoomButton(Icons.Filled.ZoomIn, "Zoom in") { onZoom(zoom * ZOOM_STEP) }
         }
+    }
+}
+
+@Composable
+private fun ZoomButton(icon: ImageVector, description: String, onClick: () -> Unit) {
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClick)) {
+        Icon(icon, contentDescription = description, modifier = Modifier.size(20.dp))
     }
 }
 
