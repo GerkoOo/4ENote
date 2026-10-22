@@ -132,6 +132,8 @@ data class PageImage(
      * fill it; the photo then syncs into this very frame, since it keeps the same [id].
      */
     val requested: Boolean = false,
+    /** A photo frame's name, e.g. "Photo 2", so the right photo goes in the right frame. */
+    val label: String = "",
 ) {
     /** True if this is an empty frame waiting for a photo. */
     val waitingForPhoto: Boolean get() = requested && file.isEmpty()
@@ -295,7 +297,8 @@ object InkSerializer {
                             .put("w", img.width.toDouble()).put("h", img.height.toDouble())
                             .put("r", img.rotation.toDouble()).put("o", img.opacity.toDouble())
                             .apply { if (img.inverted) put("invert", true) }
-                            .apply { if (img.requested) put("req", true) },
+                            .apply { if (img.requested) put("req", true) }
+                            .apply { if (img.label.isNotEmpty()) put("lbl", img.label) },
                     )
                 }
                 json.put("images", images)
@@ -397,6 +400,7 @@ object InkSerializer {
                 opacity = o.optDouble("o", 1.0).toFloat(),
                 inverted = o.optBoolean("invert"),
                 requested = o.optBoolean("req"),
+                label = o.optString("lbl"),
             )
         }
         val textsJson = json.optJSONArray("texts") ?: JSONArray()

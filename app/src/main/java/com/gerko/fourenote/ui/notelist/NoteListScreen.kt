@@ -203,7 +203,10 @@ fun NoteListScreen(
                     photoRequests.forEach { request ->
                         TextButton(onClick = { showingRequests = false; filling = request }, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Filled.AddAPhoto, contentDescription = null)
-                            Text("  ${request.noteTitle} · page ${request.pageNumber}", modifier = Modifier.weight(1f))
+                            Text(
+                                "  ${request.label.ifEmpty { "Photo" }} · ${request.noteTitle} · page ${request.pageNumber}",
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
                 }

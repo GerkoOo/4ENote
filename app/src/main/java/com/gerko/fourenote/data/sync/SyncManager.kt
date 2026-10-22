@@ -1,5 +1,13 @@
 package com.gerko.fourenote.data.sync
 
+import androidx.work.WorkManager
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.NetworkType
+import androidx.work.ExistingWorkPolicy
+import androidx.work.Constraints
+import android.net.NetworkCapabilities
+import android.net.Network
+import android.net.ConnectivityManager
 import android.content.Context
 import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
@@ -83,18 +91,53 @@ class SyncManager(
         requestSync()
     }
 
+    /**
+     * Syncs soon: right away when online, otherwise as soon as a connection comes back, even if
+     * the app has been closed by then (a background job, see SyncWorker).
+     */
     fun requestSync() {
-        val provider = providerFor(_choice.value) ?: return
-        scope.launch {
-            mutex.withLock {
-                _status.value = SyncStatus.Syncing
-                _status.value = try {
-                    val result = SyncEngine(repository, provider, ::exportPdf).sync()
-                    SyncStatus.Done(result, System.currentTimeMillis())
-                } catch (e: Exception) {
-                    SyncStatus.Failed(e.message ?: e.javaClass.simpleName, System.currentTimeMillis())
-                }
+        if (providerFor(_choice.value) == null) return
+        if (!online()) {
+            syncWhenOnline()
+            return
+        }
+        scope.launch { syncNow() }
+    }
+
+    /** One sync, now. Returns false if it failed (or there is nowhere to sync to). */
+    suspend fun syncNow(): Boolean {
+        val provider = providerFor(_choice.value) ?: return false
+        return mutex.withLock {
+            _status.value = SyncStatus.Syncing
+            try {
+                val result = SyncEngine(repository, provider, ::exportPdf).sync()
+                _status.value = SyncStatus.Done(result, System.currentTimeMillis())
+                true
+            } catch (e: Exception) {
+                _status.value = SyncStatus.Failed(e.message ?: e.javaClass.simpleName, System.currentTimeMillis())
+                false
             }
+        }
+    }
+
+    /** Leaves a job for Android to sync once there is a connection, app open or not. */
+    fun syncWhenOnline() {
+        val work = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(SyncWorker.NAME, ExistingWorkPolicy.KEEP, work)
+    }
+
+    private fun online(): Boolean {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    // Syncs the moment a connection comes back while the app is in front.
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            requestSync()
         }
     }
 
@@ -114,6 +157,7 @@ class SyncManager(
     /** Call when the app comes to the foreground. */
     fun startAutoSync() {
         if (autoSync?.isActive == true) return
+        runCatching { context.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(networkCallback) }
         autoSync = scope.launch {
             while (isActive) {
                 requestSync()
@@ -123,6 +167,7 @@ class SyncManager(
     }
 
     fun stopAutoSync() {
+        runCatching { context.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(networkCallback) }
         autoSync?.cancel()
         autoSync = null
     }

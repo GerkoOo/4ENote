@@ -101,8 +101,18 @@ class SyncEngine(
         val fills = mutableListOf<Pair<String, List<PageImage>>>()
         for (note in localNotes) {
             if (store.isOpen(note.id)) {
-                skippedOpen++
                 val cloud = cloudNotes[note.id]
+                // An open note can still be uploaded (that only reads it), so a frame set on the tablet
+                // reaches the phone at once. Anything that would change it here waits until it is closed,
+                // except photos for its frames, which the editor takes in itself.
+                val uploadOnly = !note.deleted && note.dirty &&
+                    (if (cloud == null) note.remoteId == null else cloud.version == note.remoteVersion)
+                if (uploadOnly) {
+                    runCatching { syncNote(note, cloud) }
+                        .onFailure { errors += "${note.title.ifBlank { "Untitled" }}: ${it.message}" }
+                    continue
+                }
+                skippedOpen++
                 if (cloud != null && cloud.version != note.remoteVersion) {
                     runCatching { filledFrames(cloud) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { fills += note.id to it }
                 }

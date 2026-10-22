@@ -57,7 +57,9 @@ fun FourENoteNavGraph(
             val noteId = backStackEntry.arguments?.getString("noteId") ?: return@composable
             val viewModel: NoteEditorViewModel = viewModel(
                 key = noteId,
-                factory = NoteEditorViewModel.Factory(noteId, repository, attachments, toolPreferences, syncManager::requestSync),
+                factory = NoteEditorViewModel.Factory(
+                    noteId, repository, attachments, toolPreferences, syncManager::requestSync, syncManager::requestSync,
+                ),
             )
             NoteEditorScreen(viewModel = viewModel, backgrounds = backgrounds, onBack = { navController.popBackStack() })
         }

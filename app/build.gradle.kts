@@ -90,6 +90,8 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.6.1")
     implementation("androidx.camera:camera-lifecycle:1.6.1")
     implementation("androidx.camera:camera-view:1.6.1")
+    // Syncs once a connection is back, even with the app closed (AndroidX, Apache 2.0).
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     // Draws LaTeX as a typeset formula, offline (JLaTeXMath, GPL-2.0-or-later).
     implementation("ru.noties:jlatexmath-android:0.2.0")
 

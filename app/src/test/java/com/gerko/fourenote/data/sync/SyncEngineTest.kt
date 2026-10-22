@@ -369,4 +369,18 @@ class SyncEngineTest {
         // The photo itself arrived too, before the frame was handed over.
         assertEquals("JPEG", a.attachments("n1").getValue("photo.jpg").readText())
     }
+
+    @Test
+    fun anOpenNoteIsStillUploaded() {
+        a.save(Note(id = "n1", title = "Open here"))
+        a.open += "n1"
+        a.sync()
+        b.sync()
+        assertEquals("Open here", b.notes.getValue("n1").title)
+        // But an open note is never replaced from the cloud.
+        b.save(b.notes.getValue("n1").copy(title = "Changed on B"))
+        b.sync()
+        a.sync()
+        assertEquals("Open here", a.notes.getValue("n1").title)
+    }
 }

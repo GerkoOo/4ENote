@@ -74,7 +74,14 @@ class NoteRepository(
     }
 
     /** An empty frame somewhere in the notes, waiting for a photo. */
-    data class PhotoRequest(val noteId: String, val noteTitle: String, val pageNumber: Int, val frameId: String, val aspect: Float)
+    data class PhotoRequest(
+        val noteId: String,
+        val noteTitle: String,
+        val pageNumber: Int,
+        val frameId: String,
+        val aspect: Float,
+        val label: String = "",
+    )
 
     /** Every frame waiting for a photo, in all notes. Reads only the notes' outlines, not their ink. */
     suspend fun photoRequests(): List<PhotoRequest> {
@@ -84,7 +91,7 @@ class NoteRepository(
             val outline = ink.loadOutline(note.id) ?: return@flatMap emptyList()
             outline.pages.withIndex().flatMap { (index, page) ->
                 page.images.filter { it.waitingForPhoto }.map {
-                    PhotoRequest(note.id, note.title.ifBlank { "Untitled" }, index + 1, it.id, it.width / it.height)
+                    PhotoRequest(note.id, note.title.ifBlank { "Untitled" }, index + 1, it.id, it.width / it.height, it.label)
                 }
             }
         }

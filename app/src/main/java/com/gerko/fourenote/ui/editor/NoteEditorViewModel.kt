@@ -115,6 +115,8 @@ class NoteEditorViewModel(
     private val attachments: AttachmentStore,
     private val toolPreferences: ToolPreferences,
     private val onClosed: () -> Unit,
+    /** Asks for a sync now (or once online), e.g. after a photo frame is created. */
+    private val requestSync: () -> Unit = {},
 ) : ViewModel() {
     private var note: Note? = null
 
@@ -804,13 +806,56 @@ class NoteEditorViewModel(
             width = page.width * 0.5f,
             height = page.width * 0.375f,
             requested = true,
+            label = "Photo ${nextPhotoNumber()}",
         )
         page.images.add(frame)
         persist()
+        requestSync()
         tool = Tool.LASSO
         clearSelection()
         selectedImage = page.id to frame.id
         message = "Move and size the frame; fill it from the camera button on your phone's notes list"
+    }
+
+    // Frames are numbered through the whole note: Photo 1, Photo 2, ...
+    private fun nextPhotoNumber(): Int = 1 + pages.flatMap { it.images }
+        .filter { it.requested }
+        .maxOfOrNull { it.label.removePrefix("Photo ").toIntOrNull() ?: 0 }.let { it ?: 0 }
+
+    /**
+     * Scans or pictures taken in the editor: they fill the page's waiting photo frames first (the
+     * selected one, then the others in order), and only what is left over goes onto the page.
+     */
+    fun insertScans(pageId: String, photos: List<ByteArray>) {
+        val page = page(pageId) ?: return
+        val selectedId = selectedImage?.takeIf { it.first == pageId }?.second
+        val frames = page.images.filter { it.waitingForPhoto }.sortedByDescending { it.id == selectedId }
+        if (frames.isEmpty()) {
+            insertImages(pageId, photos.map { bytes -> { bytes.inputStream() } })
+            return
+        }
+        viewModelScope.launch {
+            importing = true
+            try {
+                recordUndo()
+                frames.zip(photos).forEach { (frame, bytes) ->
+                    val stored = attachments.storeImage(noteId, bytes.inputStream())
+                    val aspect = stored.widthPx.toFloat() / stored.heightPx.coerceAtLeast(1)
+                    val width = minOf(frame.width, frame.height * aspect)
+                    val index = page.images.indexOfFirst { it.id == frame.id }
+                    if (index >= 0) page.images[index] = frame.copy(file = stored.file, width = width, height = width / aspect)
+                }
+                persist()
+                requestSync()
+                message = if (frames.size == 1) "Photo placed in ${frames[0].label.ifEmpty { "the frame" }}" else "Photos placed in the frames"
+            } catch (e: Exception) {
+                message = e.message ?: "Import failed"
+            } finally {
+                importing = false
+            }
+            val rest = photos.drop(frames.size)
+            if (rest.isNotEmpty()) insertImages(pageId, rest.map { bytes -> { bytes.inputStream() } })
+        }
     }
 
     fun selectImage(pageId: String, imageId: String?) {
@@ -1234,10 +1279,11 @@ class NoteEditorViewModel(
         private val attachments: AttachmentStore,
         private val toolPreferences: ToolPreferences,
         private val onClosed: () -> Unit,
+        private val requestSync: () -> Unit = {},
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            NoteEditorViewModel(noteId, repository, attachments, toolPreferences, onClosed) as T
+            NoteEditorViewModel(noteId, repository, attachments, toolPreferences, onClosed, requestSync) as T
     }
 
     private companion object {

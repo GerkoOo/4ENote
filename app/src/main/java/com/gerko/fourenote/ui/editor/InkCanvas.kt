@@ -1336,5 +1336,10 @@ private fun DrawScope.drawPhotoRequest(image: PageImage, scale: Float, accent: C
             textAlign = android.graphics.Paint.Align.CENTER
         }
         canvas.nativeCanvas.drawText("Waiting for a photo from your phone", center.x, center.y + unit * 2.3f, paint)
+        if (image.label.isNotEmpty()) {
+            paint.textSize *= 1.4f
+            paint.isFakeBoldText = true
+            canvas.nativeCanvas.drawText(image.label, center.x, center.y - unit * 2.2f, paint)
+        }
     }
 }
