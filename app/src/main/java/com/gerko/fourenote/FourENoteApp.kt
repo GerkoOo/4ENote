@@ -7,6 +7,7 @@ import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.attachments.BackgroundLoader
 import com.gerko.fourenote.data.ink.InkStore
 import com.gerko.fourenote.data.sync.SyncManager
+import com.gerko.fourenote.data.sync.google.GoogleAuth
 import com.gerko.fourenote.ui.editor.ToolPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,5 +27,7 @@ class FourENoteApp : Application() {
         NoteRepository(AppDatabase.getInstance(this).noteDao(), attachments, InkStore(java.io.File(filesDir, "ink")), appScope)
     }
 
-    val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, appScope) }
+    val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }
+
+    val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, googleAuth, appScope) }
 }

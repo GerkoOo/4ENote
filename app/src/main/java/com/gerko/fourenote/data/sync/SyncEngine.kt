@@ -11,6 +11,12 @@ interface SyncStore {
     /** [note] with its ink and last-synced snapshot filled in, for uploading or merging. */
     suspend fun withContent(note: Note): Note = note
 
+    /** The note's pictures and PDF pages on this device: file name to file. They never change once written. */
+    fun attachments(noteId: String): Map<String, File> = emptyMap()
+
+    /** Stores a picture or PDF page that came from the cloud. */
+    suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {}
+
     /** True while the note is open in the editor; sync leaves it alone until it closes. */
     fun isOpen(noteId: String): Boolean
 
@@ -99,7 +105,47 @@ class SyncEngine(
                 .onFailure { errors += "${file.name}: ${it.message}" }
         }
 
+        runCatching { syncAttachments() }.onFailure { errors += "Pictures: ${it.message}" }
+
         return SyncResult(uploaded, downloaded, merged, deletedHere, deletedInCloud, skippedOpen, errors)
+    }
+
+    /**
+     * Pictures and PDF pages travel as files named "noteId~fileName". Their names are unique and
+     * their content never changes, so syncing them is copying whichever side lacks one; files of
+     * notes that exist on neither side any more are removed from the cloud.
+     */
+    private suspend fun syncAttachments() {
+        val files = provider.listFiles()
+        val cloudNoteIds = files.mapNotNullTo(HashSet()) { NoteFile.noteIdOf(it.name) }
+        val inCloud = files.mapNotNull { file -> NoteFile.attachmentOf(file.name)?.let { it to file } }
+        val notes = store.notesForSync().filterNot { it.deleted }
+        val localIds = notes.mapTo(HashSet()) { it.id }
+        val cloudByNote = inCloud.groupBy({ it.first.first }, { it.first.second to it.second })
+
+        for (note in notes) {
+            val local = store.attachments(note.id)
+            val remote = cloudByNote[note.id].orEmpty().toMap()
+            for ((name, file) in local) {
+                if (name !in remote) {
+                    provider.upload(NoteFile.attachmentName(note.id, name), mimeType(name), UploadContent.of(file), null)
+                }
+            }
+            for ((name, file) in remote) {
+                if (name !in local) store.saveAttachment(note.id, name, provider.download(file.id))
+            }
+        }
+        for ((key, file) in inCloud) {
+            val noteId = key.first
+            if (noteId !in localIds && noteId !in cloudNoteIds) provider.delete(file.id)
+        }
+    }
+
+    private fun mimeType(name: String) = when (name.substringAfterLast('.', "").lowercase()) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "pdf" -> PDF_MIME_TYPE
+        else -> "application/octet-stream"
     }
 
     private suspend fun syncNote(note: Note, cloud: RemoteFile?) {

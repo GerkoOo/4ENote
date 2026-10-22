@@ -77,6 +77,20 @@ class SyncEngineTest {
 
         override suspend fun purge(noteId: String) {
             notes.remove(noteId)
+            files.remove(noteId)
+        }
+
+        /** Pictures per note: file name to content. */
+        val files = mutableMapOf<String, MutableMap<String, java.io.File>>()
+
+        fun addPicture(noteId: String, name: String, content: String) {
+            files.getOrPut(noteId) { mutableMapOf() }[name] = tmp.newFile().apply { writeText(content) }
+        }
+
+        override fun attachments(noteId: String): Map<String, java.io.File> = files[noteId].orEmpty()
+
+        override suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {
+            files.getOrPut(noteId) { mutableMapOf() }[name] = tmp.newFile().apply { writeBytes(content) }
         }
     }
 
@@ -283,5 +297,33 @@ class SyncEngineTest {
         a.open -= "n1"
         a.sync()
         assertEquals(setOf("s1", "s2", "s3"), a.strokeIds("n1"))
+    }
+
+    @Test
+    fun picturesTravelWithTheirNote() {
+        val note = Note(id = "n1", title = "With picture")
+        a.save(note)
+        a.addPicture("n1", "photo.jpg", "JPEG bytes")
+        a.sync()
+        b.sync()
+        assertEquals("JPEG bytes", b.attachments("n1").getValue("photo.jpg").readText())
+
+        // A picture added on B reaches A too.
+        b.addPicture("n1", "scan.jpg", "scan bytes")
+        b.sync()
+        a.sync()
+        assertEquals(setOf("photo.jpg", "scan.jpg"), a.attachments("n1").keys)
+    }
+
+    @Test
+    fun picturesOfDeletedNotesLeaveTheCloud() {
+        a.save(Note(id = "n1", title = "Gone soon"))
+        a.addPicture("n1", "photo.jpg", "JPEG bytes")
+        a.sync()
+        b.sync()
+        a.delete("n1")
+        a.sync()
+        b.sync()
+        assertTrue(cloudDir.listFiles().orEmpty().none { it.name.contains("~") })
     }
 }

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -15,6 +17,12 @@ android {
         versionCode = 2
         versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Google Drive sign-in: the OAuth client id of an Android client with "custom URI scheme"
+        // enabled, from local.properties (google.clientId=...). Builds without it hide Google Drive.
+        val localProperties = Properties().apply {
+            rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+        }
+        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProperties.getProperty("google.clientId", "")}\"")
         // Tablets are arm64; x86_64 is for the emulator. Leaving out the 32-bit builds of the
         // native library (ONNX Runtime) keeps the APK much smaller.
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -35,6 +43,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     // Compress the native libraries in the APK (they're unpacked on install): ONNX Runtime alone

@@ -3,6 +3,8 @@ package com.gerko.fourenote.data.sync
 import android.content.Context
 import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
+import com.gerko.fourenote.data.sync.google.GoogleAuth
+import com.gerko.fourenote.data.sync.google.GoogleDriveProvider
 import com.gerko.fourenote.export.PdfExporter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -15,12 +17,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 
-/** Where notes sync to. Real services become available once their sign-in is set up. */
-enum class CloudChoice(val label: String, val available: Boolean) {
-    NONE("Not connected", true),
-    TEST("Test cloud (a folder on this tablet)", true),
-    GOOGLE_DRIVE("Google Drive", false),
-    ONEDRIVE("OneDrive", false),
+/** Where notes sync to. */
+enum class CloudChoice(val label: String) {
+    NONE("Not connected"),
+    TEST("Test cloud (a folder on this tablet)"),
+    GOOGLE_DRIVE("Google Drive"),
+    ONEDRIVE("OneDrive"),
 }
 
 sealed interface SyncStatus {
@@ -39,6 +41,7 @@ class SyncManager(
     private val context: Context,
     private val repository: NoteRepository,
     private val attachments: AttachmentStore,
+    val googleAuth: GoogleAuth,
     private val scope: CoroutineScope,
 ) {
     private val prefs = context.getSharedPreferences("sync", Context.MODE_PRIVATE)
@@ -53,8 +56,27 @@ class SyncManager(
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     val status: StateFlow<SyncStatus> = _status
 
+    /** Whether [choice] can be picked now: Google Drive once signed in, OneDrive not yet. */
+    fun isAvailable(choice: CloudChoice) = when (choice) {
+        CloudChoice.GOOGLE_DRIVE -> googleAuth.configured && googleAuth.account.value != null
+        CloudChoice.ONEDRIVE -> false
+        else -> true
+    }
+
+    /** Called once Google sign-in finishes: switches sync to Google Drive. */
+    fun onGoogleSignedIn() {
+        prefs.edit().remove(KEY_DRIVE_FOLDER).apply()
+        select(CloudChoice.GOOGLE_DRIVE)
+    }
+
+    fun signOutOfGoogle() {
+        googleAuth.signOut()
+        prefs.edit().remove(KEY_DRIVE_FOLDER).apply()
+        if (_choice.value == CloudChoice.GOOGLE_DRIVE) select(CloudChoice.NONE)
+    }
+
     fun select(choice: CloudChoice) {
-        if (!choice.available || choice == _choice.value) return
+        if (!isAvailable(choice) || choice == _choice.value) return
         _choice.value = choice
         prefs.edit().putString(KEY_CHOICE, choice.name).apply()
         _status.value = SyncStatus.Idle
@@ -107,12 +129,17 @@ class SyncManager(
 
     private fun providerFor(choice: CloudChoice): CloudProvider? = when (choice) {
         CloudChoice.TEST -> LocalFolderCloudProvider(File(context.filesDir, "test-cloud"))
-        // Plugged in once their OAuth clients exist.
-        CloudChoice.GOOGLE_DRIVE, CloudChoice.ONEDRIVE, CloudChoice.NONE -> null
+        CloudChoice.GOOGLE_DRIVE -> if (googleAuth.account.value == null) null else GoogleDriveProvider(googleAuth) { found ->
+            // Remembers the "4ENote" folder's id between syncs.
+            if (found != null) prefs.edit().putString(KEY_DRIVE_FOLDER, found).apply()
+            prefs.getString(KEY_DRIVE_FOLDER, null)
+        }
+        CloudChoice.ONEDRIVE, CloudChoice.NONE -> null
     }
 
     private companion object {
         const val KEY_CHOICE = "cloud"
+        const val KEY_DRIVE_FOLDER = "driveFolder"
         const val AUTO_SYNC_INTERVAL_MS = 60_000L
     }
 }

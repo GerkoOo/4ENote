@@ -33,6 +33,8 @@ import com.gerko.fourenote.data.sync.SyncStatus
 fun CloudSettingsScreen(syncManager: SyncManager, onBack: () -> Unit) {
     val choice by syncManager.choice.collectAsState()
     val status by syncManager.status.collectAsState()
+    val googleAccount by syncManager.googleAuth.account.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         topBar = {
@@ -62,13 +64,14 @@ fun CloudSettingsScreen(syncManager: SyncManager, onBack: () -> Unit) {
             Card {
                 Column(Modifier.padding(vertical = 8.dp)) {
                     CloudChoice.entries.forEach { option ->
+                        val available = syncManager.isAvailable(option)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .selectable(
                                     selected = option == choice,
-                                    enabled = option.available,
+                                    enabled = available,
                                     onClick = { syncManager.select(option) },
                                 )
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -76,19 +79,40 @@ fun CloudSettingsScreen(syncManager: SyncManager, onBack: () -> Unit) {
                             RadioButton(
                                 selected = option == choice,
                                 onClick = null,
-                                enabled = option.available,
+                                enabled = available,
                             )
                             Column(Modifier.padding(start = 12.dp)) {
                                 Text(option.label, style = MaterialTheme.typography.titleMedium)
-                                if (!option.available) {
-                                    Text(
-                                        "Coming soon: needs its sign-in set up first",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                val note = when {
+                                    option == CloudChoice.GOOGLE_DRIVE && !syncManager.googleAuth.configured ->
+                                        "Not set up in this build (needs a Google client id)"
+                                    option == CloudChoice.GOOGLE_DRIVE && googleAccount == null ->
+                                        "Sign in below first"
+                                    option == CloudChoice.GOOGLE_DRIVE -> "Signed in as $googleAccount"
+                                    option == CloudChoice.ONEDRIVE -> "Coming soon"
+                                    else -> null
+                                }
+                                if (note != null) {
+                                    Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Google: signs in through the browser; only the files 4ENote creates are reachable.
+            if (syncManager.googleAuth.configured) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (googleAccount == null) {
+                        Button(onClick = { context.startActivity(syncManager.googleAuth.signInIntent()) }) { Text("Sign in with Google") }
+                        Text(
+                            "4ENote only gets access to the files it creates itself, in a \"4ENote\" folder.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        Text("Google: $googleAccount", style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.OutlinedButton(onClick = syncManager::signOutOfGoogle) { Text("Sign out") }
                     }
                 }
             }

@@ -94,6 +94,16 @@ class NoteRepository(
 
     override fun isOpen(noteId: String): Boolean = noteId in openNotes
 
+    override fun attachments(noteId: String): Map<String, java.io.File> =
+        attachments.dir(noteId).listFiles().orEmpty()
+            // Files being written start with a dot.
+            .filter { it.isFile && !it.name.startsWith(".") }
+            .associateBy { it.name }
+
+    override suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {
+        attachments.saveDownloaded(noteId, name, content)
+    }
+
     override suspend fun insertFromCloud(note: Note) {
         ink.save(note.id, InkSerializer.decode(note.inkData))
         if (note.syncedSnapshot.isNotEmpty()) ink.writeSnapshot(note.id, note.syncedSnapshot)

@@ -16,6 +16,18 @@ object NoteFile {
 
     fun fileName(noteId: String) = "$noteId$EXTENSION"
 
+    /** A note's picture or PDF page in the cloud: "noteId~fileName". */
+    fun attachmentName(noteId: String, file: String) = "$noteId$ATTACHMENT_SEPARATOR$file"
+
+    /** The note id and file name of a cloud attachment, or null if [fileName] is not one. */
+    fun attachmentOf(fileName: String): Pair<String, String>? {
+        val at = fileName.indexOf(ATTACHMENT_SEPARATOR)
+        if (at <= 0 || at == fileName.lastIndex) return null
+        return fileName.substring(0, at) to fileName.substring(at + 1)
+    }
+
+    private const val ATTACHMENT_SEPARATOR = '~'
+
     /** The note id for a cloud file name, or null if it is not a note file. */
     fun noteIdOf(fileName: String): String? =
         fileName.takeIf { it.endsWith(EXTENSION) }?.removeSuffix(EXTENSION)?.ifEmpty { null }

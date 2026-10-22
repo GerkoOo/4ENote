@@ -134,6 +134,15 @@ class AttachmentStore(val context: Context) {
         if (from.isDirectory) from.copyRecursively(dir(toNoteId), overwrite = true)
     }
 
+    /** Stores a file that came from the cloud, under its own name, written whole or not at all. */
+    suspend fun saveDownloaded(noteId: String, name: String, content: ByteArray) = withContext(Dispatchers.IO) {
+        val target = file(noteId, name)
+        target.parentFile?.mkdirs()
+        val temp = File(target.parentFile, ".$name.part")
+        temp.writeBytes(content)
+        temp.renameTo(target)
+    }
+
     fun deleteAll(noteId: String) {
         dir(noteId).deleteRecursively()
     }
