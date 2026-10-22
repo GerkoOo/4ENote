@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import com.gerko.fourenote.ui.scan.ScanDialog
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.filled.Title
@@ -110,9 +111,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import com.gerko.fourenote.data.attachments.BackgroundLoader
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -205,24 +203,20 @@ fun NoteEditorScreen(
             viewModel.insertImages(page.id, uris.map { uri -> { context.contentResolver.openInputStream(uri) } })
         }
     }
-    val scanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-        val scanned = GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.pages.orEmpty()
-        viewModel.importImages(
-            scanned.map { page -> { context.contentResolver.openInputStream(page.imageUri) } },
-            ::scrollToPage,
-        )
-    }
+    // Our own scanner (ui/scan): photograph pages, fit their corners, add them straightened.
+    var scanning by remember { mutableStateOf(false) }
     fun startScan() {
-        val activity = context as? Activity ?: return
-        val options = GmsDocumentScannerOptions.Builder()
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .setGalleryImportAllowed(true)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .build()
-        GmsDocumentScanning.getClient(options).getStartScanIntent(activity)
-            .addOnSuccessListener { scanLauncher.launch(IntentSenderRequest.Builder(it).build()) }
-            .addOnFailureListener { viewModel.showMessage("Scanner unavailable: ${it.message}") }
+        scanning = true
+    }
+    if (scanning) {
+        ScanDialog(
+            decode = viewModel::decodePhoto,
+            onDone = { files ->
+                scanning = false
+                viewModel.importImages(files.map { bytes -> { bytes.inputStream() } }, ::scrollToPage)
+            },
+            onCancel = { scanning = false },
+        )
     }
 
     // Where two fingers were held to open the pen dial, in window pixels; null when closed.

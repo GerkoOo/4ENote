@@ -42,8 +42,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import com.gerko.fourenote.data.recognition.HandwritingLanguages
-import com.gerko.fourenote.data.recognition.MathRecognizer
 
 /** Shows the selected handwriting as editable text, with alternatives, Copy and Share. */
 @Composable
@@ -61,7 +59,13 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
         title = { Text(if (viewModel.recognizingMath) "Maths to LaTeX" else "Handwriting to text") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (!viewModel.recognizingMath) LanguagePicker(viewModel)
+                if (!viewModel.recognizingMath) {
+                    Text(
+                        "English · open-source TrOCR model, on this device",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 when (state) {
                     is RecognitionState.Working -> Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -71,10 +75,8 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
                         Text(
                             when {
                                 !state.downloading -> "Reading…"
-                                viewModel.recognizingMath ->
-                                    "Downloading the maths model (once, about ${MathRecognizer.DOWNLOAD_MB} MB)… " +
-                                        "${((state.progress ?: 0f) * 100).toInt()}%"
-                                else -> "Downloading ${viewModel.handwritingLanguage.label} handwriting (once, about 20 MB)…"
+                                else -> "Downloading the ${if (viewModel.recognizingMath) "maths" else "handwriting"} model " +
+                                    "(once, then it works offline)… ${((state.progress ?: 0f) * 100).toInt()}%"
                             },
                         )
                     }
@@ -138,28 +140,6 @@ private fun FormulaPreview(latex: String) {
                 Image(bitmap, contentDescription = "Formula preview")
             } else {
                 Text("Not valid LaTeX yet", color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-@Composable
-private fun LanguagePicker(viewModel: NoteEditorViewModel) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { open = true }) {
-            Icon(Icons.Filled.Language, contentDescription = null)
-            Text("  ${viewModel.handwritingLanguage.label}")
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            HandwritingLanguages.forEach { language ->
-                DropdownMenuItem(
-                    text = { Text(language.label) },
-                    onClick = {
-                        open = false
-                        viewModel.changeHandwritingLanguage(language)
-                    },
-                )
             }
         }
     }

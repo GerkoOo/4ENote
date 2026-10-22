@@ -17,7 +17,8 @@ not ready yet.
 - Pen, ink pen, calligraphy and highlighter; eraser, lasso and layers
 - Hold a drawn line, circle, triangle or rectangle to straighten it; tables
 - Handwriting to text, and handwritten maths to LaTeX (offline, open-source model)
-- Import PDFs and images (with dark-mode colour inversion), scan documents,
+- Import PDFs and images (with dark-mode colour inversion), scan documents
+  (automatic page edges, straightening, Clean and B&W filters),
   export and share as PDF
 - Lined, grid, dotted or blank paper; dark mode; full-screen page view
 - Quick pen dial, pen side buttons, scribble to erase, finger gestures
@@ -25,8 +26,10 @@ not ready yet.
 ## Stack
 
 - Kotlin, Jetpack Compose (Material 3), Room
-- PdfBox-Android for PDF export, ONNX Runtime + Pix2Text for maths recognition,
-  JLaTeXMath for typesetting, Google ML Kit for handwriting and scanning
+- Only open-source libraries, no Google services and no tracking: PdfBox-Android
+  for PDF export, ONNX Runtime running the open TrOCR (handwriting, English) and
+  Pix2Text (maths) models on the device, JLaTeXMath for typesetting; the
+  document scanner, scribble-to-erase and shape recognition are 4ENote's own code
 
 ## Building
 

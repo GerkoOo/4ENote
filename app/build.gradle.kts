@@ -16,7 +16,7 @@ android {
         versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Tablets are arm64; x86_64 is for the emulator. Leaving out the 32-bit builds of the
-        // native libraries (ONNX Runtime, ML Kit) keeps the APK much smaller.
+        // native library (ONNX Runtime) keeps the APK much smaller.
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
@@ -73,8 +73,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.8.4")
 
-    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
-    implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
     // Copies original PDF pages into exports and draws ink as vectors (Apache 2.0).
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // Runs the open-source Pix2Text formula model that turns handwritten maths into LaTeX (MIT).

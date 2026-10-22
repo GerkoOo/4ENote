@@ -12,8 +12,6 @@ import androidx.lifecycle.viewModelScope
 import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
-import com.gerko.fourenote.data.recognition.HandwritingLanguage
-import com.gerko.fourenote.data.recognition.HandwritingLanguages
 import com.gerko.fourenote.data.recognition.HandwritingRecognizer
 import com.gerko.fourenote.data.recognition.MathRecognizer
 import com.gerko.fourenote.data.recognition.HandwritingLines
@@ -239,7 +237,7 @@ class NoteEditorViewModel(
     var adjustingPageId by mutableStateOf<String?>(null)
         private set
 
-    private val recognizer = HandwritingRecognizer()
+    private var textRecognizer: HandwritingRecognizer? = null
     private var mathRecognizer: MathRecognizer? = null
 
     /** True when [recognition] reads the selection as maths (LaTeX) rather than text. */
@@ -251,12 +249,6 @@ class NoteEditorViewModel(
 
     /** Handwriting-to-text state for the selection; null when the dialog is closed. */
     var recognition by mutableStateOf<RecognitionState?>(null)
-        private set
-
-    var handwritingLanguage by mutableStateOf(
-        HandwritingLanguages.firstOrNull { it.tag.substringBefore('-') == Locale.getDefault().language }
-            ?: HandwritingLanguages.first(),
-    )
         private set
 
     /** Everything undo can restore. */
@@ -303,12 +295,11 @@ class NoteEditorViewModel(
         stylusOnly = saved.stylusOnly
         scribbleToErase = saved.scribbleToErase
         eraseWholeStrokes = saved.eraseWholeStrokes
-        HandwritingLanguages.firstOrNull { it.tag == saved.handwritingLanguage }?.let { handwritingLanguage = it }
         viewModelScope.launch {
             snapshotFlow {
                 ToolSettings(
                     tool, penColor, highlighterColor, penWidth, inkPenWidth, calligraphyWidth, highlighterWidth,
-                    smoothing, stylusOnly, scribbleToErase, eraseWholeStrokes, handwritingLanguage.tag, nibDegrees,
+                    smoothing, stylusOnly, scribbleToErase, eraseWholeStrokes, null, nibDegrees,
                     customColors.toList(), primaryButtonAction, secondaryButtonAction, twoFingerDoubleTapUndo, threeFingerDoubleTapRedo,
                     autoLatex, pointedNib,
                 )
@@ -947,6 +938,9 @@ class NoteEditorViewModel(
         }
 
     /** Appends one page per scanned image, in order. */
+    /** A photo for the scanner, the right way up and at most 3000 pixels on its long side. */
+    fun decodePhoto(file: java.io.File) = attachments.decodeUpright(file)
+
     fun importImages(opens: List<() -> InputStream?>, onAdded: (Int) -> Unit) =
         importPages(onAdded) { opens.mapNotNull { it() }.map { attachments.importImage(noteId, it) } }
 
@@ -983,21 +977,23 @@ class NoteEditorViewModel(
         val strokes = page.strokes.filter { it in selection }
         if (strokes.isEmpty()) return
         recognizingMath = false
+        val reader = textRecognizer ?: HandwritingRecognizer(attachments.context).also { textRecognizer = it }
         viewModelScope.launch {
-            val language = handwritingLanguage
-            val needsDownload = !recognizer.isDownloadedSafely(language.tag)
-            // ML Kit would otherwise wait silently forever for a connection.
-            if (needsDownload && !online()) {
-                recognition = RecognitionState.Failed(
-                    "${language.label} handwriting needs a one-time download (about 20 MB). " +
-                        "Connect to the internet and try again; after that it works offline.",
-                )
-                return@launch
-            }
-            recognition = RecognitionState.Working(downloading = needsDownload)
             recognition = try {
-                val readings = recognizer.recognize(strokes, language.tag)
-                if (readings.isEmpty()) RecognitionState.Failed("No text found") else RecognitionState.Done(readings)
+                if (!reader.isDownloaded()) {
+                    if (!online()) {
+                        recognition = RecognitionState.Failed(
+                            "Handwriting recognition needs a one-time download (about ${reader.downloadMegabytes} MB). " +
+                                "Connect to the internet and try again; after that it works offline.",
+                        )
+                        return@launch
+                    }
+                    recognition = RecognitionState.Working(downloading = true, progress = 0f)
+                    reader.download { recognition = RecognitionState.Working(downloading = true, progress = it) }
+                }
+                recognition = RecognitionState.Working(downloading = false)
+                val text = reader.recognize(strokes)
+                if (text.isEmpty()) RecognitionState.Failed("No text found") else RecognitionState.Done(listOf(text))
             } catch (e: Exception) {
                 RecognitionState.Failed(e.message ?: "Recognition failed")
             }
@@ -1017,7 +1013,7 @@ class NoteEditorViewModel(
                 if (!math.isDownloaded()) {
                     if (!online()) {
                         recognition = RecognitionState.Failed(
-                            "Maths recognition needs a one-time download (about ${MathRecognizer.DOWNLOAD_MB} MB). " +
+                            "Maths recognition needs a one-time download (about ${math.downloadMegabytes} MB). " +
                                 "Connect to the internet and try again; after that it works offline.",
                         )
                         return@launch
@@ -1074,11 +1070,6 @@ class NoteEditorViewModel(
         }
     }
 
-    fun changeHandwritingLanguage(language: HandwritingLanguage) {
-        handwritingLanguage = language
-        if (recognition != null) recognizeSelection()
-    }
-
     fun closeRecognition() {
         recognition = null
     }
@@ -1088,9 +1079,6 @@ class NoteEditorViewModel(
         val caps = connectivity?.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
         return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
-
-    private suspend fun HandwritingRecognizer.isDownloadedSafely(tag: String) =
-        runCatching { isDownloaded(tag) }.getOrDefault(true)
 
     fun showMessage(text: String) {
         message = text
@@ -1183,7 +1171,7 @@ class NoteEditorViewModel(
     }
 
     override fun onCleared() {
-        recognizer.close()
+        textRecognizer?.close()
         mathRecognizer?.close()
         // The screen is gone but the last edits may not be saved yet: finish that first,
         // then let sync know the note is free.

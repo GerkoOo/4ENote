@@ -84,7 +84,8 @@ class AttachmentStore(val context: Context) {
         }
     }
 
-    private fun decodeUpright(file: File, onWhite: Boolean = true): Bitmap? {
+    /** Reads a photo the right way up (following its EXIF rotation), at most MAX_IMAGE_SIDE pixels on its long side. */
+    fun decodeUpright(file: File, onWhite: Boolean = true): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
