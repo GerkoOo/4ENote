@@ -425,6 +425,9 @@ fun InkCanvas(
                         if (!decided || moved >= TWO_FINGER_SLOP_PX) {
                             moved += abs(dx) + abs(dy)
                             if (lastSpan > 0f && span > 0f) moved += abs(span - lastSpan)
+                            // A twist moves the fingers too (along their circle), though their middle stays put,
+                            // so it is never taken for fingers held still (which opens the dial).
+                            moved += abs(turn) * span / 2f * (Math.PI.toFloat() / 180f)
                             if (moved >= TWO_FINGER_SLOP_PX) decided = true
                             if (lastSpan > 0f && span > 0f) currentOnZoom(span / lastSpan, (a + b) / 2f)
                             if (rotating) {

@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -568,9 +569,12 @@ private fun PageList(
         pinchShift = p - (p - pinchShift) * k
         pinchScale = scale
     }
+    // Moving the fingers during a pinch scrolls the pages for real (scaled to the picture), so what
+    // comes into view is drawn rather than cut off at the edges of what was on screen.
     fun panWhilePinching(dx: Float, dy: Float): Boolean {
         if (pinchScale == 1f) return false
-        pinchShift -= Offset(dx, dy)
+        gridState.dispatchRawDelta(dy / pinchScale)
+        horizontal.dispatchRawDelta(dx / pinchScale)
         return true
     }
     fun endPinch() {
@@ -650,6 +654,8 @@ private fun PageList(
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
+            // The window the pages show in stays put while they are pinched bigger or smaller.
+            .clipToBounds()
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .onGloballyPositioned { viewport = it.boundsInRoot() }
             // Two fingers held still beside the pages open the dial too (on a page, the page does it).
@@ -724,7 +730,10 @@ private fun PageList(
             val cos = abs(kotlin.math.cos(turn)).toFloat()
             val sin = abs(kotlin.math.sin(turn)).toFloat()
             val height = width / aspect
-            return (width * cos + height * sin - width) / 2 to (width * sin + height * cos - height) / 2
+            // Never negative: an upright page turned on its side is less tall than before, and the
+            // page keeps its own room rather than overlapping its neighbours.
+            return ((width * cos + height * sin - width) / 2).coerceAtLeast(0.dp) to
+                ((width * sin + height * cos - height) / 2).coerceAtLeast(0.dp)
         }
         val gridMargin = layoutRotations.values.maxOfOrNull { turnedMargin(pageWidth, A4_ASPECT, it).first } ?: 0.dp
         val gridWidth = if (fullScreen) maxOf(maxWidth, pageWidth + gridMargin * 2) else maxOf(maxWidth, pageWidth + gridMargin * 2 + 32.dp)
@@ -742,7 +751,7 @@ private fun PageList(
                 (item.size.height - h) / 2
             } else {
                 val t = Math.toRadians((layoutRotations[page.id] ?: 0f).toDouble())
-                ((w * abs(kotlin.math.sin(t)) + h * abs(kotlin.math.cos(t))).toFloat() - h) / 2
+                (((w * abs(kotlin.math.sin(t)) + h * abs(kotlin.math.cos(t))).toFloat() - h) / 2).coerceAtLeast(0f)
             }
             return Rect(left, top, left + w, top + h)
         }
@@ -799,7 +808,10 @@ private fun PageList(
 
         Box(
             Modifier
-                .fillMaxSize()
+                // Pinched smaller, the pages lay out over a taller area, so the pages below are drawn
+                // as they come into view instead of ending at the old bottom edge.
+                .fillMaxWidth()
+                .height(maxHeight / minOf(1f, pinchScale))
                 .graphicsLayer {
                     scaleX = pinchScale
                     scaleY = pinchScale
@@ -931,10 +943,16 @@ private fun PageList(
                                             (top(newTurn) - top(oldTurns[page.id] ?: 0f)).toPx(),
                                         )
                                     }
-                                    keepCenterWhile {
-                                        layoutRotations[page.id] = newTurn
-                                        endPinch()
-                                        if (turned) pinchShift -= moved
+                                    // For now a twist leaves the layout alone (no room is made around the turned
+                                    // page), so nothing moves when the fingers lift; only a pinch is settled.
+                                    if (TURNED_PAGE_ROOM) {
+                                        keepCenterWhile {
+                                            layoutRotations[page.id] = newTurn
+                                            endPinch()
+                                            if (turned) pinchShift -= moved
+                                        }
+                                    } else if (pinched) {
+                                        keepCenterWhile { endPinch() }
                                     }
                                 } else {
                                     pendingFactor = 1f
@@ -1023,7 +1041,9 @@ private fun PageList(
         }
         turnedPage?.let { id ->
             AssistChip(
-                onClick = { keepCenterWhile { pageRotations.remove(id); layoutRotations.remove(id) } },
+                onClick = {
+                    if (TURNED_PAGE_ROOM) keepCenterWhile { pageRotations.remove(id); layoutRotations.remove(id) } else pageRotations.remove(id)
+                },
                 // The angle is read in here only, so a twist redraws just this text, not the pages.
                 label = { Text("${(pageRotations[id] ?: 0f).roundToInt().let { if (it > 180) it - 360 else it }}° · straighten") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null) },
@@ -1963,3 +1983,6 @@ private const val PINCH_START = 0.03f
 // Two fingers held this long, and this still, beside the pages open the dial (as on a page).
 private const val DIAL_HOLD_MS = 450L
 private const val DIAL_HOLD_SLOP_PX = 24f
+
+/** Whether a turned page gets room around it once the twist ends (off for now: it moved the view). */
+private const val TURNED_PAGE_ROOM = false
