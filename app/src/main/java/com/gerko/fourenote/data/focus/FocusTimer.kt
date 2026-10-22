@@ -71,8 +71,8 @@ class FocusTimer(context: Context) {
     }
 
     companion object {
-        const val DEFAULT_FOCUS_COLOR = 0xFFE5533D.toInt()
-        const val DEFAULT_BREAK_COLOR = 0xFF3FA66B.toInt()
+        const val DEFAULT_FOCUS_COLOR = 0xFFC08A7A.toInt() // terracotta
+        const val DEFAULT_BREAK_COLOR = 0xFF93AE9C.toInt() // sage
     }
 
     private fun update(change: (FocusCycle) -> FocusCycle) {

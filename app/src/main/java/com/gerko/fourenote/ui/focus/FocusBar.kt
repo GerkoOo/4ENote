@@ -54,9 +54,18 @@ import com.gerko.fourenote.data.focus.FocusPhase
 import com.gerko.fourenote.data.focus.FocusTimer
 import kotlinx.coroutines.delay
 
-/** Colours to choose from for the bar. */
+/** Colours to choose from for the bar: muted and calm, so it doesn't pull at the eye while working. */
 private val BarColors = listOf(
-    0xFFE5533D, 0xFFF39C12, 0xFFF1C40F, 0xFF3FA66B, 0xFF1ABC9C, 0xFF3498DB, 0xFF5C6BC0, 0xFF9B59B6, 0xFFE91E63, 0xFF9E9E9E,
+    0xFFC08A7A, // terracotta
+    0xFFCBB089, // sand
+    0xFFA9B38E, // olive
+    0xFF93AE9C, // sage
+    0xFF86A8A4, // teal grey
+    0xFF8C9DB8, // slate blue
+    0xFFA59BBE, // lavender
+    0xFFC29FAA, // dusty rose
+    0xFFA8A098, // warm grey
+    0xFF8F99A3, // cool grey
 ).map { it.toInt() }
 
 /** The colour of [phase] with the chosen [colors] (focus, break). */
