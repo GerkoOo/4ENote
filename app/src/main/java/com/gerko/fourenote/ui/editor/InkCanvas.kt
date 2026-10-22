@@ -774,6 +774,7 @@ fun InkCanvas(
                             points = points,
                             widths = widths,
                             nibAngle = if (calligraphy && !currentPointedNib) Calligraphy.nibRadians(currentNibDegrees) else null,
+                            squareEnds = calligraphy && currentPointedNib,
                         ),
                     )
                     current.clear()
@@ -917,6 +918,7 @@ fun InkCanvas(
                     points = livePoints,
                     widths = liveWidths,
                     nibAngle = if (tool == Tool.CALLIGRAPHY && !pointedNib) Calligraphy.nibRadians(nibDegrees) else null,
+                    squareEnds = tool == Tool.CALLIGRAPHY && pointedNib,
                 )
                 drawInkStroke(live, live.toPath(), dark)
             }
@@ -1026,7 +1028,7 @@ private fun InkStroke.nibPath(): Path {
     return path
 }
 
-/** The filled shape of an ink-pen stroke, with round ends. */
+/** The filled shape of a variable-width stroke, with round ends unless it has [InkStroke.squareEnds]. */
 private fun InkStroke.outlinePath(): Path {
     val path = Path()
     val n = points.size / 2
@@ -1042,8 +1044,10 @@ private fun InkStroke.outlinePath(): Path {
         for (i in 1 until shape.size / 2) path.lineTo(shape[2 * i], shape[2 * i + 1])
         path.close()
     }
-    cap(0)
-    cap(n - 1)
+    if (!squareEnds) {
+        cap(0)
+        cap(n - 1)
+    }
     return path
 }
 
@@ -1151,7 +1155,9 @@ fun InkStroke.erasedAround(x: Float, y: Float, radius: Float): List<InkStroke>? 
     fun flush() {
         // A piece needs at least two points to draw as a line.
         if (run.size >= 4) {
-            pieces.add(InkStroke(color, width, highlighter, run.toFloatArray(), factors?.let { runWidths.toFloatArray() }, layerId, nibAngle = nibAngle))
+            pieces.add(
+                InkStroke(color, width, highlighter, run.toFloatArray(), factors?.let { runWidths.toFloatArray() }, layerId, nibAngle = nibAngle, squareEnds = squareEnds),
+            )
         }
         run = ArrayList()
         runWidths = ArrayList()

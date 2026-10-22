@@ -587,7 +587,9 @@ class NoteEditorViewModel(
             // Nothing underneath: it was a zigzag on purpose, so keep it as ink.
         }
         recordUndo()
-        val added = InkStroke(stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, activeLayerId, stroke.id, stroke.nibAngle)
+        val added = InkStroke(
+            stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, activeLayerId, stroke.id, stroke.nibAngle, stroke.squareEnds,
+        )
         strokes.add(added)
         recentLoop = if (!added.highlighter && Shapes.isLoop(added.points)) pageId to added else null
         // Drawing on a hidden layer would look like nothing happened.
@@ -651,7 +653,7 @@ class NoteEditorViewModel(
             for (page in pages) {
                 page.strokes.addAll(
                     page.strokes.filter { it.layerId == original.id }.map {
-                        InkStroke(it.color, it.width, it.highlighter, it.points, it.widths, copy.id, nibAngle = it.nibAngle)
+                        InkStroke(it.color, it.width, it.highlighter, it.points, it.widths, copy.id, nibAngle = it.nibAngle, squareEnds = it.squareEnds)
                     },
                 )
             }
@@ -672,7 +674,7 @@ class NoteEditorViewModel(
                 val stroke = page.strokes[i]
                 if (stroke.layerId in merged) {
                     page.strokes[i] = InkStroke(
-                        stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, target.id, stroke.id, stroke.nibAngle,
+                        stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, target.id, stroke.id, stroke.nibAngle, stroke.squareEnds,
                     )
                 }
             }

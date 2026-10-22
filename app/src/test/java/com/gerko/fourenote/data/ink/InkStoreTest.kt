@@ -41,6 +41,7 @@ class InkStoreTest {
                 points = points,
                 widths = if (s % 3 == 0) FloatArray(120) { 0.5f + random.nextFloat() } else null,
                 nibAngle = if (s % 7 == 0) 0.5f else null,
+                squareEnds = s % 5 == 0,
             )
         }
         return InkPage(id = id, strokes = strokes)
@@ -55,6 +56,7 @@ class InkStoreTest {
             assertEquals(e.width, a.width, 0f)
             assertEquals(e.highlighter, a.highlighter)
             assertEquals(e.nibAngle, a.nibAngle)
+            assertEquals(e.squareEnds, a.squareEnds)
             // Kept to a tenth of a page unit, like the JSON format.
             assertArrayEquals(e.points, a.points, 0.051f)
             if (e.widths == null) assertNull(a.widths) else assertArrayEquals(e.widths, a.widths, 0.0051f)

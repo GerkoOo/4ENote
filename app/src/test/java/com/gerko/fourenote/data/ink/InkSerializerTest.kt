@@ -8,6 +8,15 @@ class InkSerializerTest {
         InkStroke(color = 7, width = 3f, highlighter = false, points = floatArrayOf(x, 10f, x + 5f, 20f), id = id)
 
     @Test
+    fun pointedPenStrokesKeepTheirSquareEnds() {
+        val stroke = InkStroke(0, 8f, false, floatArrayOf(0f, 0f, 0f, 10f), floatArrayOf(1f, 0.2f), squareEnds = true)
+        val back = InkSerializer.decode(InkSerializer.encode(InkDocument(listOf(InkPage(strokes = listOf(stroke)))))).pages[0].strokes[0]
+        assertEquals(true, back.squareEnds)
+        assertEquals(true, back.transformed(1f, 1f, 2f, 2f, 0f, 0f).squareEnds)
+        assertEquals(true, back.withColor(5).squareEnds)
+    }
+
+    @Test
     fun textBoxesRoundTrip() {
         val text = PageText(
             x = 40f, y = 80f, width = 300f, text = "Area \$\\pi r^2\$\nline two",

@@ -24,6 +24,7 @@ object InkPageCodec {
     private const val HIGHLIGHTER = 1
     private const val HAS_WIDTHS = 2
     private const val HAS_NIB = 4
+    private const val SQUARE_ENDS = 8
 
     fun encode(strokes: List<InkStroke>): ByteArray {
         val bytes = ByteArrayOutputStream()
@@ -49,7 +50,8 @@ object InkPageCodec {
                     writeByte(
                         (if (stroke.highlighter) HIGHLIGHTER else 0) or
                             (if (widths != null) HAS_WIDTHS else 0) or
-                            (if (nib != null) HAS_NIB else 0),
+                            (if (nib != null) HAS_NIB else 0) or
+                            (if (stroke.squareEnds) SQUARE_ENDS else 0),
                     )
                     if (nib != null) writeFloat(nib)
                     val n = stroke.points.size / 2
@@ -103,7 +105,7 @@ object InkPageCodec {
                     points[2 * i + 1] = y / 10f
                 }
                 val widths = if (flags and HAS_WIDTHS != 0) FloatArray(readVarInt()) { readVarInt() / 100f } else null
-                InkStroke(color, width, flags and HIGHLIGHTER != 0, points, widths, layerId, id, nib)
+                InkStroke(color, width, flags and HIGHLIGHTER != 0, points, widths, layerId, id, nib, flags and SQUARE_ENDS != 0)
             }
         }
 

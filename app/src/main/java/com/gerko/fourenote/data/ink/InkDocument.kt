@@ -39,6 +39,8 @@ class InkStroke(
      * (see [Calligraphy.nibShapes]); null for round-tipped pens.
      */
     val nibAngle: Float? = null,
+    /** Variable-width strokes only: cut straight off at both ends (the pointed pen) instead of rounded. */
+    val squareEnds: Boolean = false,
 )
 
 fun newStrokeId(): String = UUID.randomUUID().toString()
@@ -66,9 +68,11 @@ fun InkStroke.transformed(
     widths = widths,
     layerId = layerId,
     nibAngle = nibAngle,
+    squareEnds = squareEnds,
 )
 
-fun InkStroke.withColor(newColor: Int) = InkStroke(newColor, width, highlighter, points, widths, layerId, nibAngle = nibAngle)
+fun InkStroke.withColor(newColor: Int) =
+    InkStroke(newColor, width, highlighter, points, widths, layerId, nibAngle = nibAngle, squareEnds = squareEnds)
 
 /** True if most of this stroke's points fall inside the lasso [polygon] (packed x, y pairs). */
 fun InkStroke.isInsideLasso(polygon: FloatArray): Boolean {
@@ -432,6 +436,7 @@ object InkSerializer {
                     .put("p", points)
                     .put("l", stroke.layerId)
                     .apply { stroke.nibAngle?.let { put("nib", it.toDouble()) } }
+                    .apply { if (stroke.squareEnds) put("sq", true) }
                     .apply {
                         stroke.widths?.let { w -> put("pw", JSONArray().apply { w.forEach { put((it * 100).roundToInt() / 100.0) } }) }
                     },
@@ -451,6 +456,7 @@ object InkSerializer {
             widths = s.optJSONArray("pw")?.let { w -> FloatArray(w.length()) { j -> w.getDouble(j).toFloat() } },
             layerId = s.optString("l").ifEmpty { InkLayer.BASE_ID },
             nibAngle = if (s.has("nib")) s.getDouble("nib").toFloat() else null,
+            squareEnds = s.optBoolean("sq"),
             // Version 1 notes predate stroke ids.
             id = s.optString("id").ifEmpty { newStrokeId() },
         )
