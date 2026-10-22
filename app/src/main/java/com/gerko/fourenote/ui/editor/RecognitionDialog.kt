@@ -1,5 +1,14 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.sp
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,6 +85,7 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
                             onValueChange = { text = it },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
                         )
+                        if (viewModel.recognizingMath) FormulaPreview(text)
                         val alternatives = state.readings.drop(1).filter { it != text }.take(5)
                         if (alternatives.isNotEmpty()) {
                             Text("Or did you mean:", style = MaterialTheme.typography.labelMedium)
@@ -91,7 +101,11 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
         },
         confirmButton = {
             if (state is RecognitionState.Done) {
-                Row {
+                FlowRow(horizontalArrangement = Arrangement.End) {
+                    if (viewModel.recognizingMath) {
+                        TextButton(onClick = { viewModel.placeFormula(text, replace = true) }) { Text("Replace handwriting") }
+                        TextButton(onClick = { viewModel.placeFormula(text, replace = false) }) { Text("Insert below") }
+                    }
                     TextButton(onClick = {
                         val share = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
                         context.startActivity(Intent.createChooser(share, null))
@@ -106,6 +120,27 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
         },
         dismissButton = { TextButton(onClick = viewModel::closeRecognition) { Text("Close") } },
     )
+}
+
+/** The LaTeX typeset as it will look on the page, updated as it's edited. */
+@Composable
+private fun FormulaPreview(latex: String) {
+    val color = MaterialTheme.colorScheme.onSurface.toArgb()
+    val textSize = with(LocalDensity.current) { 22.sp.toPx() }
+    val bitmap = remember(latex, color, textSize) { renderLatex(latex, textSize, color)?.asImageBitmap() }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(Modifier.horizontalScroll(rememberScrollState()).padding(12.dp)) {
+            if (bitmap != null) {
+                Image(bitmap, contentDescription = "Formula preview")
+            } else {
+                Text("Not valid LaTeX yet", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
 }
 
 @Composable

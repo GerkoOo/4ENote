@@ -16,6 +16,7 @@ import com.gerko.fourenote.data.recognition.HandwritingLanguage
 import com.gerko.fourenote.data.recognition.HandwritingLanguages
 import com.gerko.fourenote.data.recognition.HandwritingRecognizer
 import com.gerko.fourenote.data.recognition.MathRecognizer
+import com.gerko.fourenote.data.recognition.HandwritingLines
 import com.gerko.fourenote.data.ink.BackgroundPlacement
 import com.gerko.fourenote.data.ink.Calligraphy
 import com.gerko.fourenote.data.ink.InkDocument
@@ -33,6 +34,7 @@ import com.gerko.fourenote.data.ink.isInsideLasso
 import com.gerko.fourenote.data.ink.transformed
 import com.gerko.fourenote.data.ink.withColor
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,6 +56,9 @@ val HighlighterColors = listOf(
 )
 val PenWidths = listOf(1.5f, 3f, 6f)
 val HighlighterWidths = listOf(12f, 20f, 30f)
+/** Font size formulas are typeset at before they're scaled onto the page; big enough to stay sharp. */
+private const val FORMULA_RENDER_PX = 96f
+
 val InkPenWidths = listOf(2.5f, 4.5f, 8f)
 val CalligraphyWidths = listOf(6f, 10f, 16f)
 
@@ -231,6 +236,9 @@ class NoteEditorViewModel(
     /** True when [recognition] reads the selection as maths (LaTeX) rather than text. */
     var recognizingMath by mutableStateOf(false)
         private set
+
+    // The handwriting last read as maths, so its formula can be placed on the page.
+    private var mathSource: Pair<String, List<InkStroke>>? = null
 
     /** Handwriting-to-text state for the selection; null when the dialog is closed. */
     var recognition by mutableStateOf<RecognitionState?>(null)
@@ -791,6 +799,7 @@ class NoteEditorViewModel(
         val strokes = page.strokes.filter { it in selection }
         if (strokes.isEmpty()) return
         recognizingMath = true
+        mathSource = page.id to strokes
         val math = mathRecognizer ?: MathRecognizer(attachments.context).also { mathRecognizer = it }
         viewModelScope.launch {
             recognition = try {
@@ -810,6 +819,46 @@ class NoteEditorViewModel(
                 if (latex.isEmpty()) RecognitionState.Failed("No formula found") else RecognitionState.Done(listOf(latex))
             } catch (e: Exception) {
                 RecognitionState.Failed(e.message ?: "Recognition failed")
+            }
+        }
+    }
+
+    /**
+     * Puts [latex], typeset in the handwriting's color, on the page: in place of the handwriting
+     * read as maths if [replace], otherwise just below it. One undo step.
+     */
+    fun placeFormula(latex: String, replace: Boolean) {
+        val (pageId, strokes) = mathSource ?: return
+        val page = page(pageId) ?: return
+        val bounds = HandwritingLines.bounds(strokes)
+        val color = strokes.firstOrNull()?.color ?: penColor.toArgb()
+        viewModelScope.launch {
+            try {
+                val bitmap = withContext(Dispatchers.Default) { renderLatex(latex, FORMULA_RENDER_PX, color) }
+                    ?: throw IllegalArgumentException("This LaTeX can't be shown as a formula")
+                val png = java.io.ByteArrayOutputStream().also { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                val stored = attachments.storeImage(noteId, png.toByteArray().inputStream(), keepTransparency = true)
+                // As tall as the handwriting, but never wider than the page.
+                val aspect = stored.widthPx.toFloat() / stored.heightPx.coerceAtLeast(1)
+                var height = bounds.height.coerceAtLeast(24f)
+                var width = height * aspect
+                val maxWidth = page.width - 48f
+                if (width > maxWidth) {
+                    width = maxWidth
+                    height = width / aspect
+                }
+                recordUndo()
+                if (replace) {
+                    page.strokes.removeAll { it in strokes }
+                    clearSelection()
+                }
+                val centerY = if (replace) bounds.top + bounds.height / 2 else bounds.bottom + 12f + height / 2
+                val centerX = (bounds.left + width / 2).coerceIn(24f + width / 2, page.width - 24f - width / 2)
+                page.images.add(PageImage(file = stored.file, x = centerX, y = centerY, width = width, height = height))
+                persist()
+                recognition = null
+            } catch (e: Exception) {
+                message = e.message ?: "Couldn't place the formula"
             }
         }
     }

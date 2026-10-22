@@ -79,6 +79,8 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // Runs the open-source Pix2Text formula model that turns handwritten maths into LaTeX (MIT).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
+    // Draws LaTeX as a typeset formula, offline (JLaTeXMath, GPL-2.0-or-later).
+    implementation("ru.noties:jlatexmath-android:0.2.0")
 
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")
