@@ -959,7 +959,8 @@ private fun PageList(
                             texts = page.texts,
                             pxPerUnit = itemWidthPx / page.width,
                             editingId = viewModel.editingText?.takeIf { it.first == page.id }?.second,
-                            textTool = viewModel.tool == Tool.TEXT,
+                            // The Text tool and Select both pick up typed text with a tap.
+                            textTool = viewModel.tool == Tool.TEXT || viewModel.tool == Tool.LASSO,
                             onEdit = { viewModel.editText(page.id, it) },
                             onChange = { viewModel.updateText(page.id, it) },
                             onDelete = viewModel::deleteEditingText,

@@ -457,6 +457,8 @@ class NoteEditorViewModel(
         val box = page(pageId)?.texts?.firstOrNull { it.id == textId } ?: return
         recordUndo()
         textStyle = box.style
+        // Picked up with Select too: switch to Text so its style options show.
+        tool = Tool.TEXT
         editingText = pageId to textId
     }
 
