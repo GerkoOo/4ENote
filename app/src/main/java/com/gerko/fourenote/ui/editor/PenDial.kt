@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.Title
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -113,6 +114,7 @@ private fun rings(viewModel: NoteEditorViewModel, scale: Float, onAddColor: () -
         Tool.HIGHLIGHTER to Icons.Filled.BorderColor,
         Tool.ERASER to Icons.Outlined.CleaningServices,
         Tool.LASSO to Icons.Filled.HighlightAlt,
+        Tool.TEXT to Icons.Filled.Title,
     )
     return listOf(
         Ring(

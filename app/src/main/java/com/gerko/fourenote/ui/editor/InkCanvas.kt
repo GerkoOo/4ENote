@@ -156,6 +156,8 @@ fun InkCanvas(
     /** A loop just drawn on this page; long-pressing inside it with a finger calls [onLoopHold]. */
     loop: InkStroke? = null,
     onLoopHold: () -> Unit = {},
+    /** A tap with the text tool, in page units. */
+    onTextTap: (x: Float, y: Float) -> Unit = { _, _ -> },
     /** Color and width of a tool, for strokes drawn with a tool other than the selected one (pen button). */
     styleFor: (Tool) -> Pair<Color, Float> = { color to width },
 ) {
@@ -204,6 +206,7 @@ fun InkCanvas(
     val currentOnPageDragEnd by rememberUpdatedState(onPageDragEnd)
     val currentLoop by rememberUpdatedState(loop)
     val currentOnLoopHold by rememberUpdatedState(onLoopHold)
+    val currentOnTextTap by rememberUpdatedState(onTextTap)
     val currentSmoothing by rememberUpdatedState(smoothing)
     val currentNibDegrees by rememberUpdatedState(nibDegrees)
     val currentScale by rememberUpdatedState(scale)
@@ -487,6 +490,28 @@ fun InkCanvas(
                     }
                     if (lifted) return@awaitEachGesture
                     // Moved: carry on as an ordinary touch.
+                }
+
+                // The text tool: a tap places or finishes a text box. Drags are left to the page list,
+                // so a finger or pen still scrolls; two fingers scroll and zoom as usual.
+                if (gestureTool == Tool.TEXT && down.type != PointerType.Eraser) {
+                    var moved = 0f
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.count { it.pressed } >= 2) {
+                            scrollWithFingers()
+                            return@awaitEachGesture
+                        }
+                        val pointer = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                        moved = maxOf(moved, (pointer.position - down.position).getDistance())
+                        if (!pointer.pressed) {
+                            if (moved < TWO_FINGER_SLOP_PX) {
+                                val p = toDp(down.position)
+                                currentOnTextTap(p.x, p.y)
+                            }
+                            return@awaitEachGesture
+                        }
+                    }
                 }
 
                 if ((currentStylusOnly || currentOverview) && down.type == PointerType.Touch && !fingerOnSelectedPicture) {

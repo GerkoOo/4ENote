@@ -13,6 +13,8 @@ import com.gerko.fourenote.data.ink.InkDocument
 import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.PageBackground
+import com.gerko.fourenote.data.ink.PageText
+import com.gerko.fourenote.ui.editor.renderTextBox
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.ink.PaperStyle
 import com.gerko.fourenote.data.ink.outline
@@ -42,6 +44,7 @@ object PdfExporter {
 
     /** Page units are 96 per inch (an A4 page is 794 wide); PDF points are 72 per inch. */
     private const val POINTS_PER_UNIT = 0.75f
+    private const val TEXT_PX_PER_UNIT = 4f
 
     /** Pictures are scaled down to at most this many pixels on their long side. */
     private const val MAX_IMAGE_SIDE = 2000
@@ -108,6 +111,7 @@ object PdfExporter {
             if (copied == null) drawBackground(out, cs, page, doc.paper, noteId, attachments)
             for (image in page.images) drawPicture(out, cs, attachments.file(noteId, image.file), image)
             for (stroke in doc.visibleStrokes(page)) drawStroke(cs, stroke)
+            for (text in page.texts) if (text.text.isNotBlank()) drawText(out, cs, text)
         }
     }
 
@@ -185,6 +189,14 @@ object PdfExporter {
         }
 
     /** Draws [image] upright into a rectangle given in page units (y down). */
+    // Text boxes, typeset maths included, are drawn as sharp transparent pictures (4 pixels per page unit).
+    private fun drawText(out: PDDocument, cs: PDPageContentStream, text: PageText) {
+        val bitmap = renderTextBox(text, TEXT_PX_PER_UNIT)
+        val image = LosslessFactory.createFromImage(out, bitmap)
+        drawImageInRect(cs, image, text.x, text.y, bitmap.width / TEXT_PX_PER_UNIT, bitmap.height / TEXT_PX_PER_UNIT)
+        bitmap.recycle()
+    }
+
     private fun drawImageInRect(cs: PDPageContentStream, image: PDImageXObject, x: Float, y: Float, w: Float, h: Float) {
         // PDF draws images into the unit square with y up; flip it so the picture isn't upside down.
         cs.drawImage(image, Matrix(w, 0f, 0f, -h, x, y + h))

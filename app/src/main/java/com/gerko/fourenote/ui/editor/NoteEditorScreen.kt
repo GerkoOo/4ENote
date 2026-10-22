@@ -1,5 +1,8 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.filled.Title
 import kotlin.math.abs
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.gestures.ScrollableDefaults
@@ -621,6 +624,13 @@ private fun PageList(
                                 InkDocument(layers = viewModel.layers.toList()).visibleStrokes(page.toPage())
                             }
                         }
+                        // The page: ink, with its text boxes over it.
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(page.width / page.height)
+                                .then(if (fullScreen) Modifier else Modifier.shadow(2.dp)),
+                        ) {
                         InkCanvas(
                             strokes = visibleStrokes,
                             scale = itemWidthPx / page.width,
@@ -678,11 +688,19 @@ private fun PageList(
                             selectedImageId = viewModel.selectedImage?.takeIf { it.first == page.id }?.second,
                             onImageSelect = { viewModel.selectImage(page.id, it) },
                             onImageChange = { viewModel.updateImage(page.id, it) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(page.width / page.height)
-                                .then(if (fullScreen) Modifier else Modifier.shadow(2.dp)),
+                            onTextTap = { x, y -> viewModel.tapWithText(page.id, x, y) },
+                            modifier = Modifier.matchParentSize(),
                         )
+                        TextBoxLayer(
+                            texts = page.texts,
+                            pxPerUnit = itemWidthPx / page.width,
+                            editingId = viewModel.editingText?.takeIf { it.first == page.id }?.second,
+                            textTool = viewModel.tool == Tool.TEXT,
+                            onEdit = { viewModel.editText(page.id, it) },
+                            onChange = { viewModel.updateText(page.id, it) },
+                            onDelete = viewModel::deleteEditingText,
+                        )
+                        }
                         if (!fullScreen) PageFooter(
                             number = index + 1,
                             count = viewModel.pages.size,
@@ -1305,10 +1323,15 @@ private fun ToolBar(
             ToolChip("Select", Icons.Filled.HighlightAlt, viewModel.tool == Tool.LASSO) {
                 viewModel.selectTool(Tool.LASSO)
             }
+            ToolChip("Text", Icons.Filled.Title, viewModel.tool == Tool.TEXT) {
+                viewModel.selectTool(Tool.TEXT)
+            }
             VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
 
             if (viewModel.tool == Tool.LASSO) {
                 SelectionOptions(viewModel)
+            } else if (viewModel.tool == Tool.TEXT) {
+                TextStyleBar(viewModel, darkPaper)
             } else if (viewModel.tool != Tool.ERASER) {
                 val highlighter = viewModel.tool == Tool.HIGHLIGHTER
                 val colors = if (highlighter) HighlighterColors else PenColors
@@ -1421,6 +1444,54 @@ private fun Hint(text: String) {
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/** The text tool's options: looks, size, colour, and whether `$…$` becomes maths while typing. */
+@Composable
+private fun TextStyleBar(viewModel: NoteEditorViewModel, darkPaper: Boolean) {
+    val style = viewModel.textStyle
+    fun change(new: com.gerko.fourenote.data.ink.TextStyleSpec) = viewModel.changeTextStyle(new)
+    TextPreset.entries.forEach { preset ->
+        val chosen = style.size == preset.size && style.bold == preset.bold && style.font == preset.font
+        FilterChip(
+            selected = chosen,
+            onClick = { change(style.copy(size = preset.size, bold = preset.bold, font = preset.font)) },
+            label = { Text(preset.label) },
+        )
+    }
+    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
+    com.gerko.fourenote.data.ink.TextFont.entries.forEach { font ->
+        FilterChip(
+            selected = style.font == font,
+            onClick = { change(style.copy(font = font)) },
+            label = { Text(font.name.lowercase().replaceFirstChar { it.uppercase() }) },
+        )
+    }
+    IconButton(onClick = { change(style.copy(size = (style.size - 2f).coerceAtLeast(8f))) }) {
+        Icon(Icons.Filled.Remove, contentDescription = "Smaller text")
+    }
+    Text("${style.size.roundToInt()}", style = MaterialTheme.typography.labelLarge)
+    IconButton(onClick = { change(style.copy(size = (style.size + 2f).coerceAtMost(96f))) }) {
+        Icon(Icons.Filled.Add, contentDescription = "Bigger text")
+    }
+    FilterChip(selected = style.bold, onClick = { change(style.copy(bold = !style.bold)) }, label = { Text("B", fontWeight = FontWeight.Bold) })
+    FilterChip(selected = style.italic, onClick = { change(style.copy(italic = !style.italic)) }, label = { Text("I", fontStyle = FontStyle.Italic) })
+    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
+    viewModel.toolColors.forEach { c ->
+        ColorSwatch(c, selected = Color(style.color) == c, darkPaper = darkPaper) {
+            viewModel.penColor = c
+            change(style.copy(color = c.toArgb()))
+        }
+    }
+    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Auto LaTeX", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = viewModel.autoLatex, onCheckedChange = viewModel::changeAutoLatex)
+    }
+    if (viewModel.editingText != null) {
+        TextButton(onClick = viewModel::finishTextEditing) { Text("Done") }
+    }
 }
 
 @Composable

@@ -49,6 +49,16 @@ object NoteMerger {
                                     localIsNewer,
                                 )
                             },
+                        // Text boxes are edited in place too: per box, the newer side's version.
+                        texts = mergeById(basePage?.texts.orEmpty(), localPage.texts, remotePage.texts) { it.id }
+                            .map { text ->
+                                pick(
+                                    basePage?.texts?.firstOrNull { it.id == text.id },
+                                    localPage.texts.firstOrNull { it.id == text.id } ?: text,
+                                    remotePage.texts.firstOrNull { it.id == text.id } ?: text,
+                                    localIsNewer,
+                                )
+                            },
                         placement = pick(basePage?.placement, localPage.placement, remotePage.placement, localIsNewer),
                     )
                 }

@@ -8,6 +8,17 @@ class InkSerializerTest {
         InkStroke(color = 7, width = 3f, highlighter = false, points = floatArrayOf(x, 10f, x + 5f, 20f), id = id)
 
     @Test
+    fun textBoxesRoundTrip() {
+        val text = PageText(
+            x = 40f, y = 80f, width = 300f, text = "Area \$\\pi r^2\$\nline two",
+            style = TextStyleSpec(size = 24f, color = 0xFFFF0000.toInt(), bold = true, italic = true, font = TextFont.MONO),
+            autoMath = false,
+        )
+        val doc = InkDocument(listOf(InkPage(id = "p", texts = listOf(text))))
+        assertEquals(listOf(text), InkSerializer.decode(InkSerializer.encode(doc)).pages[0].texts)
+    }
+
+    @Test
     fun pagesWithBackgroundsRoundTrip() {
         val doc = InkDocument(
             pages = listOf(

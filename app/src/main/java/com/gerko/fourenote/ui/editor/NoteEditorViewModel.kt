@@ -24,6 +24,8 @@ import com.gerko.fourenote.data.ink.InkLayer
 import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.PageBackground
 import com.gerko.fourenote.data.ink.PageImage
+import com.gerko.fourenote.data.ink.PageText
+import com.gerko.fourenote.data.ink.TextStyleSpec
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.PaperStyle
 import com.gerko.fourenote.data.ink.Scribble
@@ -85,18 +87,20 @@ class PageState(
     placement: BackgroundPlacement,
     images: List<PageImage>,
     invertBackground: Boolean,
+    texts: List<PageText>,
 ) {
     val strokes = mutableStateListOf<InkStroke>().apply { addAll(strokes) }
     var placement by mutableStateOf(placement)
     val images = mutableStateListOf<PageImage>().apply { addAll(images) }
     var invertBackground by mutableStateOf(invertBackground)
+    val texts = mutableStateListOf<PageText>().apply { addAll(texts) }
 
-    fun toPage() = InkPage(id, width, height, background, strokes.toList(), placement, images.toList(), invertBackground)
+    fun toPage() = InkPage(id, width, height, background, strokes.toList(), placement, images.toList(), invertBackground, texts.toList())
 
     companion object {
         fun of(page: InkPage) = PageState(
             page.id, page.width, page.height, page.background, page.strokes, page.placement, page.images,
-            page.invertBackground,
+            page.invertBackground, page.texts,
         )
     }
 }
@@ -202,6 +206,9 @@ class NoteEditorViewModel(
     /** The last pen button or eraser signal the editor received, shown in the pen settings to help set them up. */
     var lastPenSignal by mutableStateOf<String?>(null)
     var twoFingerDoubleTapUndo by mutableStateOf(true)
+
+    /** New text boxes typeset `$…$` as maths while typing; the text bar's Auto LaTeX switch. */
+    var autoLatex by mutableStateOf(true)
     var threeFingerDoubleTapRedo by mutableStateOf(true)
 
     private val undoStack = ArrayDeque<Snapshot>()
@@ -286,6 +293,7 @@ class NoteEditorViewModel(
         secondaryButtonAction = saved.secondaryButtonAction
         twoFingerDoubleTapUndo = saved.twoFingerDoubleTapUndo
         threeFingerDoubleTapRedo = saved.threeFingerDoubleTapRedo
+        autoLatex = saved.autoLatex
         highlighterWidth = saved.highlighterWidth
         smoothing = saved.smoothing
         stylusOnly = saved.stylusOnly
@@ -298,6 +306,7 @@ class NoteEditorViewModel(
                     tool, penColor, highlighterColor, penWidth, inkPenWidth, calligraphyWidth, highlighterWidth,
                     smoothing, stylusOnly, scribbleToErase, eraseWholeStrokes, handwritingLanguage.tag, nibDegrees,
                     customColors.toList(), primaryButtonAction, secondaryButtonAction, twoFingerDoubleTapUndo, threeFingerDoubleTapRedo,
+                    autoLatex,
                 )
             }.drop(1).collect(toolPreferences::save)
         }
@@ -409,7 +418,85 @@ class NoteEditorViewModel(
         }
     }
 
+    /** The text box being typed in: page id and text id. */
+    var editingText by mutableStateOf<Pair<String, String>?>(null)
+        private set
+
+    /** The look of the text box being edited, and of the next new one. */
+    var textStyle by mutableStateOf(TextStyleSpec())
+        private set
+
+    /**
+     * A tap on a page with the text tool: finishes the box being typed in, or else starts a new
+     * one there in the pen's colour.
+     */
+    fun tapWithText(pageId: String, x: Float, y: Float) {
+        if (editingText != null) {
+            finishTextEditing()
+            return
+        }
+        val page = page(pageId) ?: return
+        val style = textStyle.copy(color = penColor.toArgb())
+        val width = minOf(DEFAULT_TEXT_WIDTH, page.width - x - 24f).coerceAtLeast(120f)
+        val box = PageText(x = x.coerceIn(0f, page.width - width), y = (y - style.size * 0.7f).coerceAtLeast(0f), width = width, style = style, autoMath = autoLatex)
+        recordUndo()
+        page.texts.add(box)
+        textStyle = style
+        editingText = pageId to box.id
+        persist()
+    }
+
+    /** Starts typing in an existing text box. One undo step covers the whole edit. */
+    fun editText(pageId: String, textId: String) {
+        if (editingText == pageId to textId) return
+        finishTextEditing()
+        val box = page(pageId)?.texts?.firstOrNull { it.id == textId } ?: return
+        recordUndo()
+        textStyle = box.style
+        editingText = pageId to textId
+    }
+
+    fun updateText(pageId: String, box: PageText) {
+        val texts = page(pageId)?.texts ?: return
+        val index = texts.indexOfFirst { it.id == box.id }
+        if (index < 0) return
+        texts[index] = box
+        persist()
+    }
+
+    /** Stops typing; a box left empty is removed. */
+    fun finishTextEditing() {
+        val (pageId, textId) = editingText ?: return
+        editingText = null
+        val texts = page(pageId)?.texts ?: return
+        if (texts.removeAll { it.id == textId && it.text.isBlank() }) persist()
+    }
+
+    fun deleteEditingText() {
+        val (pageId, textId) = editingText ?: return
+        editingText = null
+        page(pageId)?.texts?.removeAll { it.id == textId }
+        persist()
+    }
+
+    /** Changes the style of the box being typed in (if any) and of new boxes. */
+    fun changeTextStyle(style: TextStyleSpec) {
+        textStyle = style
+        editedText()?.let { (pageId, box) -> updateText(pageId, box.copy(style = style)) }
+    }
+
+    fun changeAutoLatex(on: Boolean) {
+        autoLatex = on
+        editedText()?.let { (pageId, box) -> updateText(pageId, box.copy(autoMath = on)) }
+    }
+
+    private fun editedText(): Pair<String, PageText>? {
+        val (pageId, textId) = editingText ?: return null
+        return page(pageId)?.texts?.firstOrNull { it.id == textId }?.let { pageId to it }
+    }
+
     fun selectTool(newTool: Tool) {
+        if (newTool != Tool.TEXT) finishTextEditing()
         if (newTool != tool) previousTool = tool
         tool = newTool
         toolBeforeLoop = null
@@ -1009,6 +1096,7 @@ class NoteEditorViewModel(
 
     fun undo() {
         recentLoop = null
+        editingText = null
         val previous = undoStack.removeLastOrNull() ?: return
         redoStack.addLast(snapshot())
         restore(previous)
@@ -1016,6 +1104,7 @@ class NoteEditorViewModel(
 
     fun redo() {
         recentLoop = null
+        editingText = null
         val next = redoStack.removeLastOrNull() ?: return
         undoStack.addLast(snapshot())
         restore(next)
@@ -1112,6 +1201,7 @@ class NoteEditorViewModel(
     }
 
     private companion object {
+        const val DEFAULT_TEXT_WIDTH = 360f
         const val MAX_UNDO = 100
         const val SAVE_DELAY_MS = 400L
         const val TAG = "NoteEditor"

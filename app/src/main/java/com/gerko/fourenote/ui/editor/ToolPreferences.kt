@@ -29,6 +29,8 @@ data class ToolSettings(
     val secondaryButtonAction: PenButtonAction,
     val twoFingerDoubleTapUndo: Boolean,
     val threeFingerDoubleTapRedo: Boolean,
+    /** New text boxes typeset `$…$` as maths while typing. */
+    val autoLatex: Boolean = true,
 )
 
 /**
@@ -73,13 +75,14 @@ class ToolPreferences(context: Context) {
             secondaryButtonAction = action("secondaryButtonAction") ?: PenButtonAction.ERASE,
             twoFingerDoubleTapUndo = prefs.getBoolean("twoFingerDoubleTapUndo", true),
             threeFingerDoubleTapRedo = prefs.getBoolean("threeFingerDoubleTapRedo", true),
+            autoLatex = prefs.getBoolean("autoLatex", true),
         )
     }
 
     fun save(settings: ToolSettings) {
         prefs.edit()
-            // The eraser and lasso aren't remembered: a note should always open ready to write.
-            .apply { if (settings.tool !in setOf(Tool.ERASER, Tool.LASSO)) putString("tool", settings.tool.name) }
+            // The eraser, lasso and text tool aren't remembered: a note should always open ready to write.
+            .apply { if (settings.tool !in setOf(Tool.ERASER, Tool.LASSO, Tool.TEXT)) putString("tool", settings.tool.name) }
             .putInt("penColor", settings.penColor.toArgb())
             .putInt("highlighterColor", settings.highlighterColor.toArgb())
             .putFloat("penWidth", settings.penWidth)
@@ -97,6 +100,7 @@ class ToolPreferences(context: Context) {
             .putString("secondaryButtonAction", settings.secondaryButtonAction.name)
             .putBoolean("twoFingerDoubleTapUndo", settings.twoFingerDoubleTapUndo)
             .putBoolean("threeFingerDoubleTapRedo", settings.threeFingerDoubleTapRedo)
+            .putBoolean("autoLatex", settings.autoLatex)
             .apply()
     }
 

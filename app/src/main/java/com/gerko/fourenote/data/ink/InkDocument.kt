@@ -9,7 +9,7 @@ import kotlin.math.sin
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-enum class Tool { PEN, INK_PEN, CALLIGRAPHY, HIGHLIGHTER, ERASER, LASSO }
+enum class Tool { PEN, INK_PEN, CALLIGRAPHY, HIGHLIGHTER, ERASER, LASSO, TEXT }
 
 enum class PaperStyle { BLANK, LINED, GRID, DOTS }
 
@@ -167,6 +167,31 @@ data class PageImage(
     }
 }
 
+enum class TextFont { SANS, SERIF, MONO }
+
+/** How a text box's text looks. [size] is in page units (16 is about 12 pt on A4). */
+data class TextStyleSpec(
+    val size: Float = 16f,
+    val color: Int = 0xFF000000.toInt(),
+    val bold: Boolean = false,
+    val italic: Boolean = false,
+    val font: TextFont = TextFont.SANS,
+)
+
+/**
+ * Typed text on a page, at ([x], [y]) (its top-left corner) and [width] wide in page units; it
+ * grows downwards as needed. With [autoMath], `$…$` and `$$…$$` in [text] show as typeset maths.
+ */
+data class PageText(
+    val id: String = UUID.randomUUID().toString(),
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val text: String = "",
+    val style: TextStyleSpec = TextStyleSpec(),
+    val autoMath: Boolean = true,
+)
+
 /**
  * Where a page's background sits: its top-left corner at ([x], [y]) in page
  * units and its size as a multiple ([scale]) of the page. The default fills
@@ -188,6 +213,7 @@ data class InkPage(
     val images: List<PageImage> = emptyList(),
     /** Show the background (PDF page or scan) with smart-inverted colors, for reading in the dark. */
     val invertBackground: Boolean = false,
+    val texts: List<PageText> = emptyList(),
 ) {
     companion object {
         /** A4 at 96 units per inch. */
@@ -260,6 +286,20 @@ object InkSerializer {
                     )
                 }
                 json.put("images", images)
+            }
+            if (page.texts.isNotEmpty()) {
+                val texts = JSONArray()
+                for (t in page.texts) {
+                    val st = t.style
+                    texts.put(
+                        JSONObject().put("id", t.id).put("x", t.x.toDouble()).put("y", t.y.toDouble())
+                            .put("w", t.width.toDouble()).put("t", t.text).put("m", t.autoMath)
+                            .put("s", st.size.toDouble()).put("c", st.color).put("f", st.font.name)
+                            .apply { if (st.bold) put("b", true) }
+                            .apply { if (st.italic) put("i", true) },
+                    )
+                }
+                json.put("texts", texts)
             }
             if (bgJson != null) {
                 if (page.invertBackground) bgJson.put("invert", true)
@@ -345,7 +385,27 @@ object InkSerializer {
                 inverted = o.optBoolean("invert"),
             )
         }
+        val textsJson = json.optJSONArray("texts") ?: JSONArray()
+        val texts = List(textsJson.length()) { i ->
+            val o = textsJson.getJSONObject(i)
+            PageText(
+                id = o.getString("id"),
+                x = o.getDouble("x").toFloat(),
+                y = o.getDouble("y").toFloat(),
+                width = o.getDouble("w").toFloat(),
+                text = o.optString("t"),
+                autoMath = o.optBoolean("m", true),
+                style = TextStyleSpec(
+                    size = o.optDouble("s", 16.0).toFloat(),
+                    color = o.optInt("c", 0xFF000000.toInt()),
+                    bold = o.optBoolean("b"),
+                    italic = o.optBoolean("i"),
+                    font = runCatching { TextFont.valueOf(o.optString("f")) }.getOrDefault(TextFont.SANS),
+                ),
+            )
+        }
         return InkPage(
+            texts = texts,
             invertBackground = bgJson?.optBoolean("invert") ?: false,
             images = images,
             placement = placement,
