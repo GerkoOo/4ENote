@@ -11,7 +11,7 @@ import kotlin.math.sqrt
 
 enum class Tool { PEN, INK_PEN, CALLIGRAPHY, HIGHLIGHTER, ERASER, LASSO }
 
-enum class PaperStyle { BLANK, LINED, GRID }
+enum class PaperStyle { BLANK, LINED, GRID, DOTS }
 
 /**
  * A single stroke. [points] is packed as x0, y0, x1, y1, ... in dp relative to

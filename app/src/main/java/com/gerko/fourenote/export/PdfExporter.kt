@@ -323,6 +323,23 @@ object PdfExporter {
                     y += 24f
                 }
             }
+            PaperStyle.DOTS -> {
+                // Each dot is a zero-length line with a round cap: one small path for the whole page.
+                cs.setStrokingColor(RULE[0], RULE[1], RULE[2])
+                cs.setLineWidth(1.6f)
+                cs.setLineCapStyle(1)
+                var y = 24f
+                while (y < height) {
+                    var x = 24f
+                    while (x < width) {
+                        cs.moveTo(x, y)
+                        cs.lineTo(x, y)
+                        x += 24f
+                    }
+                    y += 24f
+                }
+                cs.stroke()
+            }
         }
         cs.restoreGraphicsState()
     }

@@ -132,6 +132,7 @@ import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.outlined.CleaningServices
@@ -1408,6 +1409,7 @@ private fun PaperMenu(selected: PaperStyle, onSelect: (PaperStyle) -> Unit) {
             listOf(
                 Triple(PaperStyle.LINED, "Lined", Icons.AutoMirrored.Filled.Notes),
                 Triple(PaperStyle.GRID, "Grid", Icons.Filled.GridOn),
+                Triple(PaperStyle.DOTS, "Dots", Icons.Filled.Apps),
                 Triple(PaperStyle.BLANK, "Blank", Icons.AutoMirrored.Filled.InsertDriveFile),
             ).forEach { (style, label, icon) ->
                 DropdownMenuItem(

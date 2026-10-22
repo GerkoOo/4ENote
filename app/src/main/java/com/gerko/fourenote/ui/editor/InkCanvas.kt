@@ -1062,6 +1062,19 @@ fun DrawScope.drawPaper(paper: PaperStyle, scale: Float = density, dark: Boolean
                     y += spacing
                 }
             }
+            PaperStyle.DOTS -> {
+                // A dot where each pair of grid lines would cross.
+                val spacing = 24f * scale
+                var y = spacing
+                while (y < size.height) {
+                    var x = spacing
+                    while (x < size.width) {
+                        drawCircle(ruleColor, radius = scale * 1.1f, center = Offset(x, y))
+                        x += spacing
+                    }
+                    y += spacing
+                }
+            }
         }
     }
 }
