@@ -108,7 +108,10 @@ object Calligraphy {
      * blending smoothly in between. Unlike the flat nib, a stroke and the same stroke drawn the
      * other way look different: only down-strokes are bold.
      */
-    fun pointedFactors(points: FloatArray): FloatArray {
+    fun pointedFactors(points: FloatArray, slant: Float = 0f): FloatArray {
+        // Thick along the slant: straight down at 0, leaning forward (top to the right) as it grows.
+        val sinSlant = kotlin.math.sin(slant)
+        val cosSlant = kotlin.math.cos(slant)
         val n = points.size / 2
         if (n == 0) return FloatArray(0)
         val raw = FloatArray(n) { i ->
@@ -118,7 +121,7 @@ object Calligraphy {
             val dy = points[2 * b + 1] - points[2 * a + 1]
             val length = kotlin.math.hypot(dx, dy)
             // Screen y grows downwards, so a positive dy is a down-stroke.
-            val down = if (length < 0.01f) 0f else (dy / length).coerceIn(0f, 1f)
+            val down = if (length < 0.01f) 0f else ((dy * cosSlant - dx * sinSlant) / length).coerceIn(0f, 1f)
             HAIRLINE + (1f - HAIRLINE) * down
         }
         // A short moving average keeps the swell from thin to thick gradual.

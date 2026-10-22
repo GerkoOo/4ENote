@@ -1513,7 +1513,11 @@ private fun ToolBar(
 
                 if (calligraphy) {
                     VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-                    Text("Nib angle ${viewModel.nibDegrees.roundToInt()}°", style = MaterialTheme.typography.labelLarge)
+                    // Flat: the nib's angle. Pointed: the slant of the thick down-strokes.
+                    Text(
+                        "${if (viewModel.pointedNib) "Slant" else "Nib angle"} ${viewModel.nibDegrees.roundToInt()}°",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                     Slider(
                         value = viewModel.nibDegrees,
                         onValueChange = { viewModel.nibDegrees = (it / 15f).roundToInt() * 15f },

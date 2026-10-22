@@ -831,7 +831,7 @@ fun InkCanvas(
                         }
                         calligraphy && currentPointedNib -> InkPen.resampleWidths(
                             raw,
-                            pointedWidths(raw, currentPressures.toFloatArray()),
+                            pointedWidths(raw, currentPressures.toFloatArray(), currentNibDegrees),
                             points,
                         )
                         calligraphy -> InkPen.resampleWidths(
@@ -1010,7 +1010,7 @@ fun InkCanvas(
                     currentTimes.size != current.size -> null
                     tool == Tool.INK_PEN ->
                         InkPen.widthFactors(livePoints, currentTimes.toLongArray(), currentPressures.toFloatArray())
-                    tool == Tool.CALLIGRAPHY && pointedNib -> pointedWidths(livePoints, currentPressures.toFloatArray())
+                    tool == Tool.CALLIGRAPHY && pointedNib -> pointedWidths(livePoints, currentPressures.toFloatArray(), nibDegrees)
                     tool == Tool.CALLIGRAPHY -> Calligraphy.pressureFactors(currentPressures.toFloatArray())
                     else -> null
                 }
@@ -1330,8 +1330,8 @@ private fun describePenButtons(buttons: Int, type: PointerType, touching: Boolea
 }
 
 /** The pointed pen's width at each point: bold going down, a hairline going up, scaled by pen pressure. */
-private fun pointedWidths(points: FloatArray, pressures: FloatArray): FloatArray {
-    val direction = Calligraphy.pointedFactors(points)
+private fun pointedWidths(points: FloatArray, pressures: FloatArray, slantDegrees: Float): FloatArray {
+    val direction = Calligraphy.pointedFactors(points, Calligraphy.nibRadians(slantDegrees))
     val pressure = Calligraphy.pressureFactors(pressures)
     return FloatArray(direction.size) { i -> direction[i] * (pressure.getOrNull(i) ?: 1f).coerceIn(0.6f, 1.2f) }
 }
