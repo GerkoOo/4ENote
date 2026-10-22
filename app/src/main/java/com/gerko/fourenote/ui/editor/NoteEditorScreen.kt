@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.material.icons.filled.LockOpen
@@ -1422,20 +1423,10 @@ private fun ToolBar(
     onAddColor: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Floats over the pages as one row; on narrow screens swipe it sideways for the rest.
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        tonalElevation = 4.dp,
-        shadowElevation = 6.dp,
-        modifier = modifier,
-    ) {
-        Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    // Floats over the pages in two rows: the tools, and under them the chosen tool's options.
+    // On narrow screens each row swipes sideways for the rest.
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    FloatingRow {
             IconButton(onClick = onOpenDial) {
                 Icon(Icons.Filled.DonutLarge, contentDescription = "Quick dial")
             }
@@ -1458,8 +1449,8 @@ private fun ToolBar(
             ToolChip("Text", Icons.Filled.Title, viewModel.tool == Tool.TEXT) {
                 viewModel.selectTool(Tool.TEXT)
             }
-            VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-
+    }
+    FloatingRow {
             if (viewModel.tool == Tool.LASSO) {
                 SelectionOptions(viewModel)
             } else if (viewModel.tool == Tool.TEXT) {
@@ -1559,7 +1550,20 @@ private fun ToolBar(
                     label = { Text("Erase whole lines") },
                 )
             }
-        }
+    }
+    }
+}
+
+/** One floating, rounded row of the tool bar; swipes sideways when it doesn't fit. */
+@Composable
+private fun FloatingRow(content: @Composable RowScope.() -> Unit) {
+    Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 4.dp, shadowElevation = 6.dp) {
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
     }
 }
 
@@ -1732,4 +1736,4 @@ private fun PenButtonChoice(label: String, action: PenButtonAction, onChange: (P
 private const val ROTATION_SNAP_DEG = 8f
 
 /** The floating tool bar's height plus its margins: the pages start below it. */
-private val TOOLBAR_SPACE = 76.dp
+private val TOOLBAR_SPACE = 136.dp
