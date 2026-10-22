@@ -42,6 +42,11 @@ export JAVA_HOME=/path/to/jdk-17-or-newer   # must be a full JDK, not a JRE
 Requires the Android SDK with platform 37 and build-tools 37.0.0 installed,
 and `local.properties` pointing `sdk.dir` at your SDK (not committed).
 
+## Privacy
+
+No accounts, no tracking, no servers of our own: notes stay on your device and in your own
+cloud. See the [privacy policy](PRIVACY.md).
+
 ## License
 
 4ENote is licensed under the [GNU General Public License v3.0](LICENSE).
