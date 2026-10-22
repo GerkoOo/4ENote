@@ -88,6 +88,8 @@ private const val MULTI_FINGER_TAP_MS = 300L
 private const val PAGE_HOLD_MS = 450L
 private const val SHAPE_HOLD_MS = 500L
 private const val LOOP_HOLD_MS = 500L
+// How far a finger held inside a loop may wobble and still count as held.
+private const val LOOP_HOLD_SLOP_PX = 40f
 private const val HOLD_SLOP_PX = 6f
 private const val MAX_SCALE = 8f
 
@@ -378,6 +380,14 @@ fun InkCanvas(
                         if (event == null) {
                             decided = true
                             val fingers = currentEvent.changes.filter { it.pressed }
+                            // A palm resting on the screen and a finger held inside a loop just drawn: the
+                            // finger turns the loop into a selection, as it does on its own.
+                            val loopPoints = currentLoop?.points
+                            if (loopPoints != null && fingers.any { it.type == PointerType.Touch && toDp(it.position).let { p -> Shapes.contains(loopPoints, p.x, p.y) } }) {
+                                currentOnLoopHold()
+                                while (currentEvent.changes.any { it.pressed }) awaitPointerEvent().changes.forEach { it.consume() }
+                                return
+                            }
                             val local = coordinates
                             if (fingers.size >= 2 && local != null) {
                                 val centroid = Offset(
@@ -539,7 +549,7 @@ fun InkCanvas(
                             val event = awaitPointerEvent()
                             val finger = event.changes.firstOrNull { it.id == down.id }
                             if (finger == null || !finger.pressed) { lifted = true; break }
-                            if (event.changes.count { it.pressed } > 1 || (finger.position - down.position).getDistance() > TWO_FINGER_SLOP_PX) { moved = true; break }
+                            if (event.changes.count { it.pressed } > 1 || (finger.position - down.position).getDistance() > LOOP_HOLD_SLOP_PX) { moved = true; break }
                         }
                     } == null
                     if (timedOut) {

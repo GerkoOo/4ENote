@@ -65,7 +65,13 @@ object Shapes {
         val bounds = Bounds.of(points)
         val size = hypot(bounds.width, bounds.height)
         if (size < 12f || minOf(bounds.width, bounds.height) < 0.15f * size) return false
-        val gap = hypot(points[2 * n - 2] - points[0], points[2 * n - 1] - points[1])
+        // Closed if the end comes back near the start, or (drawn past it, as loops often are) near
+        // the start's part of the path, or the start lies near the end's part.
+        val endX = points[2 * n - 2]
+        val endY = points[2 * n - 1]
+        var gap = hypot(endX - points[0], endY - points[1])
+        for (i in 0 until n / 3) gap = minOf(gap, hypot(endX - points[2 * i], endY - points[2 * i + 1]))
+        for (i in n - n / 3 until n) gap = minOf(gap, hypot(points[0] - points[2 * i], points[1] - points[2 * i + 1]))
         return gap <= CLOSED_GAP * size
     }
 

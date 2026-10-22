@@ -103,6 +103,12 @@ class ShapesTest {
     }
 
     @Test
+    fun aLoopDrawnPastItsStartIsStillALoop() {
+        // A quarter turn too far: the end is far from the start but back on the loop's first part.
+        assertTrue(Shapes.isLoop(drawnEllipse(100f, 100f, 90f, 60f, turn = 2.5 * PI)))
+    }
+
+    @Test
     fun containsPointsInsideALoop() {
         val loop = drawnEllipse(100f, 100f, 50f, 50f, wobble = 0f)
         assertTrue(Shapes.contains(loop, 100f, 100f))
