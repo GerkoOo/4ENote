@@ -572,8 +572,9 @@ fun InkCanvas(
                 val start = toDp(down.position)
 
                 if (!erasing && gestureTool == Tool.LASSO) {
-                    // Pictures first. The pen only works the selected picture's handles (so it can still
-                    // lasso ink drawn over a picture); fingers can also drag a picture and pinch it.
+                    // Pictures first. The pen moves the selected picture and works its handles, but starts
+                    // a lasso over any other picture (so ink drawn over it can still be selected);
+                    // fingers can also pick up any picture, drag it and pinch it.
                     val pen = down.type == PointerType.Stylus
                     val selected = currentImages.firstOrNull { it.id == currentSelectedImageId }
                     fun onHandle(handle: Pair<Float, Float>) =
@@ -583,8 +584,8 @@ fun InkCanvas(
                         onHandle(SCALE_HANDLE) -> ImageGesture.SCALE
                         onHandle(SCALE_X_HANDLE) -> ImageGesture.SCALE_X
                         onHandle(SCALE_Y_HANDLE) -> ImageGesture.SCALE_Y
-                        pen -> null
                         selected != null && selected.contains(start.x, start.y) -> ImageGesture.MOVE
+                        pen -> null
                         else -> currentImages.lastOrNull { it.contains(start.x, start.y) }?.let {
                             currentOnImageSelect(it.id)
                             ImageGesture.MOVE

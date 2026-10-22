@@ -728,7 +728,7 @@ class NoteEditorViewModel(
     }
 
     /**
-     * Places pictures on a page, centered and sized to about 60% of its width,
+     * Places pictures on a page, centered and sized to at most 40% of its width and height,
      * each a little offset from the last. Switches to Select with the last one
      * selected, so it can be moved straight away.
      */
@@ -741,9 +741,9 @@ class NoteEditorViewModel(
                 if (stored.isEmpty()) return@launch
                 recordUndo()
                 stored.forEachIndexed { i, image ->
-                    val width = minOf(page.width * 0.6f, page.width - 48f)
+                    val width = page.width * 0.4f
                     var height = width * image.heightPx / image.widthPx.coerceAtLeast(1)
-                    val fit = minOf(1f, page.height * 0.6f / height)
+                    val fit = minOf(1f, page.height * 0.4f / height)
                     height *= fit
                     page.images.add(
                         PageImage(
