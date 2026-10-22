@@ -89,7 +89,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
-import com.gerko.fourenote.data.scan.AutoCapture
+import com.gerko.fourenote.data.scan.FramingGuide
 import com.gerko.fourenote.data.scan.EdgeModel
 import com.gerko.fourenote.data.scan.PageFinder
 import com.gerko.fourenote.data.scan.PageScanner
@@ -103,16 +103,24 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /** One photographed page: the photo, where its corners are, and how it will be turned into the final page. */
-private class ScanPage(val photo: Bitmap, val preview: Bitmap, corners: PageFinder.Corners, settings: ScanSettings) {
-    var corners by mutableStateOf(corners)
+/**
+ * One photo being reviewed. It starts as the whole photo, as taken; [suggested] is the page the
+ * scanner found in it, one tap away.
+ */
+private class ScanPage(val photo: Bitmap, val preview: Bitmap, val suggested: PageFinder.Corners, settings: ScanSettings) {
+    val whole = PageFinder.Corners(
+        floatArrayOf(0f, 0f, photo.width.toFloat(), 0f, photo.width.toFloat(), photo.height.toFloat(), 0f, photo.height.toFloat()),
+    )
+    var corners by mutableStateOf(whole)
     var settings by mutableStateOf(settings)
 }
 
 /**
  * The document scanner, all on the device and open source: a live camera that outlines the
- * page it sees and takes the picture by itself once the page holds still, then a review of the
- * pages (drag corners with a magnifier, turn, choose a filter, brightness and contrast, retake
- * or delete). [onDone] gets each finished page as a JPEG.
+ * page it sees (green once it is framed well; the user takes the picture), then a review of the
+ * pages: each starts as the photo as taken, with the found page crop and filters as suggestions
+ * (drag corners with a magnifier, turn, brightness and contrast, retake or delete). [onDone]
+ * gets each finished page as a JPEG.
  */
 @Composable
 fun ScanDialog(decode: (File) -> Bitmap?, onDone: (List<ByteArray>) -> Unit, onCancel: () -> Unit) {
@@ -236,17 +244,16 @@ private fun CameraStage(
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = it }
     LaunchedEffect(Unit) { if (!allowed) askPermission.launch(Manifest.permission.CAMERA) }
 
-    var auto by remember { mutableStateOf(true) }
     var outline by remember { mutableStateOf<FloatArray?>(null) }
     var frame by remember { mutableStateOf(IntSize(3, 4)) }
-    var progress by remember { mutableFloatStateOf(0f) }
+    // The page is framed well: the outline turns green. The picture is still taken by the user.
+    var framed by remember { mutableStateOf(false) }
     var capturing by remember { mutableStateOf(false) }
-    val currentAuto by rememberUpdatedState(auto)
     val currentOnPhoto by rememberUpdatedState(onPhoto)
 
     val controller = remember { LifecycleCameraController(context) }
     val analysis = remember { Executors.newSingleThreadExecutor() }
-    val autoCapture = remember { AutoCapture() }
+    val guide = remember { FramingGuide() }
 
     fun capture() {
         if (capturing) return
@@ -267,7 +274,6 @@ private fun CameraStage(
             },
         )
     }
-    val currentCapture by rememberUpdatedState(::capture)
 
     DisposableEffect(allowed) {
         if (allowed) {
@@ -286,13 +292,11 @@ private fun CameraStage(
                 }
                 val corners = found
                     ?: PageFinder.find(luma, w, h)?.points?.let { p -> FloatArray(8) { if (it % 2 == 0) p[it] / w else p[it] / h } }
-                val fire = currentAuto && autoCapture.onFrame(corners)
-                val ready = if (currentAuto) autoCapture.progress else 0f
+                val good = guide.onFrame(corners)
                 ContextCompat.getMainExecutor(context).execute {
                     frame = IntSize(w, h)
                     outline = corners
-                    progress = ready
-                    if (fire) currentCapture()
+                    framed = good
                 }
             }
             controller.bindToLifecycle(lifecycle)
@@ -323,8 +327,9 @@ private fun CameraStage(
                     for (k in 1..3) lineTo(at(k).x, at(k).y)
                     close()
                 }
-                drawPath(path, accent.copy(alpha = 0.18f + 0.3f * progress))
-                drawPath(path, accent, style = Stroke(4.dp.toPx()))
+                val color = if (framed) FRAMED_GREEN else Color.White
+                drawPath(path, color.copy(alpha = if (framed) 0.25f else 0.12f))
+                drawPath(path, color, style = Stroke(4.dp.toPx()))
             }
             if (capturing) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.4f)))
         } else {
@@ -341,14 +346,14 @@ private fun CameraStage(
         IconButton(onClick = onCancel, modifier = Modifier.align(Alignment.TopStart).padding(12.dp)) {
             Icon(Icons.Filled.Close, contentDescription = "Close scanner", tint = Color.White)
         }
-        Row(
-            Modifier.align(Alignment.TopEnd).padding(16.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.5f))
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Auto capture", color = Color.White)
-            Spacer(Modifier.width(8.dp))
-            Switch(checked = auto, onCheckedChange = { auto = it })
+        if (allowed) {
+            Text(
+                if (framed) "Framed well: tap the button to take it" else "Fit the page in view and hold still",
+                color = Color.White,
+                modifier = Modifier.align(Alignment.TopCenter).padding(16.dp).clip(RoundedCornerShape(20.dp))
+                    .background(if (framed) FRAMED_GREEN.copy(alpha = 0.8f) else Color.Black.copy(alpha = 0.5f))
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            )
         }
         Row(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.5f)).padding(16.dp),
@@ -359,9 +364,11 @@ private fun CameraStage(
                 Icon(Icons.Filled.Image, contentDescription = null, tint = Color.White)
                 Text("  Photos", color = Color.White)
             }
-            // The shutter; its ring fills as a still page gets ready to be captured automatically.
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(84.dp)) {
-                CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(84.dp), color = accent, strokeWidth = 5.dp)
+            // The shutter; its ring turns green while the page is framed well.
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(84.dp).border(5.dp, if (framed) FRAMED_GREEN else Color.White, CircleShape),
+            ) {
                 Box(Modifier.size(64.dp).clip(CircleShape).background(Color.White).clickable(enabled = allowed && !capturing) { capture() })
             }
             // The last page taken and how many so far; tap to review.
@@ -435,7 +442,7 @@ private fun ReviewStage(
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = onCancel) { Icon(Icons.Filled.Close, contentDescription = "Cancel scanning") }
             Text(
-                "Page ${current + 1} of ${pages.size} · drag the corners to fit the page",
+                "Page ${current + 1} of ${pages.size} · drag the corners to crop",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -451,6 +458,14 @@ private fun ReviewStage(
             itemVerticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
         ) {
+            // The photo as taken, or cropped to the page the scanner found.
+            FilterChip(selected = page.corners === page.whole, onClick = { page.corners = page.whole }, label = { Text("Whole photo") })
+            FilterChip(
+                selected = page.corners === page.suggested,
+                onClick = { page.corners = page.suggested },
+                label = { Text("Crop to page") },
+            )
+            Text("·", style = MaterialTheme.typography.titleMedium)
             ScanFilter.entries.forEach { filter ->
                 FilterChip(selected = page.settings.filter == filter, onClick = { change(page.settings.copy(filter = filter)) }, label = { Text(filter.label) })
             }
@@ -604,3 +619,6 @@ private fun ResultPreview(page: ScanPage, modifier: Modifier) {
         } ?: CircularProgressIndicator(Modifier.size(32.dp))
     }
 }
+
+/** The scanner's "framed well" colour. */
+private val FRAMED_GREEN = Color(0xFF2E7D32)

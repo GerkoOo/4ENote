@@ -206,6 +206,10 @@ fun NoteEditorScreen(
             viewModel.insertImages(page.id, uris.map { uri -> { context.contentResolver.openInputStream(uri) } })
         }
     }
+    // The page on screen: new pages go right after it.
+    fun currentPageId(): String? =
+        viewModel.pages.getOrNull(gridState.firstVisibleItemIndex.coerceAtMost(viewModel.pages.lastIndex))?.id
+
     // Our own scanner (ui/scan): photograph pages, fit their corners, add them straightened.
     var scanning by remember { mutableStateOf(false) }
     fun startScan() {
@@ -319,7 +323,8 @@ fun NoteEditorScreen(
                         Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
                     }
                     AddMenu(
-                        onBlankPage = { scrollToPage(viewModel.addBlankPage()) },
+                        onBlankPage = { scrollToPage(viewModel.addBlankPage(afterPageId = currentPageId())) },
+                        onBlankPageAtEnd = { scrollToPage(viewModel.addBlankPage()) },
                         onImportPdf = { pdfPicker.launch(arrayOf("application/pdf")) },
                         onImportImages = { imagePicker.launch(arrayOf("image/*")) },
                         onScan = ::startScan,
@@ -386,7 +391,8 @@ fun NoteEditorScreen(
                     onMultiFingerTap = ::onMultiFingerTap,
                     onPenButton = ::onPenButton,
                     addPages = AddPageActions(
-                        blank = { scrollToPage(viewModel.addBlankPage()) },
+                        blank = { scrollToPage(viewModel.addBlankPage(afterPageId = currentPageId())) },
+                        blankAtEnd = { scrollToPage(viewModel.addBlankPage()) },
                         pdf = { pdfPicker.launch(arrayOf("application/pdf")) },
                         images = { imagePicker.launch(arrayOf("image/*")) },
                         scan = ::startScan,
@@ -1069,6 +1075,7 @@ private fun PageFooter(
 @Composable
 private fun AddMenu(
     onBlankPage: () -> Unit,
+    onBlankPageAtEnd: () -> Unit,
     onImportPdf: () -> Unit,
     onImportImages: () -> Unit,
     onScan: () -> Unit,
@@ -1082,9 +1089,14 @@ private fun AddMenu(
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = { Text("Blank page") },
+                text = { Text("Blank page after this one") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) },
                 onClick = { open = false; onBlankPage() },
+            )
+            DropdownMenuItem(
+                text = { Text("Blank page at the end") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) },
+                onClick = { open = false; onBlankPageAtEnd() },
             )
             DropdownMenuItem(
                 text = { Text("Import PDF") },
@@ -1157,7 +1169,14 @@ private fun Stepper(label: String, value: Int, onChange: (Int) -> Unit) {
 private const val MAX_TABLE_CELLS = 20
 
 /** Ways to add pages, offered under the last page. */
-private class AddPageActions(val blank: () -> Unit, val pdf: () -> Unit, val images: () -> Unit, val scan: () -> Unit)
+private class AddPageActions(
+    /** A blank page after the page on screen. */
+    val blank: () -> Unit,
+    val blankAtEnd: () -> Unit,
+    val pdf: () -> Unit,
+    val images: () -> Unit,
+    val scan: () -> Unit,
+)
 
 /** A small handle under the last page; tapping it slides up the ways to add pages. */
 @Composable
@@ -1172,6 +1191,8 @@ private fun AddPagesHandle(actions: AddPageActions) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
                 fun pick(action: () -> Unit) = { open = false; action() }
                 AssistChip(onClick = pick(actions.blank), label = { Text("Blank page") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) })
+                AssistChip(onClick = pick(actions.blankAtEnd), label = { Text("Blank page at the end") },
                     leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) })
                 AssistChip(onClick = pick(actions.pdf), label = { Text("PDF") },
                     leadingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null) })

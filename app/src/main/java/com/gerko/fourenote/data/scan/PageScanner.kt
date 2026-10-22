@@ -10,19 +10,21 @@ import kotlin.math.roundToInt
 
 /** How a scanned page is cleaned up. */
 enum class ScanFilter(val label: String) {
+    /** The photo as taken, only cropped and straightened. The default; the others are suggestions. */
+    ORIGINAL("Original"),
     /** Even lighting, white paper, colours kept: right for most documents. */
     CLEAN("Auto"),
     /** Like Auto with livelier colours, for coloured notes and diagrams. */
     COLOUR("Colour"),
     GREYSCALE("Greyscale"),
     BLACK_AND_WHITE("B&W"),
-    /** The photo as taken, only straightened: for pictures. */
-    ORIGINAL("Photo"),
+    /** Cleaned, then dark paper with light writing (colours keep their hue), for dark notes. */
+    INVERTED("Inverted"),
 }
 
 /** How one scanned page is turned into the final picture. */
 data class ScanSettings(
-    val filter: ScanFilter = ScanFilter.CLEAN,
+    val filter: ScanFilter = ScanFilter.ORIGINAL,
     /** Quarter turns clockwise, 0 to 3. */
     val quarterTurns: Int = 0,
     /** -1 (darker) to 1 (lighter); 0 leaves it. */
@@ -126,10 +128,30 @@ object PageScanner {
         val flat = straighten(photo, corners, maxSide)
         val filtered = when (settings.filter) {
             ScanFilter.ORIGINAL -> flat
+            ScanFilter.INVERTED -> invert(clean(flat, ScanFilter.CLEAN))
             else -> clean(flat, settings.filter)
         }
         val adjusted = adjust(filtered, settings.brightness, settings.contrast)
         return turn(adjusted, settings.quarterTurns)
+    }
+
+    // Flips light and dark but keeps each colour's hue (blue ink stays blue), in place.
+    private fun invert(page: Bitmap): Bitmap {
+        val out = if (page.isMutable) page else page.copy(Bitmap.Config.ARGB_8888, true).also { page.recycle() }
+        val row = IntArray(out.width)
+        for (y in 0 until out.height) {
+            out.getPixels(row, 0, out.width, 0, y, out.width, 1)
+            for (i in row.indices) {
+                val c = row[i]
+                val r = Color.red(c)
+                val g = Color.green(c)
+                val b = Color.blue(c)
+                val shift = 255 - maxOf(r, g, b) - minOf(r, g, b)
+                row[i] = Color.argb(Color.alpha(c), r + shift, g + shift, b + shift)
+            }
+            out.setPixels(row, 0, out.width, 0, y, out.width, 1)
+        }
+        return out
     }
 
     private fun turn(page: Bitmap, quarterTurns: Int): Bitmap {
