@@ -257,6 +257,10 @@ class NoteEditorViewModel(
     init {
         restoreTools()
         repository.markOpen(noteId)
+        // Photos for this note's frames, taken on another device while it is open here.
+        viewModelScope.launch {
+            repository.frameFills.collect { (id, frames) -> if (id == noteId) fillFrames(frames) }
+        }
         viewModelScope.launch {
             val loadedNote = repository.getById(noteId) ?: Note(id = noteId, title = "Untitled")
             val doc = repository.loadDocument(noteId)
@@ -764,6 +768,25 @@ class NoteEditorViewModel(
             } finally {
                 importing = false
             }
+        }
+    }
+
+    // Fills waiting frames with photos that arrived by sync; other changes to the frame stay as they are here.
+    private fun fillFrames(frames: List<PageImage>) {
+        val byId = frames.associateBy { it.id }
+        var changed = false
+        for (page in pages) {
+            for (i in page.images.indices) {
+                val frame = page.images[i]
+                val filled = byId[frame.id] ?: continue
+                if (!frame.waitingForPhoto) continue
+                page.images[i] = filled
+                changed = true
+            }
+        }
+        if (changed) {
+            persist()
+            message = "A photo arrived from your other device"
         }
     }
 

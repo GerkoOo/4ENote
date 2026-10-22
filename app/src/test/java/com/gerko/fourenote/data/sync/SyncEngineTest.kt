@@ -89,6 +89,12 @@ class SyncEngineTest {
 
         override fun attachments(noteId: String): Map<String, java.io.File> = files[noteId].orEmpty()
 
+        val delivered = mutableListOf<Pair<String, List<com.gerko.fourenote.data.ink.PageImage>>>()
+
+        override suspend fun deliverFilledFrames(noteId: String, frames: List<com.gerko.fourenote.data.ink.PageImage>) {
+            delivered += noteId to frames
+        }
+
         override suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {
             files.getOrPut(noteId) { mutableMapOf() }[name] = tmp.newFile().apply { writeBytes(content) }
         }
@@ -343,5 +349,24 @@ class SyncEngineTest {
 
         val image = InkSerializer.decode(a.notes.getValue("n1").inkData).pages[0].images.single()
         assertEquals("photo.jpg", image.file)
+    }
+
+    @Test
+    fun aPhotoReachesTheFrameWhileTheNoteIsOpen() {
+        val frame = com.gerko.fourenote.data.ink.PageImage(id = "frame", file = "", x = 100f, y = 100f, width = 200f, height = 150f, requested = true)
+        val page = InkPage(id = "p1", images = listOf(frame))
+        a.save(Note(id = "n1", title = "Lab", inkData = InkSerializer.encode(InkDocument(listOf(page)))))
+        a.sync()
+        b.sync()
+
+        a.open += "n1" // the tablet has the note open
+        b.save(b.notes.getValue("n1").copy(inkData = InkSerializer.encode(InkDocument(listOf(page.copy(images = listOf(frame.copy(file = "photo.jpg"))))))))
+        b.addPicture("n1", "photo.jpg", "JPEG")
+        b.sync()
+        a.sync()
+
+        assertEquals("photo.jpg", a.delivered.single().second.single().file)
+        // The photo itself arrived too, before the frame was handed over.
+        assertEquals("JPEG", a.attachments("n1").getValue("photo.jpg").readText())
     }
 }

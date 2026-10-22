@@ -1,5 +1,7 @@
 package com.gerko.fourenote.data.sync
 
+import com.gerko.fourenote.data.ink.InkSerializer
+import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.Note
 import java.io.File
 
@@ -16,6 +18,12 @@ interface SyncStore {
 
     /** Stores a picture or PDF page that came from the cloud. */
     suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {}
+
+    /**
+     * Photo frames filled on another device, for a note that is open here (and so not synced
+     * as a whole): the open editor puts the photos into its frames straight away.
+     */
+    suspend fun deliverFilledFrames(noteId: String, frames: List<PageImage>) {}
 
     /** True while the note is open in the editor; sync leaves it alone until it closes. */
     fun isOpen(noteId: String): Boolean
@@ -89,9 +97,15 @@ class SyncEngine(
             .toMap()
         val localNotes = store.notesForSync()
 
+        // Filled photo frames for open notes, handed over once their photos have downloaded.
+        val fills = mutableListOf<Pair<String, List<PageImage>>>()
         for (note in localNotes) {
             if (store.isOpen(note.id)) {
                 skippedOpen++
+                val cloud = cloudNotes[note.id]
+                if (cloud != null && cloud.version != note.remoteVersion) {
+                    runCatching { filledFrames(cloud) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { fills += note.id to it }
+                }
                 continue
             }
             runCatching { syncNote(note, cloudNotes[note.id]) }
@@ -106,6 +120,7 @@ class SyncEngine(
         }
 
         runCatching { syncAttachments() }.onFailure { errors += "Pictures: ${it.message}" }
+        for ((noteId, frames) in fills) store.deliverFilledFrames(noteId, frames)
 
         return SyncResult(uploaded, downloaded, merged, deletedHere, deletedInCloud, skippedOpen, errors)
     }
@@ -146,6 +161,12 @@ class SyncEngine(
         "png" -> "image/png"
         "pdf" -> PDF_MIME_TYPE
         else -> "application/octet-stream"
+    }
+
+    // The photo frames in the cloud copy of a note that have been filled.
+    private suspend fun filledFrames(cloud: RemoteFile): List<PageImage> {
+        val note = NoteFile.decode(provider.download(cloud.id).decodeToString())
+        return InkSerializer.decode(note.inkData).pages.flatMap { page -> page.images.filter { it.requested && it.file.isNotEmpty() } }
     }
 
     private suspend fun syncNote(note: Note, cloud: RemoteFile?) {

@@ -137,6 +137,13 @@ class NoteRepository(
 
     override fun isOpen(noteId: String): Boolean = noteId in openNotes
 
+    /** Photo frames filled elsewhere for notes open in the editor: note id and the filled frames. */
+    val frameFills = kotlinx.coroutines.flow.MutableSharedFlow<Pair<String, List<com.gerko.fourenote.data.ink.PageImage>>>(extraBufferCapacity = 16)
+
+    override suspend fun deliverFilledFrames(noteId: String, frames: List<com.gerko.fourenote.data.ink.PageImage>) {
+        frameFills.emit(noteId to frames)
+    }
+
     override fun attachments(noteId: String): Map<String, java.io.File> =
         attachments.dir(noteId).listFiles().orEmpty()
             // Files being written start with a dot.
