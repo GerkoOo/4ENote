@@ -1,5 +1,21 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.AssistChip
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.FilledTonalIconButton
@@ -348,6 +364,12 @@ fun NoteEditorScreen(
                     onTwoFingerHold = { dialAt = it },
                     onMultiFingerTap = ::onMultiFingerTap,
                     onPenButton = ::onPenButton,
+                    addPages = AddPageActions(
+                        blank = { scrollToPage(viewModel.addBlankPage()) },
+                        pdf = { pdfPicker.launch(arrayOf("application/pdf")) },
+                        images = { imagePicker.launch(arrayOf("image/*")) },
+                        scan = ::startScan,
+                    ),
                 )
             } else {
                 Box(Modifier.fillMaxSize())
@@ -405,6 +427,7 @@ private fun PageList(
     onTwoFingerHold: (Offset) -> Unit,
     onMultiFingerTap: (Int) -> Unit,
     onPenButton: (PenButtonAction, Offset) -> Unit,
+    addPages: AddPageActions,
 ) {
     val drawingColor = if (viewModel.tool == Tool.HIGHLIGHTER) viewModel.highlighterColor else viewModel.penColor
     val drawingWidth = when (viewModel.tool) {
@@ -421,6 +444,36 @@ private fun PageList(
     // scrolling straight away would use the zoomed-out layout, where every page fits on screen
     // and the scroll is clamped to the first page.
     var zoomedToPage by remember { mutableStateOf<Int?>(null) }
+    // A page picked up in the overview to move: its id, the finger (root pixels) and where on the page it was held.
+    var draggingPage by remember { mutableStateOf<String?>(null) }
+    var dragFinger by remember { mutableStateOf(Offset.Zero) }
+    var dragGrab by remember { mutableStateOf(Offset.Zero) }
+    val pageBounds = remember { mutableStateMapOf<String, Rect>() }
+    var gridBounds by remember { mutableStateOf(Rect.Zero) }
+    // Moves the held page into the place of the page under the finger.
+    fun dragPageTo(finger: Offset) {
+        dragFinger = finger
+        val dragged = draggingPage ?: return
+        val visible = gridState.layoutInfo.visibleItemsInfo.mapTo(HashSet()) { it.key }
+        val target = pageBounds.entries.firstOrNull { (id, bounds) -> id != dragged && id in visible && finger in bounds }?.key ?: return
+        viewModel.movePage(viewModel.pages.indexOfFirst { it.id == dragged }, viewModel.pages.indexOfFirst { it.id == target })
+    }
+    // While a page is held near the top or bottom edge, scroll the pages along.
+    val edgeDensity = LocalDensity.current
+    LaunchedEffect(draggingPage) {
+        if (draggingPage == null) return@LaunchedEffect
+        val edge = with(edgeDensity) { 72.dp.toPx() }
+        val speed = with(edgeDensity) { 12.dp.toPx() }
+        while (true) {
+            withFrameNanos { }
+            val dy = when {
+                dragFinger.y < gridBounds.top + edge -> -speed
+                dragFinger.y > gridBounds.bottom - edge -> speed
+                else -> 0f
+            }
+            if (dy != 0f && gridState.scrollBy(dy) != 0f) dragPageTo(dragFinger)
+        }
+    }
     LaunchedEffect(zoomedToPage) {
         val index = zoomedToPage ?: return@LaunchedEffect
         gridState.scrollToItem(index)
@@ -434,7 +487,7 @@ private fun PageList(
         val fullWidth = minOf(maxWidth - 32.dp, MAX_PAGE_WIDTH)
         val pageWidth = fullWidth * zoom
         val columns = maxOf(1, ((maxWidth - 16.dp) / (pageWidth + 16.dp)).toInt())
-        // Zoomed out to several pages a row, double-tapping a page zooms in until it just fits the screen.
+        // Zoomed out below 100%, double-tapping a page zooms in until it just fits the screen.
         fun onPageTap(index: Int, pageId: String, aspect: Float) {
             val now = System.currentTimeMillis()
             val (lastId, lastTime) = lastPageTap
@@ -461,13 +514,37 @@ private fun PageList(
                 horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(16.dp),
-                modifier = Modifier.width(gridWidth).fillMaxHeight(),
+                modifier = Modifier.width(gridWidth).fillMaxHeight().onGloballyPositioned { gridBounds = it.boundsInRoot() },
             ) {
                 itemsIndexed(viewModel.pages, key = { _, page -> page.id }) { index, page ->
                     // Grid cells are stretched to fill their column; keep the page at its zoomed
                     // width so the ink's scale and the page's on-screen size always agree.
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                    Column(Modifier.width(pageWidth), horizontalAlignment = Alignment.CenterHorizontally) {
+                    val dragged = draggingPage == page.id
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .zIndex(if (dragged) 1f else 0f)
+                            // The other pages slide out of the way of a page being moved.
+                            .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = if (dragged) null else spring()),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                    Column(
+                        Modifier
+                            // Before the graphics layer, so the bounds are the page's place in the grid, not where it's dragged.
+                            .onGloballyPositioned { pageBounds[page.id] = it.boundsInRoot() }
+                            .graphicsLayer {
+                                if (dragged) {
+                                    val home = pageBounds[page.id]?.topLeft ?: Offset.Zero
+                                    translationX = dragFinger.x - dragGrab.x - home.x
+                                    translationY = dragFinger.y - dragGrab.y - home.y
+                                    scaleX = 1.05f
+                                    scaleY = 1.05f
+                                    shadowElevation = 16.dp.toPx()
+                                }
+                            }
+                            .width(pageWidth),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
                         val background by produceState<ImageBitmap?>(null, page.background, backgroundWidthPx) {
                             value = page.background?.let { backgrounds.load(viewModel.noteId, it, backgroundWidthPx)?.asImageBitmap() }
                         }
@@ -513,8 +590,20 @@ private fun PageList(
                             onPenButtonClick = onPenButton,
                             onPenSignal = { viewModel.lastPenSignal = it },
                             onMultiFingerTap = onMultiFingerTap,
-                            overview = columns > 1,
-                            onFingerTap = { if (columns > 1) onPageTap(index, page.id, page.width / page.height) },
+                            // Zoomed out below 100%, fingers scroll, tap and move pages; only the pen writes.
+                            overview = zoom < 1f,
+                            onFingerTap = { if (zoom < 1f) onPageTap(index, page.id, page.width / page.height) },
+                            onPageDragStart = { finger ->
+                                viewModel.beginPageMove()
+                                dragGrab = finger - (pageBounds[page.id]?.topLeft ?: finger)
+                                dragFinger = finger
+                                draggingPage = page.id
+                            },
+                            onPageDrag = ::dragPageTo,
+                            onPageDragEnd = {
+                                draggingPage = null
+                                viewModel.endPageMove()
+                            },
                             styleFor = viewModel::styleFor,
                             placement = page.placement,
                             adjustingBackground = viewModel.adjustingPageId == page.id,
@@ -547,13 +636,7 @@ private fun PageList(
                     }
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box(contentAlignment = Alignment.Center) {
-                        TextButton(onClick = { viewModel.addBlankPage() }) {
-                            Icon(Icons.Filled.Add, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Add page")
-                        }
-                    }
+                    AddPagesHandle(addPages)
                 }
             }
         }
@@ -726,7 +809,7 @@ private fun ZoomControl(zoom: Float, onZoom: (Float) -> Unit, modifier: Modifier
 }
 
 private const val MIN_ZOOM = 0.2f
-private val PAGE_FOOTER_HEIGHT = 48.dp
+private val PAGE_FOOTER_HEIGHT = 28.dp
 private const val MAX_ZOOM = 3f
 private const val ZOOM_STEP = 1.25f
 
@@ -803,16 +886,25 @@ private fun PageFooter(
     onDelete: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxWidth()) {
+    // Kept low so it takes little room between pages.
+    Box(Modifier.fillMaxWidth().height(PAGE_FOOTER_HEIGHT)) {
         Text(
             "$number / $count",
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.align(Alignment.Center),
         )
         Box(Modifier.align(Alignment.CenterEnd)) {
-            IconButton(onClick = { open = true }) {
-                Icon(Icons.Filled.MoreHoriz, contentDescription = "Page $number options")
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(PAGE_FOOTER_HEIGHT).clip(CircleShape).clickable { open = true },
+            ) {
+                Icon(
+                    Icons.Filled.MoreHoriz,
+                    contentDescription = "Page $number options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 if (hasImage) {
@@ -887,6 +979,45 @@ private fun AddMenu(onBlankPage: () -> Unit, onImportPdf: () -> Unit, onImportIm
                 text = { Text("Scan document") },
                 leadingIcon = { Icon(Icons.Filled.DocumentScanner, contentDescription = null) },
                 onClick = { open = false; onScan() },
+            )
+        }
+    }
+}
+
+/** Ways to add pages, offered under the last page. */
+private class AddPageActions(val blank: () -> Unit, val pdf: () -> Unit, val images: () -> Unit, val scan: () -> Unit)
+
+/** A small handle under the last page; tapping it slides up the ways to add pages. */
+@Composable
+private fun AddPagesHandle(actions: AddPageActions) {
+    var open by remember { mutableStateOf(false) }
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        AnimatedVisibility(
+            visible = open,
+            enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+            exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
+        ) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+                fun pick(action: () -> Unit) = { open = false; action() }
+                AssistChip(onClick = pick(actions.blank), label = { Text("Blank page") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) })
+                AssistChip(onClick = pick(actions.pdf), label = { Text("PDF") },
+                    leadingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null) })
+                AssistChip(onClick = pick(actions.images), label = { Text("Images") },
+                    leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) })
+                AssistChip(onClick = pick(actions.scan), label = { Text("Scan") },
+                    leadingIcon = { Icon(Icons.Filled.DocumentScanner, contentDescription = null) })
+            }
+        }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(width = 56.dp, height = 28.dp).clip(CircleShape).clickable { open = !open },
+        ) {
+            Icon(
+                if (open) Icons.Filled.KeyboardArrowDown else Icons.Filled.Add,
+                contentDescription = if (open) "Hide add page options" else "Add pages",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
             )
         }
     }

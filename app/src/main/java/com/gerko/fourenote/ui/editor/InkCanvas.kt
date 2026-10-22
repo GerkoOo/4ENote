@@ -78,6 +78,7 @@ private const val MIN_SCALE = 0.2f
 private const val TWO_FINGER_HOLD_MS = 450L
 private const val TWO_FINGER_SLOP_PX = 24f
 private const val MULTI_FINGER_TAP_MS = 300L
+private const val PAGE_HOLD_MS = 450L
 private const val MAX_SCALE = 8f
 
 /** RESIZE_X and RESIZE_Y stretch one axis; RESIZE_XY scales both axes independently. */
@@ -138,10 +139,14 @@ fun InkCanvas(
     /** Describes each pen button or eraser signal, so the settings can show what the pen sends. */
     onPenSignal: (String) -> Unit = {},
     onMultiFingerTap: (fingers: Int) -> Unit = {},
-    /** Several pages fit on screen: fingers only scroll and tap (pens still write). */
+    /** Zoomed out: fingers only scroll, tap and move pages (pens still write). */
     overview: Boolean = false,
     /** A quick one-finger tap on the page while fingers don't draw. */
     onFingerTap: () -> Unit = {},
+    /** In the [overview], holding a finger still on the page picks it up to move: start, move and drop, in root pixels. */
+    onPageDragStart: (Offset) -> Unit = {},
+    onPageDrag: (Offset) -> Unit = {},
+    onPageDragEnd: () -> Unit = {},
     /** Color and width of a tool, for strokes drawn with a tool other than the selected one (pen button). */
     styleFor: (Tool) -> Pair<Color, Float> = { color to width },
 ) {
@@ -185,6 +190,9 @@ fun InkCanvas(
     val currentStylusOnly by rememberUpdatedState(stylusOnly)
     val currentOverview by rememberUpdatedState(overview)
     val currentOnFingerTap by rememberUpdatedState(onFingerTap)
+    val currentOnPageDragStart by rememberUpdatedState(onPageDragStart)
+    val currentOnPageDrag by rememberUpdatedState(onPageDrag)
+    val currentOnPageDragEnd by rememberUpdatedState(onPageDragEnd)
     val currentSmoothing by rememberUpdatedState(smoothing)
     val currentNibDegrees by rememberUpdatedState(nibDegrees)
     val currentScale by rememberUpdatedState(scale)
@@ -427,7 +435,26 @@ fun InkCanvas(
                     // and flings normally); a second finger takes over to scroll or open the dial.
                     var moved = 0f
                     while (true) {
-                        val event = awaitPointerEvent()
+                        val held = down.uptimeMillis + PAGE_HOLD_MS - (currentEvent.changes.first().uptimeMillis)
+                        val event = if (currentOverview && moved < TWO_FINGER_SLOP_PX) {
+                            withTimeoutOrNull(held.coerceAtLeast(1)) { awaitPointerEvent() }
+                        } else {
+                            awaitPointerEvent()
+                        }
+                        if (event == null) {
+                            // Held still: pick the page up and follow the finger until it lifts.
+                            val local = coordinates ?: return@awaitEachGesture
+                            currentOnPageDragStart(local.localToRoot(down.position))
+                            while (true) {
+                                val move = awaitPointerEvent()
+                                val finger = move.changes.firstOrNull { it.id == down.id }
+                                move.changes.forEach { it.consume() }
+                                if (finger == null || !finger.pressed) break
+                                coordinates?.let { currentOnPageDrag(it.localToRoot(finger.position)) }
+                            }
+                            currentOnPageDragEnd()
+                            return@awaitEachGesture
+                        }
                         val fingers = event.changes.count { it.pressed }
                         event.changes.firstOrNull { it.id == down.id }?.let { moved = maxOf(moved, (it.position - down.position).getDistance()) }
                         if (fingers == 0) {

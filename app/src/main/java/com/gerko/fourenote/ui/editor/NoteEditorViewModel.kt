@@ -698,6 +698,16 @@ class NoteEditorViewModel(
         persist()
     }
 
+    /** Starts moving a page by hand: one undo step covers the whole move. */
+    fun beginPageMove() = recordUndo()
+
+    fun movePage(from: Int, to: Int) {
+        if (from !in pages.indices || to !in pages.indices || from == to) return
+        pages.add(to, pages.removeAt(from))
+    }
+
+    fun endPageMove() = persist()
+
     fun deletePage(pageId: String) {
         val index = pages.indexOfFirst { it.id == pageId }
         if (index < 0) return
