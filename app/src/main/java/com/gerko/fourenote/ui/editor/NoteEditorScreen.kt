@@ -1,5 +1,13 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -48,6 +56,7 @@ import androidx.compose.material.icons.filled.OpenWith
 import com.gerko.fourenote.data.ink.BackgroundPlacement
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Visibility
@@ -231,12 +240,28 @@ fun NoteEditorScreen(
         }
     }
 
+    // Full screen hides the app's bars and the system's; the dial and gestures still work.
+    var fullScreen by rememberSaveable { mutableStateOf(false) }
+    val view = LocalView.current
+    DisposableEffect(fullScreen) {
+        val window = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()?.window
+        val bars = window?.let { WindowCompat.getInsetsController(it, view) }
+        if (fullScreen) {
+            bars?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            bars?.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            bars?.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
+    }
+
     val darkPaper = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Box(Modifier.fillMaxSize()) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
+            if (!fullScreen) TopAppBar(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -282,6 +307,9 @@ fun NoteEditorScreen(
                     IconButton(onClick = { showingSettings = true }) {
                         Icon(Icons.Filled.Tune, contentDescription = "Pen and gesture settings")
                     }
+                    IconButton(onClick = { fullScreen = true }) {
+                        Icon(Icons.Filled.Fullscreen, contentDescription = "Full screen")
+                    }
                     LayersMenu(viewModel)
                     PaperMenu(selected = viewModel.paper, onSelect = viewModel::changePaper)
                     IconToggleButton(
@@ -302,16 +330,18 @@ fun NoteEditorScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            ToolBar(
-                viewModel,
-                darkPaper,
-                onOpenDial = {
-                    val metrics = context.resources.displayMetrics
-                    dialAt = Offset(metrics.widthPixels / 2f, metrics.heightPixels / 2f)
-                },
-                onAddColor = { pickingColor = true },
-            )
-            if (viewModel.importing || viewModel.exporting) LinearProgressIndicator(Modifier.fillMaxWidth()) else HorizontalDivider()
+            if (!fullScreen) {
+                ToolBar(
+                    viewModel,
+                    darkPaper,
+                    onOpenDial = {
+                        val metrics = context.resources.displayMetrics
+                        dialAt = Offset(metrics.widthPixels / 2f, metrics.heightPixels / 2f)
+                    },
+                    onAddColor = { pickingColor = true },
+                )
+            }
+            if (viewModel.importing || viewModel.exporting) LinearProgressIndicator(Modifier.fillMaxWidth()) else if (!fullScreen) HorizontalDivider()
             if (viewModel.loaded) {
                 PageList(
                     viewModel, backgrounds, gridState, darkPaper,
@@ -322,6 +352,14 @@ fun NoteEditorScreen(
             } else {
                 Box(Modifier.fillMaxSize())
             }
+        }
+    }
+    if (fullScreen) {
+        FilledTonalIconButton(
+            onClick = { fullScreen = false },
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).alpha(0.7f),
+        ) {
+            Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit full screen")
         }
     }
     dialAt?.let { PenDial(viewModel, it, darkPaper, onDismiss = { dialAt = null }, onAddColor = { pickingColor = true }) }
@@ -377,9 +415,18 @@ private fun PageList(
     }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     val horizontal = rememberScrollState()
-    val scope = rememberCoroutineScope()
     // The last one-finger tap on a page in the overview, to spot a double tap: page id and time.
     var lastPageTap by remember { mutableStateOf("" to 0L) }
+    // The page a double tap zoomed to. Scrolled to once the grid is composed at the new zoom:
+    // scrolling straight away would use the zoomed-out layout, where every page fits on screen
+    // and the scroll is clamped to the first page.
+    var zoomedToPage by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(zoomedToPage) {
+        val index = zoomedToPage ?: return@LaunchedEffect
+        gridState.scrollToItem(index)
+        horizontal.scrollTo(0)
+        zoomedToPage = null
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
         // At 100% a page fills the width (up to a comfortable maximum). Zooming out fits
@@ -399,10 +446,7 @@ private fun PageList(
             // Leave room for the page footer below the page.
             val fitHeight = (maxHeight - 32.dp - PAGE_FOOTER_HEIGHT) / (fullWidth / aspect)
             zoom = minOf(1f, fitHeight).coerceIn(MIN_ZOOM, MAX_ZOOM)
-            scope.launch {
-                gridState.scrollToItem(index)
-                horizontal.scrollTo(0)
-            }
+            zoomedToPage = index
         }
         val gridWidth = maxOf(maxWidth, pageWidth + 32.dp)
         val density = LocalDensity.current
@@ -724,6 +768,11 @@ private fun SelectionBar(viewModel: NoteEditorViewModel, darkPaper: Boolean, mod
                 Icon(Icons.Filled.TextFields, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text("To text")
+            }
+            TextButton(onClick = viewModel::recognizeSelectionAsMath) {
+                Icon(Icons.Filled.Functions, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("To LaTeX")
             }
             TextButton(onClick = viewModel::duplicateSelection) {
                 Icon(Icons.Filled.ContentCopy, contentDescription = null)

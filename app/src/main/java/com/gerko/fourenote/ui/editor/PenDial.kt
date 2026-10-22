@@ -59,8 +59,8 @@ private class Hole(val selected: Boolean, val onClick: () -> Unit, val content: 
 private class Ring(val radius: Dp, val holeSize: Dp, val holes: List<Hole>, val enabled: Boolean = true)
 
 /**
- * Quick pen settings styled like a rotary phone with four nested rings, from
- * the outside in: tool, color, smoothness (0-10) and calligraphy nib angle.
+ * Quick pen settings styled like a rotary phone with five nested rings, from
+ * the outside in: tool, color, smoothness (0-10), thickness and calligraphy nib angle.
  * Like a rotary dial's finger holes, each ring's options sit close together
  * in an arc on the right; the left side, where the fingers were, is left
  * empty so nothing there can be pressed by accident. The center shows
@@ -144,6 +144,16 @@ private fun rings(viewModel: NoteEditorViewModel, scale: Float, onAddColor: () -
         Ring(
             radius = 92.dp * scale,
             holeSize = 26.dp * scale,
+            holes = viewModel.dialWidths.let { widths ->
+                val current = widths.indices.minBy { abs(widths[it] - viewModel.toolWidth) }
+                widths.mapIndexed { i, width ->
+                    Hole(i == current, { viewModel.setToolWidth(width) }) { SizeGlyph(i, scale) }
+                }
+            },
+        ),
+        Ring(
+            radius = 52.dp * scale,
+            holeSize = 22.dp * scale,
             holes = NIB_ANGLES.map { degrees ->
                 Hole(viewModel.nibDegrees == degrees, { viewModel.nibDegrees = degrees }) { NibGlyph(degrees, 18.dp * scale) }
             },
@@ -189,7 +199,7 @@ private fun Ring.sweep(scale: Float): Pair<Float, Float> {
 
 /**
  * The dial's face: a fan on the right, just big enough for the outer ring,
- * with a band behind each ring's arc so the four layers read as separate dials.
+ * with a band behind each ring's arc so the layers read as separate dials.
  */
 @Composable
 private fun FanBackground(rings: List<Ring>, scale: Float) {
@@ -265,6 +275,12 @@ private fun ColorGlyph(color: Color, size: Dp) {
         Modifier.size(size).clip(CircleShape).background(color)
             .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape),
     )
+}
+
+/** A dot growing with the [index] of its size, thinnest first. */
+@Composable
+private fun SizeGlyph(index: Int, scale: Float) {
+    Box(Modifier.size((3 + index * 2.5f).dp * scale).clip(CircleShape).background(MaterialTheme.colorScheme.onSurface))
 }
 
 /** A short line at the nib's angle, so each hole shows the direction it writes thin in. */

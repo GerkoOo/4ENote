@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.gerko.fourenote.data.recognition.HandwritingLanguages
+import com.gerko.fourenote.data.recognition.MathRecognizer
 
 /** Shows the selected handwriting as editable text, with alternatives, Copy and Share. */
 @Composable
@@ -48,10 +49,10 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
 
     AlertDialog(
         onDismissRequest = viewModel::closeRecognition,
-        title = { Text("Handwriting to text") },
+        title = { Text(if (viewModel.recognizingMath) "Maths to LaTeX" else "Handwriting to text") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                LanguagePicker(viewModel)
+                if (!viewModel.recognizingMath) LanguagePicker(viewModel)
                 when (state) {
                     is RecognitionState.Working -> Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -59,10 +60,12 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
                     ) {
                         CircularProgressIndicator(Modifier.size(24.dp))
                         Text(
-                            if (state.downloading) {
-                                "Downloading ${viewModel.handwritingLanguage.label} handwriting (once, about 20 MB)…"
-                            } else {
-                                "Reading…"
+                            when {
+                                !state.downloading -> "Reading…"
+                                viewModel.recognizingMath ->
+                                    "Downloading the maths model (once, about ${MathRecognizer.DOWNLOAD_MB} MB)… " +
+                                        "${((state.progress ?: 0f) * 100).toInt()}%"
+                                else -> "Downloading ${viewModel.handwritingLanguage.label} handwriting (once, about 20 MB)…"
                             },
                         )
                     }

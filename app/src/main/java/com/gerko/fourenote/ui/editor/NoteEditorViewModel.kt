@@ -15,6 +15,7 @@ import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.recognition.HandwritingLanguage
 import com.gerko.fourenote.data.recognition.HandwritingLanguages
 import com.gerko.fourenote.data.recognition.HandwritingRecognizer
+import com.gerko.fourenote.data.recognition.MathRecognizer
 import com.gerko.fourenote.data.ink.BackgroundPlacement
 import com.gerko.fourenote.data.ink.Calligraphy
 import com.gerko.fourenote.data.ink.InkDocument
@@ -57,8 +58,8 @@ val InkPenWidths = listOf(2.5f, 4.5f, 8f)
 val CalligraphyWidths = listOf(6f, 10f, 16f)
 
 sealed interface RecognitionState {
-    /** [downloading] is true while the language model is fetched for the first time. */
-    data class Working(val downloading: Boolean) : RecognitionState
+    /** [downloading] is true while the model is fetched for the first time; [progress] is 0..1 when known. */
+    data class Working(val downloading: Boolean, val progress: Float? = null) : RecognitionState
 
     /** The best reading first, then alternatives. */
     data class Done(val readings: List<String>) : RecognitionState
@@ -225,6 +226,11 @@ class NoteEditorViewModel(
         private set
 
     private val recognizer = HandwritingRecognizer()
+    private var mathRecognizer: MathRecognizer? = null
+
+    /** True when [recognition] reads the selection as maths (LaTeX) rather than text. */
+    var recognizingMath by mutableStateOf(false)
+        private set
 
     /** Handwriting-to-text state for the selection; null when the dialog is closed. */
     var recognition by mutableStateOf<RecognitionState?>(null)
@@ -329,6 +335,15 @@ class NoteEditorViewModel(
             Tool.INK_PEN -> InkPenWidths
             Tool.CALLIGRAPHY -> CalligraphyWidths
             else -> PenWidths
+        }
+
+    /**
+     * The finer choice of thicknesses on the pen dial: the tool's three presets, the steps
+     * between them, and one thinner and one thicker.
+     */
+    val dialWidths: List<Float>
+        get() = toolWidths.let { (thin, medium, thick) ->
+            listOf(thin / 2, thin, (thin + medium) / 2, medium, (medium + thick) / 2, thick, thick * 1.5f)
         }
 
     val toolWidth: Float
@@ -738,6 +753,7 @@ class NoteEditorViewModel(
         val page = selectionPageId?.let(::page) ?: return
         val strokes = page.strokes.filter { it in selection }
         if (strokes.isEmpty()) return
+        recognizingMath = false
         viewModelScope.launch {
             val language = handwritingLanguage
             val needsDownload = !recognizer.isDownloadedSafely(language.tag)
@@ -753,6 +769,35 @@ class NoteEditorViewModel(
             recognition = try {
                 val readings = recognizer.recognize(strokes, language.tag)
                 if (readings.isEmpty()) RecognitionState.Failed("No text found") else RecognitionState.Done(readings)
+            } catch (e: Exception) {
+                RecognitionState.Failed(e.message ?: "Recognition failed")
+            }
+        }
+    }
+
+    /** Reads the lasso selection as one formula and writes it as LaTeX; results arrive in [recognition]. */
+    fun recognizeSelectionAsMath() {
+        val page = selectionPageId?.let(::page) ?: return
+        val strokes = page.strokes.filter { it in selection }
+        if (strokes.isEmpty()) return
+        recognizingMath = true
+        val math = mathRecognizer ?: MathRecognizer(attachments.context).also { mathRecognizer = it }
+        viewModelScope.launch {
+            recognition = try {
+                if (!math.isDownloaded()) {
+                    if (!online()) {
+                        recognition = RecognitionState.Failed(
+                            "Maths recognition needs a one-time download (about ${MathRecognizer.DOWNLOAD_MB} MB). " +
+                                "Connect to the internet and try again; after that it works offline.",
+                        )
+                        return@launch
+                    }
+                    recognition = RecognitionState.Working(downloading = true, progress = 0f)
+                    math.download { recognition = RecognitionState.Working(downloading = true, progress = it) }
+                }
+                recognition = RecognitionState.Working(downloading = false)
+                val latex = math.recognize(strokes)
+                if (latex.isEmpty()) RecognitionState.Failed("No formula found") else RecognitionState.Done(listOf(latex))
             } catch (e: Exception) {
                 RecognitionState.Failed(e.message ?: "Recognition failed")
             }
@@ -868,6 +913,7 @@ class NoteEditorViewModel(
 
     override fun onCleared() {
         recognizer.close()
+        mathRecognizer?.close()
         // The screen is gone but the last edits may not be saved yet: finish that first,
         // then let sync know the note is free.
         CoroutineScope(Dispatchers.Default + NonCancellable).launch {

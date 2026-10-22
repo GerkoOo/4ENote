@@ -15,6 +15,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Tablets are arm64; x86_64 is for the emulator. Leaving out the 32-bit builds of the
+        // native libraries (ONNX Runtime, ML Kit) keeps the APK much smaller.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     buildTypes {
@@ -32,6 +35,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    // Compress the native libraries in the APK (they're unpacked on install): ONNX Runtime alone
+    // is about 35 MB per processor type uncompressed, which matters for sharing the APK.
+    packaging {
+        jniLibs { useLegacyPackaging = true }
     }
 
     compileOptions {
@@ -68,6 +77,8 @@ dependencies {
     implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
     // Copies original PDF pages into exports and draws ink as vectors (Apache 2.0).
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // Runs the open-source Pix2Text formula model that turns handwritten maths into LaTeX (MIT).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
 
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")
