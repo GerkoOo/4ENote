@@ -537,12 +537,62 @@ class NoteEditorViewModel(
     }
 
     /** Deletes a layer and its ink on every page. The last layer cannot be deleted. */
-    fun deleteLayer(layerId: String) {
-        if (layers.size <= 1) return
+    fun deleteLayer(layerId: String) = deleteLayers(setOf(layerId))
+
+    /** Deletes the given layers and their ink on every page, keeping at least one layer. One undo step. */
+    fun deleteLayers(layerIds: Set<String>) {
+        if (layerIds.isEmpty()) return
+        if (layers.all { it.id in layerIds }) {
+            message = "A note needs at least one layer"
+            return
+        }
         recordUndo()
-        layers.removeAll { it.id == layerId }
-        for (page in pages) page.strokes.removeAll { it.layerId == layerId }
-        if (activeLayerId == layerId) activeLayerId = layers.last().id
+        layers.removeAll { it.id in layerIds }
+        for (page in pages) page.strokes.removeAll { it.layerId in layerIds }
+        if (activeLayerId in layerIds) activeLayerId = layers.last().id
+        clearSelection()
+        persist()
+    }
+
+    /** Copies each of the given layers, with its ink on every page, just above the original. One undo step. */
+    fun duplicateLayers(layerIds: Set<String>) {
+        val originals = layers.filter { it.id in layerIds }
+        if (originals.isEmpty()) return
+        recordUndo()
+        for (original in originals) {
+            val copy = InkLayer(name = "${original.name} copy", visible = original.visible)
+            layers.add(layers.indexOfFirst { it.id == original.id } + 1, copy)
+            for (page in pages) {
+                page.strokes.addAll(
+                    page.strokes.filter { it.layerId == original.id }.map {
+                        InkStroke(it.color, it.width, it.highlighter, it.points, it.widths, copy.id, nibAngle = it.nibAngle)
+                    },
+                )
+            }
+        }
+        clearSelection()
+        persist()
+    }
+
+    /** Moves the ink of the given layers onto the lowest of them and removes the rest. One undo step. */
+    fun mergeLayers(layerIds: Set<String>) {
+        val chosen = layers.filter { it.id in layerIds }
+        if (chosen.size < 2) return
+        val target = chosen.first()
+        val merged = chosen.drop(1).mapTo(HashSet()) { it.id }
+        recordUndo()
+        for (page in pages) {
+            for (i in page.strokes.indices) {
+                val stroke = page.strokes[i]
+                if (stroke.layerId in merged) {
+                    page.strokes[i] = InkStroke(
+                        stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, target.id, stroke.id, stroke.nibAngle,
+                    )
+                }
+            }
+        }
+        layers.removeAll { it.id in merged }
+        if (activeLayerId in merged) activeLayerId = target.id
         clearSelection()
         persist()
     }

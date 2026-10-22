@@ -27,6 +27,14 @@ class NoteRepository(
         if (note.remoteId == null) purge(note.id) else dao.markDeleted(note.id, System.currentTimeMillis())
     }
 
+    /** A new note with the same pages, ink and pictures, titled as a copy. Uploads on the next sync. */
+    suspend fun duplicate(note: Note): Note {
+        val copy = Note(title = "${note.title.ifBlank { "Untitled" }} (copy)", inkData = note.inkData)
+        attachments.copyAll(note.id, copy.id)
+        dao.upsert(copy)
+        return copy
+    }
+
     /** Called by the editor; sync skips open notes so it never overwrites ink being drawn. */
     fun markOpen(noteId: String) {
         openNotes.add(noteId)

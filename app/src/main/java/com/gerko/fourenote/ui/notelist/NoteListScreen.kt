@@ -1,5 +1,15 @@
 package com.gerko.fourenote.ui.notelist
 
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.activity.compose.BackHandler
 import android.text.format.DateUtils
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
@@ -77,11 +87,34 @@ fun NoteListScreen(
     val notes by viewModel.notes.collectAsState()
     val cloud by syncManager.choice.collectAsState()
     val syncStatus by syncManager.status.collectAsState()
-    var pendingDelete by remember { mutableStateOf<Note?>(null) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+    val selecting = viewModel.selected.isNotEmpty()
+    // Back leaves selecting before it leaves the app.
+    BackHandler(enabled = selecting) { viewModel.clearSelection() }
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selecting) {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = viewModel::clearSelection) {
+                            Icon(Icons.Filled.Close, contentDescription = "Stop selecting")
+                        }
+                    },
+                    title = { Text("${viewModel.selected.size} selected") },
+                    actions = {
+                        IconButton(onClick = viewModel::selectAll) {
+                            Icon(Icons.Filled.SelectAll, contentDescription = "Select all")
+                        }
+                        IconButton(onClick = viewModel::duplicateSelected) {
+                            Icon(Icons.Filled.ContentCopy, contentDescription = "Duplicate")
+                        }
+                        IconButton(onClick = { confirmingDelete = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                        }
+                    },
+                )
+            } else TopAppBar(
                 title = { Text("4ENote") },
                 actions = {
                     IconButton(onClick = onToggleTheme) {
@@ -103,7 +136,7 @@ fun NoteListScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
+            if (!selecting) ExtendedFloatingActionButton(
                 onClick = { onOpenNote(viewModel.createNote().id) },
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                 text = { Text("New note") },
@@ -126,43 +159,58 @@ fun NoteListScreen(
                 modifier = Modifier.padding(padding),
             ) {
                 items(notes, key = { it.id }) { note ->
+                    // Holding a note starts selecting; while selecting, taps tick and untick notes.
                     NoteCard(
                         note = note,
                         backgrounds = backgrounds,
-                        onClick = { onOpenNote(note.id) },
-                        onLongClick = { pendingDelete = note },
+                        selected = note.id in viewModel.selected,
+                        onClick = { if (selecting) viewModel.toggleSelected(note.id) else onOpenNote(note.id) },
+                        onLongClick = { viewModel.toggleSelected(note.id) },
                     )
                 }
             }
         }
     }
 
-    pendingDelete?.let { note ->
+    if (confirmingDelete) {
+        val count = viewModel.selected.size
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete note?") },
-            text = { Text("\"${note.title.ifBlank { "Untitled" }}\" will be permanently deleted.") },
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text(if (count == 1) "Delete note?" else "Delete $count notes?") },
+            text = { Text(if (count == 1) "It will be permanently deleted." else "They will be permanently deleted.") },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.deleteNote(note)
-                    pendingDelete = null
+                    viewModel.deleteSelected()
+                    confirmingDelete = false
                 }) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+                TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") }
             },
         )
     }
 }
 
 @Composable
-private fun NoteCard(note: Note, backgrounds: BackgroundLoader, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun NoteCard(note: Note, backgrounds: BackgroundLoader, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     Card(
+        border = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier
             .padding(8.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        NoteThumbnail(note, backgrounds)
+        Box {
+            NoteThumbnail(note, backgrounds)
+            if (selected) {
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(28.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape),
+                )
+            }
+        }
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(
                 note.title.ifBlank { "Untitled" },

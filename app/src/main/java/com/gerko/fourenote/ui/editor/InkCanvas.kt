@@ -124,6 +124,8 @@ fun InkCanvas(
         dx: Float, dy: Float, scaleX: Float, scaleY: Float, pivotX: Float, pivotY: Float,
     ) -> Unit,
     onScroll: (dxPx: Float, dyPx: Float) -> Unit,
+    /** Two fingers lifted after scrolling or zooming. */
+    onScrollEnd: () -> Unit = {},
     onZoom: (factor: Float) -> Unit,
     onTwoFingerHold: (rootPx: Offset) -> Unit,
     modifier: Modifier = Modifier,
@@ -206,6 +208,7 @@ fun InkCanvas(
     val currentNibDegrees by rememberUpdatedState(nibDegrees)
     val currentScale by rememberUpdatedState(scale)
     val currentOnScroll by rememberUpdatedState(onScroll)
+    val currentOnScrollEnd by rememberUpdatedState(onScrollEnd)
     val currentOnZoom by rememberUpdatedState(onZoom)
     val currentBounds by rememberUpdatedState(bounds)
     val currentOnStroke by rememberUpdatedState(onStroke)
@@ -347,6 +350,7 @@ fun InkCanvas(
                         if (pressed.isEmpty()) {
                             val quick = System.currentTimeMillis() - holdStart < MULTI_FINGER_TAP_MS
                             if (!decided && quick && moved < TWO_FINGER_SLOP_PX) currentOnMultiFingerTap(fingers)
+                            if (moved >= TWO_FINGER_SLOP_PX) currentOnScrollEnd()
                             return
                         }
                         val dy = pressed.map { it.positionChange().y }.average().toFloat()

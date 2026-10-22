@@ -127,6 +127,12 @@ class AttachmentStore(val context: Context) {
         const val JPEG_QUALITY = 90
     }
 
+    /** Copies one note's pictures and PDF pages to another note, for duplicating notes. */
+    suspend fun copyAll(fromNoteId: String, toNoteId: String) = withContext(Dispatchers.IO) {
+        val from = dir(fromNoteId)
+        if (from.isDirectory) from.copyRecursively(dir(toNoteId), overwrite = true)
+    }
+
     fun deleteAll(noteId: String) {
         dir(noteId).deleteRecursively()
     }

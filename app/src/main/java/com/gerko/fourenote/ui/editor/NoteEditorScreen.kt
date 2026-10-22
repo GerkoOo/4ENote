@@ -1,5 +1,10 @@
 package com.gerko.fourenote.ui.editor
 
+import kotlin.math.abs
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.snapping.SnapPosition
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TableChart
@@ -458,6 +463,25 @@ private fun PageList(
     }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     val horizontal = rememberScrollState()
+    // Full screen opens at the fitting size on the page being looked at, and gives the zoom back after.
+    var zoomBeforeFullScreen by rememberSaveable { mutableFloatStateOf(1f) }
+    LaunchedEffect(fullScreen) {
+        val page = gridState.firstVisibleItemIndex
+        if (fullScreen) {
+            zoomBeforeFullScreen = zoom
+            zoom = 1f
+        } else {
+            zoom = zoomBeforeFullScreen
+        }
+        gridState.scrollToItem(page)
+        horizontal.scrollTo(0)
+    }
+    // Pages wider than the screen start centered rather than pinned to the left edge.
+    LaunchedEffect(zoom, fullScreen) {
+        withFrameNanos { } // once laid out at the new size
+        horizontal.scrollTo(horizontal.maxValue / 2)
+    }
+    val scope = rememberCoroutineScope()
     // The last one-finger tap on a page in the overview, to spot a double tap: page id and time.
     var lastPageTap by remember { mutableStateOf("" to 0L) }
     // The page a double tap zoomed to. Scrolled to once the grid is composed at the new zoom:
@@ -504,9 +528,11 @@ private fun PageList(
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
         // At 100% a page fills the width (up to a comfortable maximum). Zooming out fits
         // several pages per row; zooming in makes pages wider than the screen, panned sideways.
-        val fullWidth = minOf(maxWidth - 32.dp, MAX_PAGE_WIDTH)
+        // Full screen: one page per screen, as large as fits, centered, with no gaps or footers.
+        fun fitWidth(aspect: Float) = minOf(maxWidth, maxHeight * aspect)
+        val fullWidth = if (fullScreen) fitWidth(A4_ASPECT) else minOf(maxWidth - 32.dp, MAX_PAGE_WIDTH)
         val pageWidth = fullWidth * zoom
-        val columns = maxOf(1, ((maxWidth - 16.dp) / (pageWidth + 16.dp)).toInt())
+        val columns = if (fullScreen) 1 else maxOf(1, ((maxWidth - 16.dp) / (pageWidth + 16.dp)).toInt())
         // Zoomed out below 100%, double-tapping a page zooms in until it just fits the screen.
         fun onPageTap(index: Int, pageId: String, aspect: Float) {
             val now = System.currentTimeMillis()
@@ -521,7 +547,17 @@ private fun PageList(
             zoom = minOf(1f, fitHeight).coerceIn(MIN_ZOOM, MAX_ZOOM)
             zoomedToPage = index
         }
-        val gridWidth = maxOf(maxWidth, pageWidth + 32.dp)
+        val gridWidth = if (fullScreen) maxOf(maxWidth, pageWidth) else maxOf(maxWidth, pageWidth + 32.dp)
+        // In full screen at fitting size, a scroll or fling settles on whole pages, like turning them.
+        val snapping = fullScreen && zoom <= 1f
+        fun snapToNearestPage() {
+            if (!snapping) return
+            val info = gridState.layoutInfo
+            val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
+            val nearest = info.visibleItemsInfo.filter { it.index < viewModel.pages.size }
+                .minByOrNull { abs(it.offset.y + it.size.height / 2 - middle) } ?: return
+            scope.launch { gridState.animateScrollToItem(nearest.index) }
+        }
         val density = LocalDensity.current
         val pageWidthPx = with(density) { pageWidth.toPx() }
         // Backgrounds are re-rendered in size steps, not on every frame of a pinch.
@@ -531,22 +567,27 @@ private fun PageList(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 state = gridState,
-                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (fullScreen) 0.dp else 16.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(if (fullScreen) 0.dp else 12.dp),
+                contentPadding = PaddingValues(if (fullScreen) 0.dp else 16.dp),
+                flingBehavior = if (snapping) rememberSnapFlingBehavior(gridState, SnapPosition.Start) else ScrollableDefaults.flingBehavior(),
                 modifier = Modifier.width(gridWidth).fillMaxHeight().onGloballyPositioned { gridBounds = it.boundsInRoot() },
             ) {
                 itemsIndexed(viewModel.pages, key = { _, page -> page.id }) { index, page ->
                     // Grid cells are stretched to fill their column; keep the page at its zoomed
                     // width so the ink's scale and the page's on-screen size always agree.
                     val dragged = draggingPage == page.id
+                    val itemWidth = if (fullScreen) fitWidth(page.width / page.height) * zoom else pageWidth
+                    val itemWidthPx = with(density) { itemWidth.toPx() }
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            // Each page gets a whole screen in full screen, centered in it.
+                            .then(if (fullScreen) Modifier.heightIn(min = this@BoxWithConstraints.maxHeight) else Modifier)
                             .zIndex(if (dragged) 1f else 0f)
                             // The other pages slide out of the way of a page being moved.
                             .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = if (dragged) null else spring()),
-                        contentAlignment = Alignment.TopCenter,
+                        contentAlignment = if (fullScreen) Alignment.Center else Alignment.TopCenter,
                     ) {
                     Column(
                         Modifier
@@ -562,7 +603,7 @@ private fun PageList(
                                     shadowElevation = 16.dp.toPx()
                                 }
                             }
-                            .width(pageWidth),
+                            .width(itemWidth),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         val background by produceState<ImageBitmap?>(null, page.background, backgroundWidthPx) {
@@ -582,7 +623,7 @@ private fun PageList(
                         }
                         InkCanvas(
                             strokes = visibleStrokes,
-                            scale = pageWidthPx / page.width,
+                            scale = itemWidthPx / page.width,
                             background = background,
                             darkPaper = darkPaper,
                             selection = if (viewModel.selectionPageId == page.id) viewModel.selection else emptySet(),
@@ -603,6 +644,7 @@ private fun PageList(
                                 gridState.dispatchRawDelta(dy)
                                 horizontal.dispatchRawDelta(dx)
                             },
+                            onScrollEnd = ::snapToNearestPage,
                             onZoom = { factor -> zoom = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM) },
                             onTwoFingerHold = onTwoFingerHold,
                             primaryButtonAction = viewModel.primaryButtonAction,
@@ -639,7 +681,7 @@ private fun PageList(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(page.width / page.height)
-                                .shadow(2.dp),
+                                .then(if (fullScreen) Modifier else Modifier.shadow(2.dp)),
                         )
                         if (!fullScreen) PageFooter(
                             number = index + 1,
@@ -847,6 +889,7 @@ private fun ZoomButton(icon: ImageVector, description: String, onClick: () -> Un
 }
 
 private const val MIN_ZOOM = 0.2f
+private const val A4_ASPECT = 210f / 297f
 private val PAGE_FOOTER_HEIGHT = 28.dp
 private const val MAX_ZOOM = 3f
 private const val ZOOM_STEP = 1.25f
@@ -1170,13 +1213,15 @@ private fun SettingSwitch(label: String, checked: Boolean, onChange: (Boolean) -
 @Composable
 private fun LayersMenu(viewModel: NoteEditorViewModel) {
     var open by remember { mutableStateOf(false) }
+    // Layers ticked for duplicating, merging or deleting together.
+    var checked by remember { mutableStateOf(emptySet<String>()) }
     Box {
         IconButton(onClick = { open = true }) {
             Icon(Icons.Filled.Layers, contentDescription = "Layers")
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false; checked = emptySet() }) {
             Text(
-                "Layers · you draw on the selected one",
+                "Layers · you draw on the selected one · tick to act on several",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -1188,6 +1233,10 @@ private fun LayersMenu(viewModel: NoteEditorViewModel) {
                         .clickable { viewModel.selectLayer(layer.id) }
                         .padding(start = 4.dp, end = 4.dp),
                 ) {
+                    Checkbox(
+                        checked = layer.id in checked,
+                        onCheckedChange = { checked = if (it) checked + layer.id else checked - layer.id },
+                    )
                     RadioButton(selected = layer.id == viewModel.activeLayerId, onClick = { viewModel.selectLayer(layer.id) })
                     Text(layer.name, modifier = Modifier.width(120.dp))
                     IconButton(onClick = { viewModel.setLayerVisible(layer.id, !layer.visible) }) {
@@ -1196,9 +1245,18 @@ private fun LayersMenu(viewModel: NoteEditorViewModel) {
                             contentDescription = if (layer.visible) "Hide ${layer.name}" else "Show ${layer.name}",
                         )
                     }
-                    IconButton(onClick = { viewModel.deleteLayer(layer.id) }, enabled = viewModel.layers.size > 1) {
+                    IconButton(onClick = { viewModel.deleteLayer(layer.id); checked = checked - layer.id }, enabled = viewModel.layers.size > 1) {
                         Icon(Icons.Filled.Delete, contentDescription = "Delete ${layer.name}")
                     }
+                }
+            }
+            if (checked.isNotEmpty()) {
+                HorizontalDivider()
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
+                    Text("${checked.size} ticked", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
+                    TextButton(onClick = { viewModel.duplicateLayers(checked); checked = emptySet() }) { Text("Duplicate") }
+                    TextButton(onClick = { viewModel.mergeLayers(checked); checked = emptySet() }, enabled = checked.size > 1) { Text("Merge") }
+                    TextButton(onClick = { viewModel.deleteLayers(checked); checked = emptySet() }) { Text("Delete") }
                 }
             }
             HorizontalDivider()
