@@ -9,19 +9,23 @@ study use. Open source (GPL-3.0).
 · [all releases](https://github.com/GerkoOo/4ENote/releases)
 
 Open the file on your Android tablet (Android 8 or newer) and allow your browser
-to install apps when asked. This is a beta: Google Drive and OneDrive sync are
-not ready yet.
+to install apps when asked. This is a beta. Google Drive sync works for test
+users while the Google sign-in is being verified; OneDrive is not ready yet.
+
+Website: [gerkooo.github.io/4ENote](https://gerkooo.github.io/4ENote/)
 
 ## Features
 
-- Pen, ink pen, calligraphy and highlighter; eraser, lasso and layers
-- Hold a drawn line, circle, triangle or rectangle to straighten it; tables
-- Handwriting to text, and handwritten maths to LaTeX (offline, open-source model)
+- Pen, ink pen, calligraphy (pointed or flat nib) and highlighter; eraser, lasso and layers
+- Hold a drawn line, circle, triangle or rectangle to straighten it; tables; text boxes with LaTeX
+- Handwriting to editable text, and handwritten maths to LaTeX (offline, open-source models)
+- Pinch to zoom, twist to turn a page, full-screen writing; Arrange pages to reorder them
 - Import PDFs and images (with dark-mode colour inversion), scan documents
-  (automatic page edges, straightening, Clean and B&W filters),
-  export and share as PDF
-- Lined, grid, dotted or blank paper; dark mode; full-screen page view
-- Quick pen dial, pen side buttons, scribble to erase, finger gestures
+  (page edges, straightening, filters including inverted), export and share as PDF
+- Photo frames filled from your phone, scans for later; focus (Pomodoro) timer
+- Optional Google Drive sync (only 4ENote's own folder), with a PDF copy of each note
+- Lined, grid, dotted or blank paper; dark mode
+- Quick pen dial, pen side buttons, scribble or strike out to erase, finger gestures
 
 ## Stack
 
