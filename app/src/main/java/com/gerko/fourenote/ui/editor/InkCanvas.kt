@@ -141,6 +141,8 @@ fun InkCanvas(
     images: List<PageImage> = emptyList(),
     imageBitmaps: Map<String, ImageBitmap> = emptyMap(),
     selectedImageId: String? = null,
+    /** Holding the pen and a finger on a picture selects it, whatever the tool. */
+    penAndFingerSelect: Boolean = false,
     onImageSelect: (String?) -> Unit = {},
     onImageChange: (PageImage) -> Unit = {},
     primaryButtonAction: PenButtonAction = PenButtonAction.OPEN_DIAL,
@@ -181,6 +183,7 @@ fun InkCanvas(
     val currentImages by rememberUpdatedState(images)
     val currentSelectedImageId by rememberUpdatedState(selectedImageId)
     val currentOnImageSelect by rememberUpdatedState(onImageSelect)
+    val currentPenAndFingerSelect by rememberUpdatedState(penAndFingerSelect)
     val currentOnImageChange by rememberUpdatedState(onImageChange)
     // While adjusting, the image follows the fingers here and is saved once on release.
     var livePlacement by remember { mutableStateOf<BackgroundPlacement?>(null) }
@@ -331,6 +334,21 @@ fun InkCanvas(
 
                 // Two fingers: moving scrolls the pages, pinching zooms them, holding still opens the pen dial.
                 suspend fun AwaitPointerEventScope.scrollWithFingers() {
+                    // If turned on: with any tool, the pen and a finger held together on the same picture
+                    // select it (a locked one too, so it can be unlocked).
+                    val pressed = currentEvent.changes.filter { it.pressed }
+                    val penAt = pressed.firstOrNull { it.type == PointerType.Stylus }?.let { toDp(it.position) }
+                    val fingerAt = pressed.firstOrNull { it.type == PointerType.Touch }?.let { toDp(it.position) }
+                    val picked = if (currentPenAndFingerSelect && penAt != null && fingerAt != null) {
+                        currentImages.lastOrNull { it.contains(penAt.x, penAt.y) && it.contains(fingerAt.x, fingerAt.y) }
+                    } else {
+                        null
+                    }
+                    if (picked != null) {
+                        currentOnImageSelect(picked.id)
+                        while (currentEvent.changes.any { it.pressed }) awaitPointerEvent().changes.forEach { it.consume() }
+                        return
+                    }
                     val holdStart = System.currentTimeMillis()
                     var moved = 0f
                     var decided = false
@@ -478,7 +496,7 @@ fun InkCanvas(
                 }
 
                 val fingerOnSelectedPicture = gestureTool == Tool.LASSO &&
-                    currentImages.any { it.id == currentSelectedImageId && it.contains(toDp(down.position).x, toDp(down.position).y) }
+                    currentImages.any { it.id == currentSelectedImageId && !it.locked && it.contains(toDp(down.position).x, toDp(down.position).y) }
                 // A finger held still inside a loop just drawn turns the loop into a lasso selection.
                 val loopPoints = currentLoop?.points
                 if (down.type == PointerType.Touch && loopPoints != null && toDp(down.position).let { Shapes.contains(loopPoints, it.x, it.y) }) {
@@ -578,7 +596,8 @@ fun InkCanvas(
                     // a lasso over any other picture (so ink drawn over it can still be selected);
                     // fingers can also pick up any picture, drag it and pinch it.
                     val pen = down.type == PointerType.Stylus
-                    val selected = currentImages.firstOrNull { it.id == currentSelectedImageId }
+                    // A locked picture can be selected (to unlock it) but not moved or resized.
+                    val selected = currentImages.firstOrNull { it.id == currentSelectedImageId && !it.locked }
                     fun onHandle(handle: Pair<Float, Float>) =
                         selected != null && selected.handleDistance(start, handle) <= HANDLE_TOUCH_DP
                     val imageGesture = when {
@@ -588,14 +607,14 @@ fun InkCanvas(
                         onHandle(SCALE_Y_HANDLE) -> ImageGesture.SCALE_Y
                         selected != null && selected.contains(start.x, start.y) -> ImageGesture.MOVE
                         pen -> null
-                        else -> currentImages.lastOrNull { it.contains(start.x, start.y) }?.let {
+                        else -> currentImages.lastOrNull { !it.locked && it.contains(start.x, start.y) }?.let {
                             currentOnImageSelect(it.id)
                             ImageGesture.MOVE
                         }
                     }
                     if (imageGesture != null) {
                         val target = selected?.takeIf { imageGesture != ImageGesture.MOVE || it.contains(start.x, start.y) }
-                            ?: currentImages.last { it.contains(start.x, start.y) }
+                            ?: currentImages.last { !it.locked && it.contains(start.x, start.y) }
                         var image = target
                         var last = start
                         trackDrag { p ->
@@ -653,7 +672,8 @@ fun InkCanvas(
                                 scrollWithFingers()
                                 return@awaitEachGesture
                             }
-                            // A tap (no lasso drawn) on a picture selects it, with the pen too.
+                            // A tap (no lasso drawn) on a picture selects it, with the pen or a finger; a locked one
+                            // too, but then it can only be unlocked, not moved.
                             val tapped = lasso.all { (it - start).getDistance() < TAP_SLOP_DP }
                             val picture = if (tapped) currentImages.lastOrNull { it.contains(start.x, start.y) } else null
                             if (picture != null) {
@@ -875,7 +895,7 @@ fun InkCanvas(
             drawCircle(accent, radius = HANDLE_RADIUS_DP * scale, center = handle)
         }
         images.firstOrNull { it.id == selectedImageId }?.let { stored ->
-            drawImageFrame(liveImage?.takeIf { it.id == stored.id } ?: stored, scale, accent)
+            drawImageFrame(liveImage?.takeIf { it.id == stored.id } ?: stored, scale, accent, handles = !stored.locked)
         }
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
             if (bounds != null) {
@@ -988,7 +1008,7 @@ private fun PageImage.handleDistance(point: Offset, handle: Pair<Float, Float>) 
     (point - handlePosition(handle)).getDistance()
 
 /** Dashed frame, scale dots (corner, right edge, bottom edge) and rotate handle around the selected picture. */
-private fun DrawScope.drawImageFrame(image: PageImage, scale: Float, accent: Color) {
+private fun DrawScope.drawImageFrame(image: PageImage, scale: Float, accent: Color, handles: Boolean = true) {
     val corners = listOf(-1f to -1f, 1f to -1f, 1f to 1f, -1f to 1f).map { (sx, sy) ->
         val (px, py) = image.toPage(sx * image.width / 2, sy * image.height / 2)
         Offset(px * scale, py * scale)
@@ -999,6 +1019,7 @@ private fun DrawScope.drawImageFrame(image: PageImage, scale: Float, accent: Col
         close()
     }
     drawPath(frame, accent, style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f))))
+    if (!handles) return
     val topMiddle = image.toPage(0f, -image.height / 2).let { Offset(it.first * scale, it.second * scale) }
     val rotateAt = image.handlePosition(ROTATE_HANDLE).let { Offset(it.x * scale, it.y * scale) }
     drawLine(accent, topMiddle, rotateAt, strokeWidth = 2f)

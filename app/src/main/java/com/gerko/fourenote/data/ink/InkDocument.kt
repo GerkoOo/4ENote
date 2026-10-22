@@ -134,6 +134,8 @@ data class PageImage(
     val requested: Boolean = false,
     /** A photo frame's name, e.g. "Photo 2", so the right photo goes in the right frame. */
     val label: String = "",
+    /** Locked in place: fingers and the pen can't move or resize it until it is unlocked. */
+    val locked: Boolean = false,
 ) {
     /** True if this is an empty frame waiting for a photo. */
     val waitingForPhoto: Boolean get() = requested && file.isEmpty()
@@ -298,7 +300,8 @@ object InkSerializer {
                             .put("r", img.rotation.toDouble()).put("o", img.opacity.toDouble())
                             .apply { if (img.inverted) put("invert", true) }
                             .apply { if (img.requested) put("req", true) }
-                            .apply { if (img.label.isNotEmpty()) put("lbl", img.label) },
+                            .apply { if (img.label.isNotEmpty()) put("lbl", img.label) }
+                            .apply { if (img.locked) put("lock", true) },
                     )
                 }
                 json.put("images", images)
@@ -401,6 +404,7 @@ object InkSerializer {
                 inverted = o.optBoolean("invert"),
                 requested = o.optBoolean("req"),
                 label = o.optString("lbl"),
+                locked = o.optBoolean("lock"),
             )
         }
         val textsJson = json.optJSONArray("texts") ?: JSONArray()

@@ -213,6 +213,7 @@ class NoteEditorViewModel(
     /** Calligraphy style: pointed pen (bold only going down) or flat nib (bold both ways, angle set on the dial). */
     var pointedNib by mutableStateOf(true)
     var threeFingerDoubleTapRedo by mutableStateOf(true)
+    var penAndFingerSelect by mutableStateOf(false)
 
     private val undoStack = ArrayDeque<Snapshot>()
     private val redoStack = ArrayDeque<Snapshot>()
@@ -294,6 +295,7 @@ class NoteEditorViewModel(
         secondaryButtonAction = saved.secondaryButtonAction
         twoFingerDoubleTapUndo = saved.twoFingerDoubleTapUndo
         threeFingerDoubleTapRedo = saved.threeFingerDoubleTapRedo
+        penAndFingerSelect = saved.penAndFingerSelect
         autoLatex = saved.autoLatex
         pointedNib = saved.pointedNib
         highlighterWidth = saved.highlighterWidth
@@ -307,7 +309,7 @@ class NoteEditorViewModel(
                     tool, penColor, highlighterColor, penWidth, inkPenWidth, calligraphyWidth, highlighterWidth,
                     smoothing, stylusOnly, scribbleToErase, eraseWholeStrokes, null, nibDegrees,
                     customColors.toList(), primaryButtonAction, secondaryButtonAction, twoFingerDoubleTapUndo, threeFingerDoubleTapRedo,
-                    autoLatex, pointedNib,
+                    autoLatex, pointedNib, penAndFingerSelect,
                 )
             }.drop(1).collect(toolPreferences::save)
         }
@@ -904,6 +906,18 @@ class NoteEditorViewModel(
         recordUndo()
         page.images[index] = page.images[index].let { it.copy(rotation = (it.rotation + degrees) % 360f) }
         persist()
+    }
+
+    /** Locks the selected picture in place, or unlocks it. */
+    fun toggleSelectedImageLocked() {
+        val (page, index) = selected() ?: return
+        recordUndo()
+        page.images[index] = page.images[index].let { it.copy(locked = !it.locked) }
+        persist()
+        if (page.images[index].locked) {
+            message = "Picture locked. To unlock it, tap it with the lasso tool."
+            selectedImage = null
+        }
     }
 
     fun toggleSelectedImageInverted() {

@@ -1,5 +1,7 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.AddAPhoto
 import com.gerko.fourenote.ui.scan.ScanDialog
 import androidx.compose.ui.text.font.FontStyle
@@ -689,6 +691,7 @@ private fun PageList(
                             images = page.images,
                             imageBitmaps = imageBitmaps,
                             selectedImageId = viewModel.selectedImage?.takeIf { it.first == page.id }?.second,
+                            penAndFingerSelect = viewModel.penAndFingerSelect,
                             onImageSelect = { viewModel.selectImage(page.id, it) },
                             onImageChange = { viewModel.updateImage(page.id, it) },
                             onTextTap = { x, y -> viewModel.tapWithText(page.id, x, y) },
@@ -852,6 +855,13 @@ private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, modifier:
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
         ) {
+            // A locked picture only offers unlocking.
+            TextButton(onClick = viewModel::toggleSelectedImageLocked) {
+                Icon(if (image.locked) Icons.Filled.LockOpen else Icons.Filled.Lock, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text(if (image.locked) "Unlock" else "Lock")
+            }
+            if (!image.locked) {
             TextButton(onClick = viewModel::deleteSelectedImage) {
                 Icon(Icons.Filled.Delete, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
@@ -879,6 +889,7 @@ private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, modifier:
                     modifier = Modifier.width(140.dp),
                 )
                 Text("${(image.opacity * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium)
+            }
             }
             TextButton(onClick = { viewModel.selectedImage?.let { viewModel.selectImage(it.first, null) } }) { Text("Done") }
         }
@@ -1216,6 +1227,9 @@ private fun PenSettingsDialog(viewModel: NoteEditorViewModel, onDismiss: () -> U
                 SettingSwitch("Two-finger double-tap to undo", viewModel.twoFingerDoubleTapUndo) { viewModel.twoFingerDoubleTapUndo = it }
                 SettingSwitch("Three-finger double-tap to redo", viewModel.threeFingerDoubleTapRedo) { viewModel.threeFingerDoubleTapRedo = it }
                 SettingSwitch("Stylus only (fingers scroll, palm ignored)", viewModel.stylusOnly) { viewModel.stylusOnly = it }
+                SettingSwitch("Hold pen and finger on a picture to select it (any tool)", viewModel.penAndFingerSelect) {
+                    viewModel.penAndFingerSelect = it
+                }
                 Text(
                     "Draw a line, circle, triangle or rectangle and hold the pen still to straighten it. " +
                         "Draw a loop around something, then hold a finger inside it to select it.",

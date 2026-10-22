@@ -33,6 +33,8 @@ data class ToolSettings(
     val autoLatex: Boolean = true,
     /** Calligraphy with a pointed pen (bold down-strokes, like Notewise) rather than a flat nib. */
     val pointedNib: Boolean = true,
+    /** With any tool, holding the pen and a finger on a picture selects it. */
+    val penAndFingerSelect: Boolean = false,
 )
 
 /**
@@ -77,6 +79,7 @@ class ToolPreferences(context: Context) {
             secondaryButtonAction = action("secondaryButtonAction") ?: PenButtonAction.ERASE,
             twoFingerDoubleTapUndo = prefs.getBoolean("twoFingerDoubleTapUndo", true),
             threeFingerDoubleTapRedo = prefs.getBoolean("threeFingerDoubleTapRedo", true),
+            penAndFingerSelect = prefs.getBoolean("penAndFingerSelect", false),
             autoLatex = prefs.getBoolean("autoLatex", true),
             pointedNib = prefs.getBoolean("pointedNib", true),
         )
@@ -103,6 +106,7 @@ class ToolPreferences(context: Context) {
             .putString("secondaryButtonAction", settings.secondaryButtonAction.name)
             .putBoolean("twoFingerDoubleTapUndo", settings.twoFingerDoubleTapUndo)
             .putBoolean("threeFingerDoubleTapRedo", settings.threeFingerDoubleTapRedo)
+            .putBoolean("penAndFingerSelect", settings.penAndFingerSelect)
             .putBoolean("autoLatex", settings.autoLatex)
             .putBoolean("pointedNib", settings.pointedNib)
             .apply()
