@@ -247,7 +247,7 @@ class NoteEditorViewModel(
     var recognizingMath by mutableStateOf(false)
         private set
 
-    // The handwriting last read as maths, so its formula can be placed on the page.
+    // The handwriting last read (as text or maths), so the result can be placed on the page.
     private var mathSource: Pair<String, List<InkStroke>>? = null
 
     /** Handwriting-to-text state for the selection; null when the dialog is closed. */
@@ -1082,6 +1082,7 @@ class NoteEditorViewModel(
         val strokes = page.strokes.filter { it in selection }
         if (strokes.isEmpty()) return
         recognizingMath = false
+        mathSource = page.id to strokes
         val reader = textRecognizer ?: HandwritingRecognizer(attachments.context).also { textRecognizer = it }
         viewModelScope.launch {
             recognition = try {
@@ -1173,6 +1174,35 @@ class NoteEditorViewModel(
                 message = e.message ?: "Couldn't place the formula"
             }
         }
+    }
+
+    /**
+     * Puts [text] on the page as a typed text box in the handwriting's colour and about its size:
+     * in place of the handwriting if [replace], otherwise just below it. One undo step.
+     */
+    fun placeText(text: String, replace: Boolean) {
+        val (pageId, strokes) = mathSource ?: return
+        val page = page(pageId) ?: return
+        if (text.isBlank()) return
+        val bounds = HandwritingLines.bounds(strokes)
+        val color = strokes.firstOrNull()?.color ?: penColor.toArgb()
+        val lines = text.lines().size.coerceAtLeast(1)
+        // Handwriting's letters are roughly half its line height; typed text the same size reads naturally.
+        val size = (bounds.height / lines * 0.55f).coerceIn(12f, 40f)
+        val width = maxOf(bounds.width, 160f).coerceAtMost(page.width - 24f)
+        val x = bounds.left.coerceIn(0f, page.width - width)
+        val y = if (replace) bounds.top else bounds.bottom + 12f
+        recordUndo()
+        if (replace) {
+            page.strokes.removeAll { it in strokes }
+            clearSelection()
+        }
+        page.texts.add(
+            PageText(x = x, y = y, width = width, text = text.trim(), style = textStyle.copy(size = size, color = color), autoMath = false),
+        )
+        persist()
+        recognition = null
+        message = if (replace) "Handwriting turned into text; tap it with the Text tool to edit" else "Text added below the handwriting"
     }
 
     fun closeRecognition() {

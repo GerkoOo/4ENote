@@ -107,6 +107,10 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
                     if (viewModel.recognizingMath) {
                         TextButton(onClick = { viewModel.placeFormula(text, replace = true) }) { Text("Replace handwriting") }
                         TextButton(onClick = { viewModel.placeFormula(text, replace = false) }) { Text("Insert below") }
+                    } else {
+                        // Typed, editable text on the page instead of (or under) the handwriting.
+                        TextButton(onClick = { viewModel.placeText(text, replace = true) }) { Text("Replace handwriting") }
+                        TextButton(onClick = { viewModel.placeText(text, replace = false) }) { Text("Insert below") }
                     }
                     TextButton(onClick = {
                         val share = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
