@@ -1,20 +1,32 @@
 # 4ENote
 
-A native Android handwriting note-taking app with Google Drive sync, built for
-personal study use. Open source (GPL-3.0).
+A native Android handwriting note-taking app for tablets, built for personal
+study use. Open source (GPL-3.0).
+
+## Download
+
+[**⬇ Download the latest APK**](https://github.com/GerkoOo/4ENote/releases/latest/download/4ENote.apk)
+· [all releases](https://github.com/GerkoOo/4ENote/releases)
+
+Open the file on your Android tablet (Android 8 or newer) and allow your browser
+to install apps when asked. This is a beta: Google Drive and OneDrive sync are
+not ready yet.
+
+## Features
+
+- Pen, ink pen, calligraphy and highlighter; eraser, lasso and layers
+- Hold a drawn line, circle, triangle or rectangle to straighten it; tables
+- Handwriting to text, and handwritten maths to LaTeX (offline, open-source model)
+- Import PDFs and images (with dark-mode colour inversion), scan documents,
+  export and share as PDF
+- Lined, grid, dotted or blank paper; dark mode; full-screen page view
+- Quick pen dial, pen side buttons, scribble to erase, finger gestures
 
 ## Stack
 
-- Kotlin, Jetpack Compose (Material 3)
-- AGP 9.4.1 with built-in Kotlin compilation
-- `androidx.ink` for low-latency stylus/finger handwriting
-- Room for local storage
-- Google Sign-In (Credential Manager) + Drive REST API for cloud sync
-
-## Status
-
-Early scaffold. Handwriting canvas and Drive sync are being built as separate
-modules on top of this shared foundation.
+- Kotlin, Jetpack Compose (Material 3), Room
+- PdfBox-Android for PDF export, ONNX Runtime + Pix2Text for maths recognition,
+  JLaTeXMath for typesetting, Google ML Kit for handwriting and scanning
 
 ## Building
 

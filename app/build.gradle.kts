@@ -12,8 +12,8 @@ android {
         applicationId = "com.gerko.fourenote"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Tablets are arm64; x86_64 is for the emulator. Leaving out the 32-bit builds of the
         // native libraries (ONNX Runtime, ML Kit) keeps the APK much smaller.
