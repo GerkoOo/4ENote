@@ -1197,12 +1197,13 @@ class NoteEditorViewModel(
             page.strokes.removeAll { it in strokes }
             clearSelection()
         }
-        page.texts.add(
-            PageText(x = x, y = y, width = width, text = text.trim(), style = textStyle.copy(size = size, color = color), autoMath = false),
-        )
+        val box = PageText(x = x, y = y, width = width, text = text.trim(), style = textStyle.copy(size = size, color = color), autoMath = false)
+        page.texts.add(box)
         persist()
         recognition = null
-        message = if (replace) "Handwriting turned into text; tap it with the Text tool to edit" else "Text added below the handwriting"
+        // Open it for typing straight away, like any text box.
+        tool = Tool.TEXT
+        editingText = page.id to box.id
     }
 
     fun closeRecognition() {
