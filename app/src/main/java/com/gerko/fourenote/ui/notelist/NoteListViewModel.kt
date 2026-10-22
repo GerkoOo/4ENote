@@ -136,6 +136,19 @@ class NoteListViewModel(
         }
     }
 
+    /**
+     * A note dropped on a folder ([target]; null: the top): it moves there, and so do the other
+     * ticked notes if it was one of them.
+     */
+    fun dropNote(noteId: String, target: String?) {
+        val chosen = if (noteId in selected) selected else setOf(noteId)
+        clearSelection()
+        viewModelScope.launch {
+            repository.moveNotes(chosen, target)
+            onChanged()
+        }
+    }
+
     /** Moves the ticked notes into [target] (null: the top). */
     fun moveSelected(target: String?) {
         val chosen = selected

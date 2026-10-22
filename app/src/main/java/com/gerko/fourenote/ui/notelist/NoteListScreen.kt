@@ -1,5 +1,12 @@
 package com.gerko.fourenote.ui.notelist
 
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -122,6 +129,13 @@ fun NoteListScreen(
     var renaming by remember { mutableStateOf<Folder?>(null) }
     var movingFolder by remember { mutableStateOf<Folder?>(null) }
     var movingNotes by remember { mutableStateOf(false) }
+    // Drag and drop: the note being dragged, how far, and where things can be dropped (root pixels).
+    // A drop target is a folder id, or "" for the top of the home page.
+    var draggingNote by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var dragFinger by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val dropTargets = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.ui.geometry.Rect>() }
+    val dropTarget = if (draggingNote == null) null else dropTargets.entries.firstOrNull { dragFinger in it.value }?.key
     // Back leaves selecting first, then goes up a folder, before it leaves the app.
     BackHandler(enabled = selecting) { viewModel.clearSelection() }
     BackHandler(enabled = !selecting && here != null) { viewModel.goUp() }
@@ -162,7 +176,9 @@ fun NoteListScreen(
                         Text(
                             "4ENote",
                             color = if (path.isEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable(enabled = path.isNotEmpty()) { viewModel.openFolder(null) },
+                            modifier = Modifier
+                                .dropTarget("", dropTargets, highlighted = dropTarget == "" && path.isNotEmpty())
+                                .clickable(enabled = path.isNotEmpty()) { viewModel.openFolder(null) },
                         )
                         path.forEachIndexed { i, folder ->
                             Text("  ›  ", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -170,7 +186,9 @@ fun NoteListScreen(
                             Text(
                                 folder.name,
                                 color = if (last) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.clickable(enabled = !last) { viewModel.openFolder(folder.id) },
+                                modifier = Modifier
+                                    .dropTarget(folder.id, dropTargets, highlighted = dropTarget == folder.id && !last)
+                                    .clickable(enabled = !last) { viewModel.openFolder(folder.id) },
                             )
                         }
                     }
@@ -259,12 +277,15 @@ fun NoteListScreen(
                     FolderCard(
                         folder = folder,
                         count = count,
+                        highlighted = dropTarget == folder.id,
+                        modifier = Modifier.dropTarget(folder.id, dropTargets, highlighted = false),
                         onClick = { if (!selecting) viewModel.openFolder(folder.id) },
                         onLongClick = { if (!selecting) folderMenu = folder },
                     )
                 }
                 items(notes, key = { it.id }) { note ->
                     // Holding a note starts selecting; while selecting, taps tick and untick notes.
+                    val dragged = draggingNote == note.id
                     NoteCard(
                         note = note,
                         backgrounds = backgrounds,
@@ -272,6 +293,32 @@ fun NoteListScreen(
                         onClick = { if (selecting) viewModel.toggleSelected(note.id) else onOpenNote(note.id) },
                         onLongClick = { viewModel.toggleSelected(note.id) },
                         loadThumbnail = viewModel::thumbnail,
+                        onDragStart = { finger ->
+                            draggingNote = note.id
+                            dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                            dragFinger = finger
+                        },
+                        onDrag = { delta, finger ->
+                            dragOffset += delta
+                            dragFinger = finger
+                        },
+                        onDrop = {
+                            val target = dropTargets.entries.firstOrNull { dragFinger in it.value }?.key
+                            draggingNote = null
+                            if (target != null) viewModel.dropNote(note.id, target.ifEmpty { null })
+                        },
+                        modifier = Modifier
+                            .zIndex(if (dragged) 1f else 0f)
+                            .graphicsLayer {
+                                if (dragged) {
+                                    translationX = dragOffset.x
+                                    translationY = dragOffset.y
+                                    scaleX = 0.9f
+                                    scaleY = 0.9f
+                                    alpha = 0.85f
+                                    shadowElevation = 12.dp.toPx()
+                                }
+                            },
                     )
                 }
             }
@@ -443,12 +490,61 @@ private fun NoteCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     loadThumbnail: suspend (String) -> InkDocument?,
+    onDragStart: (finger: androidx.compose.ui.geometry.Offset) -> Unit = {},
+    onDrag: (delta: androidx.compose.ui.geometry.Offset, finger: androidx.compose.ui.geometry.Offset) -> Unit = { _, _ -> },
+    onDrop: () -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
+    var coordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val currentOnClick by androidx.compose.runtime.rememberUpdatedState(onClick)
+    val currentOnLongClick by androidx.compose.runtime.rememberUpdatedState(onLongClick)
+    val currentOnDragStart by androidx.compose.runtime.rememberUpdatedState(onDragStart)
+    val currentOnDrag by androidx.compose.runtime.rememberUpdatedState(onDrag)
+    val currentOnDrop by androidx.compose.runtime.rememberUpdatedState(onDrop)
     Card(
         border = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = Modifier
+        modifier = modifier
             .padding(8.dp)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .onGloballyPositioned { coordinates = it }
+            // A tap opens; holding picks the note up: drag it onto a folder, or let go where it is
+            // to tick it. A quick drag before the hold scrolls the page as usual.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull false
+                            if (change.isConsumed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                return@withTimeoutOrNull false // a scroll
+                            }
+                            if (!change.pressed) {
+                                currentOnClick()
+                                return@withTimeoutOrNull false
+                            }
+                        }
+                        @Suppress("UNREACHABLE_CODE") false
+                    } == null
+                    if (!held) return@awaitEachGesture
+                    fun root(p: androidx.compose.ui.geometry.Offset) = coordinates?.localToRoot(p) ?: p
+                    currentOnDragStart(root(down.position))
+                    var last = down.position
+                    var moved = 0f
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        change.consume()
+                        if (!change.pressed) break
+                        val delta = change.position - last
+                        last = change.position
+                        moved += delta.getDistance()
+                        currentOnDrag(delta, root(change.position))
+                    }
+                    currentOnDrop()
+                    // Held without moving: tick it, as before.
+                    if (moved < viewConfiguration.touchSlop) currentOnLongClick()
+                }
+            },
     ) {
         Box {
             NoteThumbnail(note, backgrounds, loadThumbnail)
@@ -537,9 +633,18 @@ private fun NoteThumbnail(note: Note, backgrounds: BackgroundLoader, load: suspe
 
 /** A folder tile on the home page: tap to open it, hold for rename, move and delete. */
 @Composable
-private fun FolderCard(folder: Folder, count: Int, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun FolderCard(
+    folder: Folder,
+    count: Int,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    highlighted: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     Card(
-        modifier = Modifier
+        // Lights up while a note is dragged over it.
+        border = if (highlighted) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
+        modifier = modifier
             .padding(8.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
@@ -616,4 +721,23 @@ private fun MoveDialog(title: String, folders: List<Folder>, exclude: String?, o
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** Marks a place a dragged note can be dropped on ([key]: a folder id, "" for the top). */
+@Composable
+private fun Modifier.dropTarget(
+    key: String,
+    targets: MutableMap<String, androidx.compose.ui.geometry.Rect>,
+    highlighted: Boolean,
+): Modifier {
+    androidx.compose.runtime.DisposableEffect(key) { onDispose { targets.remove(key) } }
+    return this
+        .onGloballyPositioned { targets[key] = it.boundsInRoot() }
+        .then(
+            if (highlighted) {
+                Modifier.background(MaterialTheme.colorScheme.primaryContainer, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            } else {
+                Modifier
+            },
+        )
 }
