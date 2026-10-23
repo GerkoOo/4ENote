@@ -7,6 +7,11 @@ plugins {
 }
 
 android {
+    testOptions {
+        // WebDavProvider sets WebDAV's request methods (PROPFIND, MKCOL) by reflection, which Android
+        // allows; the desktop Java running unit tests needs java.net opened for it.
+        unitTests.all { it.jvmArgs("--add-opens=java.base/java.net=ALL-UNNAMED", "--add-opens=java.base/sun.net.www.protocol.http=ALL-UNNAMED") }
+    }
     namespace = "com.gerko.fourenote"
     compileSdk = 37
 
