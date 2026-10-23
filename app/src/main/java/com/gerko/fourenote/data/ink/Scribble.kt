@@ -132,14 +132,18 @@ object Scribble {
 }
 
 /**
- * Strike out to erase: one straight, roughly level line drawn through the middle of words and
- * held still at its end deletes them, alongside scrubbing. It must cross at least two strokes,
- * so the bar of a t or f never erases its letter. A line under or over words (underlining) or
- * across empty paper stays as ink (held, it snaps straight as usual).
+ * Strike out to erase: one stroke drawn through the middle of words and straight back over
+ * them (there and back) deletes them, alongside scrubbing. It must cross at least two strokes,
+ * or one joined-up word along most of it, so the bar of a t or f never erases its letter. A line
+ * under or over words (underlining) or across empty paper stays as ink.
  */
 object StrikeOut {
     /** How much longer than straight the line may be; a hand-drawn straight line wobbles a little. */
     private const val MAX_BEND = 1.12f
+    /** How much of the way there the way back must cover. */
+    private const val BACK_SHARE = 0.6f
+    /** How far (as a share of its length) the way back may stray from the way there. */
+    private const val MAX_RETURN_OFFSET = 0.15f
     /** How far from level the line may lean, in degrees. */
     private const val MAX_TILT_DEG = 25.0
     private const val MIN_LENGTH = 20f
@@ -156,6 +160,49 @@ object StrikeOut {
     private const val MIN_CROSSED = 2
     private const val WORD_WIDTH_TO_HEIGHT = 1.5f
     private const val WORD_COVER = 0.7f
+
+    /**
+     * The strike-out gesture: one stroke across the words and straight back over them the
+     * other way (there and back, roughly level and straight). Returns the line it drew (from
+     * where it started to where it turned), or null if [stroke] isn't one. A t-bar or an
+     * underline only goes one way; a scribble goes back and forth many times (see Scribble).
+     */
+    fun backAndForth(stroke: InkStroke): InkStroke? {
+        val p = stroke.points
+        val n = p.size / 2
+        if (n < 4) return null
+        // The turn: the point furthest from the start.
+        var turn = 0
+        var far = 0f
+        for (i in 0 until n) {
+            val d = hypot(p[2 * i] - p[0], p[2 * i + 1] - p[1])
+            if (d > far) { far = d; turn = i }
+        }
+        if (far < MIN_LENGTH || turn == 0 || turn == n - 1) return null
+        val dx = p[2 * turn] - p[0]
+        val dy = p[2 * turn + 1] - p[1]
+        if (Math.toDegrees(atan2(abs(dy).toDouble(), abs(dx).toDouble())) > MAX_TILT_DEG) return null
+        fun pathLength(from: Int, to: Int): Float {
+            var length = 0f
+            for (i in from + 1..to) length += hypot(p[2 * i] - p[2 * i - 2], p[2 * i + 1] - p[2 * i - 1])
+            return length
+        }
+        // Both ways roughly straight, and the way back covers most of the way there.
+        val back = hypot(p[2 * n - 2] - p[2 * turn], p[2 * n - 1] - p[2 * turn + 1])
+        if (back < far * BACK_SHARE) return null
+        if (pathLength(0, turn) > far * MAX_BEND || pathLength(turn, n - 1) > back * MAX_BEND) return null
+        // And back along the same line, not off somewhere else: the return stays close to the way out.
+        val ux = dx / far
+        val uy = dy / far
+        var off = 0f
+        for (i in turn until n) {
+            val rx = p[2 * i] - p[0]
+            val ry = p[2 * i + 1] - p[1]
+            off = maxOf(off, abs(rx * uy - ry * ux))
+        }
+        if (off > far * MAX_RETURN_OFFSET + stroke.width * 2) return null
+        return InkStroke(stroke.color, stroke.width, false, floatArrayOf(p[0], p[1], p[2 * turn], p[2 * turn + 1]))
+    }
 
     /** True if [stroke] is a straight, roughly level line: maybe a strike-out. */
     fun isLine(stroke: InkStroke): Boolean {

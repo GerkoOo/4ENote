@@ -589,9 +589,10 @@ class NoteEditorViewModel(
             }
             // Nothing underneath: it was a zigzag on purpose, so keep it as ink.
         }
-        // A straight line through the middle of words, held still at its end, strikes them out.
-        if (scribbleToErase && held && !stroke.highlighter && StrikeOut.isLine(stroke)) {
-            val struck = StrikeOut.struckBy(stroke, strokes.filter { it.layerId == activeLayerId })
+        // A line through the middle of words and straight back over them strikes them out.
+        val strike = if (scribbleToErase && !stroke.highlighter) StrikeOut.backAndForth(stroke) else null
+        if (strike != null) {
+            val struck = StrikeOut.struckBy(strike, strokes.filter { it.layerId == activeLayerId })
             if (struck.isNotEmpty()) {
                 recordUndo()
                 val gone = struck.toSet()

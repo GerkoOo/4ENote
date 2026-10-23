@@ -66,4 +66,25 @@ class StrikeOutTest {
         val hello = word("hello", 40f, 100f)
         assertTrue(StrikeOut.struckBy(line(10f, 112f, 32f, 112f), listOf(hello, stem)).isEmpty())
     }
+
+    private fun thereAndBack(x0: Float, x1: Float, y: Float, backTo: Float = x0, drift: Float = 0f): InkStroke {
+        val out = (0..10).flatMap { listOf(x0 + (x1 - x0) * it / 10f, y) }
+        val back = (1..10).flatMap { listOf(x1 + (backTo - x1) * it / 10f, y + drift * it / 10f) }
+        return stroke("strike", *(out + back).toFloatArray())
+    }
+
+    @Test
+    fun thereAndBackIsTheGesture() {
+        assertTrue(StrikeOut.backAndForth(thereAndBack(0f, 200f, 100f)) != null)
+        assertTrue(StrikeOut.backAndForth(thereAndBack(0f, 200f, 100f, backTo = 60f)) != null) // most of the way back
+        assertTrue(StrikeOut.backAndForth(line(0f, 100f, 200f, 100f)) == null) // one way only: a t-bar or underline
+        assertTrue(StrikeOut.backAndForth(thereAndBack(0f, 200f, 100f, backTo = 170f)) == null) // barely comes back
+        assertTrue(StrikeOut.backAndForth(thereAndBack(0f, 200f, 100f, drift = 120f)) == null) // comes back somewhere else
+    }
+
+    @Test
+    fun thereAndBackThroughAWordStrikesIt() {
+        val gesture = StrikeOut.backAndForth(thereAndBack(-5f, 65f, 115f))!!
+        assertEquals(listOf("hello"), StrikeOut.struckBy(gesture, listOf(word("hello", 0f, 100f))).map { it.id })
+    }
 }
