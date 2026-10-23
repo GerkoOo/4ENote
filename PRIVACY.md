@@ -41,9 +41,10 @@ handwriting is ever sent anywhere** for recognition.
 
 ## Checking for updates
 
-Only when you tap **Check for updates**, 4ENote asks GitHub (github.com) which version is the
-newest. That works like visiting a website (GitHub sees your IP address); nothing about you or your
-notes is sent. 4ENote never checks by itself.
+To tell you about new versions, 4ENote asks GitHub (github.com) which version is the newest: when
+you open the app (at most once every 6 hours), and whenever you tap **Check for updates**. That works
+like visiting a website (GitHub sees your IP address); nothing about you or your notes is sent. You
+can turn the automatic check off in the ⋮ menu (**Look for updates by itself**).
 
 ## Backups
 

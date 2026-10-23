@@ -34,6 +34,14 @@ object UpdateChecker {
         }
     }
 
+    /** True when the background check may ask GitHub again: only if [automatic], and not more often than [every]. */
+    fun isDue(automatic: Boolean, now: Long, lastChecked: Long, every: Long): Boolean =
+        automatic && now - lastChecked > every
+
+    /** True when [latest] is newer than [current] and the user hasn't said "Later" to it. */
+    fun worthShowing(latest: String?, current: String, dismissed: String?): Boolean =
+        latest != null && isNewer(latest, current) && latest != dismissed
+
     /** True if [candidate] (like "0.3.0") is a later version than [current]. */
     fun isNewer(candidate: String, current: String): Boolean {
         fun parts(v: String) = v.removePrefix("v").split('.', '-').map { it.toIntOrNull() ?: 0 }
@@ -45,5 +53,38 @@ object UpdateChecker {
             if (x != y) return x > y
         }
         return false
+    }
+}
+
+/**
+ * Checks for a new version in the background when the app opens: at most once every
+ * [CHECK_EVERY_MS] (GitHub limits how often one connection may ask), and only while
+ * [automatic] is on. Remembers the newest version found, and the one the user said "Later" to.
+ */
+class UpdateWatch(context: android.content.Context, private val currentVersion: String) {
+    private val prefs = context.getSharedPreferences("updates", android.content.Context.MODE_PRIVATE)
+
+    var automatic: Boolean
+        get() = prefs.getBoolean("auto", true)
+        set(value) = prefs.edit().putBoolean("auto", value).apply()
+
+    /** A newer version worth telling the user about, checking GitHub first if it's time; null if none. */
+    suspend fun newerVersion(now: Long = System.currentTimeMillis()): UpdateChecker.Release? {
+        if (UpdateChecker.isDue(automatic, now, prefs.getLong("checked", 0L), CHECK_EVERY_MS)) {
+            runCatching { UpdateChecker.latest() }.onSuccess { latest ->
+                prefs.edit().putLong("checked", now).putString("latest", latest.version).putString("notes", latest.notes)
+                    .putString("page", latest.page).apply()
+            }
+        }
+        val latest = prefs.getString("latest", null)
+        if (!UpdateChecker.worthShowing(latest, currentVersion, prefs.getString("dismissed", null))) return null
+        return UpdateChecker.Release(latest!!, prefs.getString("notes", "").orEmpty(), prefs.getString("page", "").orEmpty())
+    }
+
+    /** "Later": don't mention [version] again (a newer one still will be). */
+    fun dismiss(version: String) = prefs.edit().putString("dismissed", version).apply()
+
+    private companion object {
+        const val CHECK_EVERY_MS = 6 * 60 * 60 * 1000L
     }
 }

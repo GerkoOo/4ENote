@@ -43,6 +43,7 @@ fun FourENoteNavGraph(
                     repository,
                     syncManager::requestSync,
                     (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.gerko.fourenote.FourENoteApp).scanInbox,
+                    (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.gerko.fourenote.FourENoteApp).updateWatch,
                 ),
             )
             NoteListScreen(

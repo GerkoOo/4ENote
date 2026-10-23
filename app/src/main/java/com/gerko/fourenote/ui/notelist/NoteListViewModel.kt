@@ -22,7 +22,32 @@ class NoteListViewModel(
     private val repository: NoteRepository,
     private val onChanged: () -> Unit,
     private val inbox: ScanInbox,
+    private val updates: com.gerko.fourenote.data.update.UpdateWatch? = null,
 ) : ViewModel() {
+    /** A newer version found in the background, for the banner on the home page. */
+    var availableUpdate by mutableStateOf<com.gerko.fourenote.data.update.UpdateChecker.Release?>(null)
+        private set
+
+    /** Whether the app looks for new versions by itself. */
+    var autoUpdateCheck by mutableStateOf(updates?.automatic ?: false)
+        private set
+
+    init {
+        viewModelScope.launch { availableUpdate = updates?.newerVersion() }
+    }
+
+    fun changeAutoUpdateCheck(on: Boolean) {
+        updates?.automatic = on
+        autoUpdateCheck = on
+        if (!on) availableUpdate = null
+    }
+
+    /** "Later" on the banner: not shown again for this version. */
+    fun dismissUpdate() {
+        availableUpdate?.let { updates?.dismiss(it.version) }
+        availableUpdate = null
+    }
+
     /** Null until the first load from the database completes. */
     val notes: StateFlow<List<Note>?> = repository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -266,9 +291,10 @@ class NoteListViewModel(
         private val repository: NoteRepository,
         private val onChanged: () -> Unit,
         private val inbox: ScanInbox,
+        private val updates: com.gerko.fourenote.data.update.UpdateWatch? = null,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            NoteListViewModel(repository, onChanged, inbox) as T
+            NoteListViewModel(repository, onChanged, inbox, updates) as T
     }
 }

@@ -31,6 +31,11 @@ class FourENoteApp : Application() {
 
     val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }
 
+    /** Looks for new versions in the background (see UpdateWatch). */
+    val updateWatch: com.gerko.fourenote.data.update.UpdateWatch by lazy {
+        com.gerko.fourenote.data.update.UpdateWatch(this, BuildConfig.VERSION_NAME)
+    }
+
     /** The focus (Pomodoro) timer shown as a bar in the editor. */
     val focusTimer: com.gerko.fourenote.data.focus.FocusTimer by lazy { com.gerko.fourenote.data.focus.FocusTimer(this) }
 

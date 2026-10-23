@@ -265,6 +265,13 @@ fun NoteListScreen(
                                 },
                             )
                             androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Look for updates by itself") },
+                                leadingIcon = {
+                                    androidx.compose.material3.Checkbox(checked = viewModel.autoUpdateCheck, onCheckedChange = null)
+                                },
+                                onClick = { viewModel.changeAutoUpdateCheck(!viewModel.autoUpdateCheck) },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
                                 text = { Text("Check for updates") },
                                 leadingIcon = { Icon(Icons.Filled.SystemUpdate, contentDescription = null) },
                                 onClick = {
@@ -303,6 +310,31 @@ fun NoteListScreen(
             )
         },
     ) { padding ->
+        // A newer version found in the background: a small banner, until downloaded or "Later".
+        viewModel.availableUpdate?.let { update ->
+            androidx.compose.material3.Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                modifier = Modifier.padding(padding).padding(horizontal = 24.dp, vertical = 8.dp).fillMaxWidth().zIndex(1f),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp, end = 4.dp)) {
+                    Icon(Icons.Filled.SystemUpdate, contentDescription = null)
+                    Text("  4ENote ${update.version} is available", modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        viewModel.dismissUpdate()
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(com.gerko.fourenote.data.update.UpdateChecker.DOWNLOAD),
+                                ),
+                            )
+                        }
+                    }) { Text("Download") }
+                    TextButton(onClick = viewModel::dismissUpdate) { Text("Later") }
+                }
+            }
+        }
         val allNotes = notes ?: return@Scaffold
         // A note whose folder is gone (deleted on another device) shows at the top.
         val folderIds = folders.mapTo(HashSet()) { it.id }
