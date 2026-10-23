@@ -22,7 +22,7 @@ import java.util.UUID
  * a private folder per note. Pages refer to them by file name.
  */
 class AttachmentStore(val context: Context) {
-    private val root = File(context.filesDir, "attachments")
+    val root = File(context.filesDir, "attachments")
 
     fun dir(noteId: String) = File(root, noteId)
 

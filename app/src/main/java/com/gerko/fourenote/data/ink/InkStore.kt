@@ -24,7 +24,7 @@ import java.util.zip.GZIPOutputStream
  * Only pages whose strokes changed since the last save are rewritten. Every file is written
  * to a temporary name first and then moved into place, so a crash leaves the old version.
  */
-class InkStore(private val root: File) {
+class InkStore(val root: File) {
     private val locks = ConcurrentHashMap<String, Mutex>()
 
     // The strokes last written for each page, per note: a page whose stroke list holds the same
@@ -110,6 +110,11 @@ class InkStore(private val root: File) {
             // A copy starts unsynced.
             snapshotFile(toNoteId).delete()
         }
+    }
+
+    /** Forgets what was last written for a note, before its files are replaced from outside (a backup). */
+    suspend fun forget(noteId: String) = locked(noteId) {
+        written.remove(noteId)
     }
 
     suspend fun delete(noteId: String) = locked(noteId) {

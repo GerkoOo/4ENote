@@ -74,6 +74,17 @@ class NoteRepository(
         dao.upsert(folder.copy(parentId = parentId, updatedAt = System.currentTimeMillis()))
     }
 
+    /** Backups of all notes and folders (see Backup). */
+    val backup = com.gerko.fourenote.data.backup.Backup(
+        inkRoot = ink.root,
+        attachmentsRoot = attachments.root,
+        notes = { legacyMoved.await(); dao.getAllForSync() },
+        folders = { folders?.getAll().orEmpty() },
+        saveNote = { dao.upsert(it) },
+        saveFolders = { folders?.upsertAll(it) },
+        forgetInk = { id -> ink.forget(id) },
+    )
+
     override suspend fun foldersForSync(): List<Folder>? = folders?.getAll()
 
     override suspend fun saveFoldersFromSync(folders: List<Folder>) {

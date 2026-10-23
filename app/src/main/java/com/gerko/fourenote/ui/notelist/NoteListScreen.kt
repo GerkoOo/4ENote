@@ -1,5 +1,9 @@
 package com.gerko.fourenote.ui.notelist
 
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.zIndex
@@ -143,6 +147,13 @@ fun NoteListScreen(
             if (draggingNote == null) null else dropTargets.entries.firstOrNull { dragFinger in it.value }?.key
         }
     }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val saveBackup = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri -> if (uri != null) viewModel.backUp { context.contentResolver.openOutputStream(uri) } }
+    val openBackup = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) viewModel.restore { context.contentResolver.openInputStream(uri) } }
     // Back leaves selecting first, then goes up a folder, before it leaves the app.
     BackHandler(enabled = selecting) { viewModel.clearSelection() }
     BackHandler(enabled = !selecting && here != null) { viewModel.goUp() }
@@ -228,6 +239,39 @@ fun NoteListScreen(
                             }
                         } else {
                             Icon(Icons.Filled.DocumentScanner, contentDescription = "Scan for later")
+                        }
+                    }
+                    // Backup, restore and updates.
+                    Box {
+                        var menu by remember { mutableStateOf(false) }
+                        IconButton(onClick = { menu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        }
+                        androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Back up all notes…") },
+                                leadingIcon = { Icon(Icons.Filled.Backup, contentDescription = null) },
+                                onClick = {
+                                    menu = false
+                                    saveBackup.launch("4ENote backup ${java.time.LocalDate.now()}.zip")
+                                },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Restore from a backup…") },
+                                leadingIcon = { Icon(Icons.Filled.Restore, contentDescription = null) },
+                                onClick = {
+                                    menu = false
+                                    openBackup.launch(arrayOf("application/zip", "application/octet-stream"))
+                                },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Check for updates") },
+                                leadingIcon = { Icon(Icons.Filled.SystemUpdate, contentDescription = null) },
+                                onClick = {
+                                    menu = false
+                                    viewModel.checkForUpdate()
+                                },
+                            )
                         }
                     }
                     IconButton(onClick = onOpenSupport) {
@@ -348,6 +392,24 @@ fun NoteListScreen(
                 }
             }
         }
+    }
+    viewModel.report?.let { report ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissReport,
+            title = { Text(report.title) },
+            text = { if (report.text.isNotEmpty()) Text(report.text) else androidx.compose.material3.LinearProgressIndicator() },
+            confirmButton = {
+                if (report.download != null) {
+                    TextButton(onClick = {
+                        viewModel.dismissReport()
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(report.download))) }
+                    }) { Text("Download") }
+                } else {
+                    TextButton(onClick = viewModel::dismissReport) { Text("OK") }
+                }
+            },
+            dismissButton = { if (report.download != null) TextButton(onClick = viewModel::dismissReport) { Text("Later") } },
+        )
     }
     if (naming) {
         NameDialog(title = "New folder", initial = "", confirm = "Create", onDone = { naming = false; if (it != null) viewModel.createFolder(it) })

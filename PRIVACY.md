@@ -39,6 +39,17 @@ the open-source models are downloaded once from Hugging Face (huggingface.co). T
 works like visiting a website (Hugging Face sees your IP address); **none of your notes or
 handwriting is ever sent anywhere** for recognition.
 
+## Checking for updates
+
+Only when you tap **Check for updates**, 4ENote asks GitHub (github.com) which version is the
+newest. That works like visiting a website (GitHub sees your IP address); nothing about you or your
+notes is sent. 4ENote never checks by itself.
+
+## Backups
+
+**Back up all notes** writes your notes, pictures and folders into one file, saved wherever you
+choose. It stays under your control; 4ENote sends it nowhere.
+
 ## Camera
 
 The document scanner uses your camera only while it is open. Photos are processed on your
@@ -49,7 +60,8 @@ device and only end up in the note you insert them into.
 - No user accounts or passwords of its own
 - No analytics, tracking, crash reporting or advertising
 - No selling or sharing of any data
-- No third-party services other than the cloud storage you choose and the one-time model downloads
+- No third-party services other than the cloud storage you choose, the one-time model downloads and
+  the update check you ask for
 
 ## Deleting your data
 

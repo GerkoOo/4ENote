@@ -159,6 +159,68 @@ class NoteListViewModel(
         }
     }
 
+    /** A short report for the user (backup, restore or update check), shown in a dialog. */
+    var report by mutableStateOf<Report?>(null)
+        private set
+
+    data class Report(val title: String, val text: String, val download: String? = null)
+
+    fun dismissReport() {
+        report = null
+    }
+
+    /** Writes a backup of every note and folder to the file [open] gives. */
+    fun backUp(open: () -> java.io.OutputStream?) {
+        viewModelScope.launch {
+            report = try {
+                val count = open()?.use { repository.backup.export(it, com.gerko.fourenote.BuildConfig.VERSION_NAME) }
+                    ?: error("The file couldn't be written")
+                Report("Backup saved", "$count note${if (count == 1) "" else "s"} and all folders are in the backup file. Keep it somewhere safe.")
+            } catch (e: Exception) {
+                Report("Backup failed", e.message ?: "Something went wrong")
+            }
+        }
+    }
+
+    /** Brings notes back from the backup file [open] gives. */
+    fun restore(open: () -> java.io.InputStream?) {
+        viewModelScope.launch {
+            report = try {
+                val r = open()?.use { repository.backup.restore(it) } ?: error("The file couldn't be read")
+                onChanged()
+                Report(
+                    "Restored",
+                    "${r.added} note${if (r.added == 1) "" else "s"} brought back, ${r.updated} updated to the backup's newer copy, " +
+                        "${r.kept} kept as they are here (newer here)." + if (r.folders > 0) " ${r.folders} folder${if (r.folders == 1) "" else "s"} added." else "",
+                )
+            } catch (e: Exception) {
+                Report("Couldn't restore", e.message ?: "Something went wrong")
+            }
+        }
+    }
+
+    /** Asks GitHub whether a newer version is out. */
+    fun checkForUpdate() {
+        report = Report("Checking for updates…", "")
+        viewModelScope.launch {
+            val current = com.gerko.fourenote.BuildConfig.VERSION_NAME
+            report = try {
+                val latest = com.gerko.fourenote.data.update.UpdateChecker.latest()
+                if (com.gerko.fourenote.data.update.UpdateChecker.isNewer(latest.version, current)) {
+                    Report(
+                        "Version ${latest.version} is out",
+                        "You have $current. " + latest.notes.take(600),
+                        download = com.gerko.fourenote.data.update.UpdateChecker.DOWNLOAD,
+                    )
+                } else {
+                    Report("You're up to date", "4ENote $current is the newest version.")
+                }
+            } catch (e: Exception) {
+                Report("Couldn't check", "No answer from GitHub (${e.message ?: "no connection"}). Try again when online.")
+            }
+        }
+    }
+
     fun createNote(): Note {
         val note = Note(title = "Untitled", folderId = folderId)
         viewModelScope.launch { repository.create(note) }
