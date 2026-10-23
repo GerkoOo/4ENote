@@ -913,13 +913,23 @@ fun InkCanvas(
                 }
                 val bitmap = imageBitmaps[image.file] ?: continue
                 withTransform({ rotate(image.rotation, pivot = Offset(image.x * scale, image.y * scale)) }) {
+                    // Only the cropped part of the picture is shown, filling the picture's frame.
                     drawImage(
                         bitmap,
+                        srcOffset = IntOffset((image.cropLeft * bitmap.width).roundToInt(), (image.cropTop * bitmap.height).roundToInt()),
+                        srcSize = IntSize(
+                            ((image.cropRight - image.cropLeft) * bitmap.width).roundToInt().coerceAtLeast(1),
+                            ((image.cropBottom - image.cropTop) * bitmap.height).roundToInt().coerceAtLeast(1),
+                        ),
                         dstOffset = IntOffset(((image.x - image.width / 2) * scale).roundToInt(), ((image.y - image.height / 2) * scale).roundToInt()),
                         dstSize = IntSize((image.width * scale).roundToInt(), (image.height * scale).roundToInt()),
                         alpha = image.opacity,
                         filterQuality = FilterQuality.Medium,
-                        colorFilter = if (image.inverted) SmartInvert else null,
+                        colorFilter = when {
+                            image.negative -> NegativeColors
+                            image.inverted -> SmartInvert
+                            else -> null
+                        },
                     )
                 }
             }

@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.runtime.SideEffect
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.ui.layout.layout
@@ -1148,6 +1149,18 @@ private fun PdfChoice(
 /** Floats over the pages while a picture is selected. */
 @Composable
 private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, modifier: Modifier = Modifier) {
+    var cropping by remember { mutableStateOf(false) }
+    if (cropping) {
+        CropDialog(
+            file = viewModel.imageFile(image.file),
+            initial = androidx.compose.ui.geometry.Rect(image.cropLeft, image.cropTop, image.cropRight, image.cropBottom),
+            onDone = { kept ->
+                cropping = false
+                viewModel.cropSelectedImage(kept.left, kept.top, kept.right, kept.bottom)
+            },
+            onCancel = { cropping = false },
+        )
+    }
     Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 6.dp, shadowElevation = 6.dp, modifier = modifier) {
         FlowRow(
             itemVerticalAlignment = Alignment.CenterVertically,
@@ -1172,9 +1185,21 @@ private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, modifier:
             IconButton(onClick = viewModel::duplicateSelectedImage) {
                 Icon(Icons.Filled.ContentCopy, contentDescription = "Duplicate picture")
             }
-            IconToggleButton(checked = image.inverted, onCheckedChange = { viewModel.toggleSelectedImageInverted() }) {
-                Icon(Icons.Filled.InvertColors, contentDescription = if (image.inverted) "Restore colors" else "Invert colors")
+            IconButton(onClick = { cropping = true }) {
+                Icon(Icons.Filled.Crop, contentDescription = "Crop")
             }
+            // Two kinds of inverting: smart (light and dark swap, colours stay) and negative (blue becomes yellow).
+            FilterChip(
+                selected = image.inverted,
+                onClick = { viewModel.toggleSelectedImageInverted() },
+                label = { Text("Invert") },
+                leadingIcon = { Icon(Icons.Filled.InvertColors, contentDescription = null) },
+            )
+            FilterChip(
+                selected = image.negative,
+                onClick = { viewModel.toggleSelectedImageNegative() },
+                label = { Text("Negative") },
+            )
             IconButton(onClick = viewModel::bringSelectedImageToFront) {
                 Icon(Icons.Filled.FlipToFront, contentDescription = "Bring to front")
             }

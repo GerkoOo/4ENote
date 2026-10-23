@@ -940,7 +940,39 @@ class NoteEditorViewModel(
     fun toggleSelectedImageInverted() {
         val (page, index) = selected() ?: return
         recordUndo()
-        page.images[index] = page.images[index].let { it.copy(inverted = !it.inverted) }
+        page.images[index] = page.images[index].let { it.copy(inverted = !it.inverted, negative = false) }
+        persist()
+    }
+
+    /** Shows the selected picture as a negative (blue becomes yellow), or normally again. */
+    fun toggleSelectedImageNegative() {
+        val (page, index) = selected() ?: return
+        recordUndo()
+        page.images[index] = page.images[index].let { it.copy(negative = !it.negative, inverted = false) }
+        persist()
+    }
+
+    /** The stored file of a picture in this note, e.g. for cropping. */
+    fun imageFile(name: String) = attachments.file(noteId, name)
+
+    /**
+     * Shows only part of the selected picture: [l], [t], [r], [b] are its edges as fractions of the
+     * whole picture. The frame keeps the same scale and centre, so the picture shrinks to the crop.
+     */
+    fun cropSelectedImage(l: Float, t: Float, r: Float, b: Float) {
+        val (page, index) = selected() ?: return
+        val image = page.images[index]
+        val oldW = (image.cropRight - image.cropLeft).coerceAtLeast(0.01f)
+        val oldH = (image.cropBottom - image.cropTop).coerceAtLeast(0.01f)
+        val newW = (r - l).coerceAtLeast(0.01f)
+        val newH = (b - t).coerceAtLeast(0.01f)
+        if (image.cropLeft == l && image.cropTop == t && image.cropRight == r && image.cropBottom == b) return
+        recordUndo()
+        page.images[index] = image.copy(
+            cropLeft = l, cropTop = t, cropRight = r, cropBottom = b,
+            width = image.width * newW / oldW,
+            height = image.height * newH / oldH,
+        )
         persist()
     }
 

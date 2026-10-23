@@ -1,6 +1,7 @@
 package com.gerko.fourenote.data.ink
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class InkSerializerTest {
@@ -153,5 +154,16 @@ class PageImageTest {
         val turned = image.copy(rotation = 90f)
         assertEquals(false, turned.contains(140f, 100f))
         assertEquals(true, turned.contains(100f, 140f))
+    }
+
+    @Test
+    fun aCroppedNegativePictureSurvivesTheRoundTrip() {
+        val image = PageImage(file = "a.jpg", x = 10f, y = 20f, width = 30f, height = 40f, negative = true,
+            cropLeft = 0.1f, cropTop = 0.2f, cropRight = 0.9f, cropBottom = 0.7f)
+        val doc = InkDocument(listOf(InkPage(images = listOf(image))))
+        val back = InkSerializer.decode(InkSerializer.encode(doc)).pages.single().images.single()
+        assertEquals(image, back)
+        // An uncropped picture writes no crop at all.
+        assertFalse(InkSerializer.encode(InkDocument(listOf(InkPage(images = listOf(image.copy(cropLeft = 0f, cropTop = 0f, cropRight = 1f, cropBottom = 1f)))))).contains("crop"))
     }
 }

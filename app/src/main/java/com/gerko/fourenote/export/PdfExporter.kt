@@ -174,6 +174,32 @@ object PdfExporter {
         return LosslessFactory.createFromImage(out, bitmap).also { bitmap.recycle() }
     }
 
+    /** A picture as shown on the page: only its cropped part, with its colours inverted if set. */
+    private fun editedImageFor(out: PDDocument, file: File, image: PageImage): PDImageXObject? {
+        if (!file.exists()) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_IMAGE_SIDE) sample *= 2
+        val full = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        val left = (image.cropLeft * full.width).toInt().coerceIn(0, full.width - 1)
+        val top = (image.cropTop * full.height).toInt().coerceIn(0, full.height - 1)
+        val width = ((image.cropRight - image.cropLeft) * full.width).toInt().coerceIn(1, full.width - left)
+        val height = ((image.cropBottom - image.cropTop) * full.height).toInt().coerceIn(1, full.height - top)
+        val shown = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val matrix = when {
+            image.negative -> com.gerko.fourenote.ui.editor.NEGATIVE_MATRIX
+            image.inverted -> com.gerko.fourenote.data.ink.SmartInvert.MATRIX
+            else -> null
+        }
+        val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+            if (matrix != null) colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
+        }
+        android.graphics.Canvas(shown).drawBitmap(full, android.graphics.Rect(left, top, left + width, top + height), android.graphics.Rect(0, 0, width, height), paint)
+        full.recycle()
+        return LosslessFactory.createFromImage(out, shown).also { shown.recycle() }
+    }
+
     private fun renderPdfPage(file: File, index: Int, width: Int): Bitmap? =
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
             PdfRenderer(fd).use { renderer ->
@@ -204,7 +230,9 @@ object PdfExporter {
 
     /** A picture placed on the page, rotated about its center and faded as on screen. */
     private fun drawPicture(out: PDDocument, cs: PDPageContentStream, file: File, image: PageImage) {
-        val xObject = runCatching { imageFor(out, file) }.getOrNull() ?: return
+        val xObject = runCatching {
+            if (image.cropped || image.inverted || image.negative) editedImageFor(out, file, image) else imageFor(out, file)
+        }.getOrNull() ?: return
         cs.saveGraphicsState()
         if (image.opacity < 1f) {
             cs.setGraphicsStateParameters(PDExtendedGraphicsState().apply { nonStrokingAlphaConstant = image.opacity })

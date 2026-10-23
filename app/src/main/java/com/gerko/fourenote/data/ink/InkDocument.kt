@@ -127,6 +127,13 @@ data class PageImage(
     val opacity: Float = 1f,
     /** Show with smart-inverted colors, e.g. a white-background diagram on dark paper. */
     val inverted: Boolean = false,
+    /** Show as a negative instead (every colour flipped: blue becomes yellow, black white). */
+    val negative: Boolean = false,
+    /** The part of the picture shown, as fractions of it (0 to 1): its left, top, right and bottom edges. */
+    val cropLeft: Float = 0f,
+    val cropTop: Float = 0f,
+    val cropRight: Float = 1f,
+    val cropBottom: Float = 1f,
     /**
      * A frame waiting for a photo taken on another device (it has no [file] yet). Any device can
      * fill it; the photo then syncs into this very frame, since it keeps the same [id].
@@ -137,6 +144,9 @@ data class PageImage(
     /** Locked in place: fingers and the pen can't move or resize it until it is unlocked. */
     val locked: Boolean = false,
 ) {
+    /** True if only part of the picture is shown. */
+    val cropped: Boolean get() = cropLeft > 0f || cropTop > 0f || cropRight < 1f || cropBottom < 1f
+
     /** True if this is an empty frame waiting for a photo. */
     val waitingForPhoto: Boolean get() = requested && file.isEmpty()
 
@@ -299,6 +309,13 @@ object InkSerializer {
                             .put("w", img.width.toDouble()).put("h", img.height.toDouble())
                             .put("r", img.rotation.toDouble()).put("o", img.opacity.toDouble())
                             .apply { if (img.inverted) put("invert", true) }
+                            .apply { if (img.negative) put("neg", true) }
+                            .apply {
+                                if (img.cropped) {
+                                    put("crop", JSONArray().put(img.cropLeft.toDouble()).put(img.cropTop.toDouble())
+                                        .put(img.cropRight.toDouble()).put(img.cropBottom.toDouble()))
+                                }
+                            }
                             .apply { if (img.requested) put("req", true) }
                             .apply { if (img.label.isNotEmpty()) put("lbl", img.label) }
                             .apply { if (img.locked) put("lock", true) },
@@ -402,6 +419,11 @@ object InkSerializer {
                 rotation = o.optDouble("r", 0.0).toFloat(),
                 opacity = o.optDouble("o", 1.0).toFloat(),
                 inverted = o.optBoolean("invert"),
+                negative = o.optBoolean("neg"),
+                cropLeft = o.optJSONArray("crop")?.optDouble(0, 0.0)?.toFloat() ?: 0f,
+                cropTop = o.optJSONArray("crop")?.optDouble(1, 0.0)?.toFloat() ?: 0f,
+                cropRight = o.optJSONArray("crop")?.optDouble(2, 1.0)?.toFloat() ?: 1f,
+                cropBottom = o.optJSONArray("crop")?.optDouble(3, 1.0)?.toFloat() ?: 1f,
                 requested = o.optBoolean("req"),
                 label = o.optString("lbl"),
                 locked = o.optBoolean("lock"),
