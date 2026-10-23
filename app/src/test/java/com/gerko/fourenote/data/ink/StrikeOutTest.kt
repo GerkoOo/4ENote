@@ -35,8 +35,11 @@ class StrikeOutTest {
     }
 
     @Test
-    fun aWordWrittenInOneStrokeNeedsMoreThanOneStrokeCrossed() {
-        assertTrue(StrikeOut.struckBy(line(-5f, 115f, 65f, 116f), listOf(word("hello", 0f, 100f))).isEmpty())
+    fun aJoinedUpWordInOneStrokeCanBeStruckOut() {
+        // 60 wide, 30 tall: word-shaped, and the line runs along all of it.
+        assertEquals(listOf("hello"), StrikeOut.struckBy(line(-5f, 115f, 65f, 116f), listOf(word("hello", 0f, 100f))).map { it.id })
+        // A line across only a small part of it is not a strike-out.
+        assertTrue(StrikeOut.struckBy(line(20f, 115f, 35f, 115f), listOf(word("hello", 0f, 100f))).isEmpty())
     }
 
     @Test

@@ -148,8 +148,14 @@ object StrikeOut {
     private const val BAND_HIGH = 0.8f
     /** At least this share of a stroke's width must lie along the line for it to count as struck. */
     private const val MIN_COVER = 0.5f
-    /** A strike-out crosses at least this many strokes; a letter's bar crosses just its own stem. */
+    /**
+     * A strike-out crosses at least two strokes, or one word-shaped stroke (joined-up writing:
+     * clearly wider than tall) along most of its length. A letter's bar crosses just its own
+     * stem, which is tall and narrow, so it never counts.
+     */
     private const val MIN_CROSSED = 2
+    private const val WORD_WIDTH_TO_HEIGHT = 1.5f
+    private const val WORD_COVER = 0.7f
 
     /** True if [stroke] is a straight, roughly level line: maybe a strike-out. */
     fun isLine(stroke: InkStroke): Boolean {
@@ -195,7 +201,11 @@ object StrikeOut {
             val high = b.top + b.height * BAND_HIGH + stroke.width / 2
             y in low..high
         }
-        if (crossed.size < MIN_CROSSED) return emptyList()
+        val oneWord = crossed.singleOrNull()?.let { stroke ->
+            val b = bounds.getValue(stroke)
+            b.width >= b.height * WORD_WIDTH_TO_HEIGHT && cover(b) >= WORD_COVER
+        } == true
+        if (crossed.size < MIN_CROSSED && !oneWord) return emptyList()
         // The words' height: anything along the line within it goes too (i dots, t bars, accents).
         val top = crossed.minOf { bounds.getValue(it).top }
         val bottom = crossed.maxOf { bounds.getValue(it).bottom }
