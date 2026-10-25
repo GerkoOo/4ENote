@@ -3,6 +3,7 @@ package com.gerko.fourenote.data.sync.google
 import com.gerko.fourenote.data.sync.CloudProvider
 import com.gerko.fourenote.data.sync.RemoteFile
 import com.gerko.fourenote.data.sync.UploadContent
+import com.gerko.fourenote.data.sync.readLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -128,7 +129,7 @@ class GoogleDriveProvider(private val auth: GoogleAuth, private val folderCache:
                 if (code == 401 && attempt == 0) continue
                 if (code == 404 && allowMissing) return Response(code, ByteArray(0), null)
                 val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val bytes = stream?.use { it.readBytes() } ?: ByteArray(0)
+                val bytes = stream?.use { it.readLimited() } ?: ByteArray(0)
                 if (code !in 200..299) throw IllegalStateException("Google Drive ($code): ${errorMessage(bytes)}")
                 return Response(code, bytes, connection.getHeaderField("Location"))
             } finally {
@@ -141,7 +142,7 @@ class GoogleDriveProvider(private val auth: GoogleAuth, private val folderCache:
     private fun HttpURLConnection.readBody(): String {
         val code = responseCode
         val stream = if (code in 200..299) inputStream else errorStream
-        val bytes = stream?.use { it.readBytes() } ?: ByteArray(0)
+        val bytes = stream?.use { it.readLimited() } ?: ByteArray(0)
         if (code !in 200..299) throw IllegalStateException("Google Drive ($code): ${errorMessage(bytes)}")
         return String(bytes)
     }

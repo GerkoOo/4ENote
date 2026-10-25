@@ -110,6 +110,8 @@ class SyncManager(
     suspend fun connectWebDav(url: String, user: String, password: String): String? {
         val trimmedUrl = url.trim()
         val trimmedUser = user.trim()
+        // The password travels with every request, so it may only go over an encrypted connection.
+        if (!trimmedUrl.startsWith("https://", ignoreCase = true)) return "The server address must start with https://"
         val error = try {
             withContext(Dispatchers.IO) {
                 WebDavProvider(trimmedUrl, trimmedUser, password).listFiles()

@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.ink
 
+import com.gerko.fourenote.data.SafeName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,10 +32,10 @@ class InkStore(val root: File) {
     // (immutable) stroke objects hasn't changed and isn't written again.
     private val written = ConcurrentHashMap<String, MutableMap<String, List<InkStroke>>>()
 
-    private fun dir(noteId: String) = File(root, noteId)
+    private fun dir(noteId: String) = File(root, SafeName.require(noteId, "note id"))
     private fun manifest(noteId: String) = File(dir(noteId), "manifest.json")
     private fun pagesDir(noteId: String) = File(dir(noteId), "pages")
-    private fun pageFile(noteId: String, pageId: String) = File(pagesDir(noteId), "$pageId.ink")
+    private fun pageFile(noteId: String, pageId: String) = File(pagesDir(noteId), "${SafeName.require(pageId, "page id")}.ink")
     private fun snapshotFile(noteId: String) = File(dir(noteId), "synced.4enote.gz")
 
     private suspend fun <T> locked(noteId: String, block: suspend () -> T): T =

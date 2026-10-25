@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.backup
 
+import com.gerko.fourenote.data.SafeName
 import com.gerko.fourenote.data.Folder
 import com.gerko.fourenote.data.FolderFile
 import com.gerko.fourenote.data.Note
@@ -112,6 +113,8 @@ class Backup(
                     }.associateBy { it.id }
                     for ((id, note) in backed!!) {
                         val local = here[id]
+                        // The id names the note's folders; a backup is a file from anywhere, so check it.
+                        if (!SafeName.isSafeFromCloud(id)) continue
                         if (local == null || local.deleted || note.updatedAt > local.updatedAt) taking += id
                     }
                 }

@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.attachments
 
+import com.gerko.fourenote.data.SafeName
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -24,9 +25,10 @@ import java.util.UUID
 class AttachmentStore(val context: Context) {
     val root = File(context.filesDir, "attachments")
 
-    fun dir(noteId: String) = File(root, noteId)
+    fun dir(noteId: String) = File(root, SafeName.require(noteId, "note id"))
 
-    fun file(noteId: String, name: String) = File(dir(noteId), name)
+    // An unsafe name (from a damaged or hostile note) points at a file that never exists.
+    fun file(noteId: String, name: String) = File(dir(noteId), if (SafeName.isSafe(name)) name else ".unsafe-name")
 
     /** Copies a PDF into the note and returns one page per PDF page, shaped like it. */
     suspend fun importPdf(noteId: String, source: InputStream): List<InkPage> = withContext(Dispatchers.IO) {
@@ -136,6 +138,7 @@ class AttachmentStore(val context: Context) {
 
     /** Stores a file that came from the cloud, under its own name, written whole or not at all. */
     suspend fun saveDownloaded(noteId: String, name: String, content: ByteArray) = withContext(Dispatchers.IO) {
+        require(SafeName.isSafeFromCloud(name)) { "Unsafe attachment name" }
         val target = file(noteId, name)
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, ".$name.part")

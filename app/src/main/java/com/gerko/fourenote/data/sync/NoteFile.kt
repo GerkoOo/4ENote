@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.sync
 
+import com.gerko.fourenote.data.SafeName
 import com.gerko.fourenote.data.Note
 import org.json.JSONObject
 
@@ -23,14 +24,18 @@ object NoteFile {
     fun attachmentOf(fileName: String): Pair<String, String>? {
         val at = fileName.indexOf(ATTACHMENT_SEPARATOR)
         if (at <= 0 || at == fileName.lastIndex) return null
-        return fileName.substring(0, at) to fileName.substring(at + 1)
+        val noteId = fileName.substring(0, at)
+        val file = fileName.substring(at + 1)
+        // Cloud names are untrusted; one that could leave the note's folder is ignored.
+        if (!SafeName.isSafeFromCloud(noteId) || !SafeName.isSafeFromCloud(file)) return null
+        return noteId to file
     }
 
     private const val ATTACHMENT_SEPARATOR = '~'
 
     /** The note id for a cloud file name, or null if it is not a note file. */
     fun noteIdOf(fileName: String): String? =
-        fileName.takeIf { it.endsWith(EXTENSION) }?.removeSuffix(EXTENSION)?.ifEmpty { null }
+        fileName.takeIf { it.endsWith(EXTENSION) }?.removeSuffix(EXTENSION)?.takeIf(SafeName::isSafeFromCloud)
 
     /** [pdfId] is the note's PDF copy, recorded so every device updates the same PDF. */
     fun encode(note: Note, pdfId: String?): String =
@@ -52,7 +57,7 @@ object NoteFile {
         val json = JSONObject(text)
         require(json.optString("format") == FORMAT) { "Not a 4ENote file" }
         return Note(
-            id = json.getString("id"),
+            id = json.getString("id").also { require(SafeName.isSafeFromCloud(it)) { "Unsafe note id" } },
             title = json.optString("title"),
             inkData = json.optString("ink"),
             createdAt = json.optLong("createdAt"),

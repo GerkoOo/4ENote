@@ -453,7 +453,8 @@ object InkSerializer {
             invertBackground = bgJson?.optBoolean("invert") ?: false,
             images = images,
             placement = placement,
-            id = json.optString("id").ifEmpty { UUID.randomUUID().toString() },
+            // The id names the page's file; an unsafe one (hostile or damaged note) gets a new id.
+            id = json.optString("id").takeIf(com.gerko.fourenote.data.SafeName::isSafeFromCloud) ?: UUID.randomUUID().toString(),
             width = json.optDouble("w", InkPage.PAGE_WIDTH.toDouble()).toFloat(),
             height = json.optDouble("h", InkPage.PAGE_HEIGHT.toDouble()).toFloat(),
             background = bg,

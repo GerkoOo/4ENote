@@ -3,6 +3,7 @@ package com.gerko.fourenote.data.sync.webdav
 import com.gerko.fourenote.data.sync.CloudProvider
 import com.gerko.fourenote.data.sync.RemoteFile
 import com.gerko.fourenote.data.sync.UploadContent
+import com.gerko.fourenote.data.sync.readLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.w3c.dom.Element
@@ -106,7 +107,7 @@ class WebDavProvider(
             val code = connection.responseCode
             if (code == 404 && allowMissing) return Response(code, ByteArray(0))
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val bytes = stream?.use { it.readBytes() } ?: ByteArray(0)
+            val bytes = stream?.use { it.readLimited() } ?: ByteArray(0)
             if (code !in 200..299) throw IllegalStateException("WebDAV $code: ${shortMessage(bytes)}")
             return Response(code, bytes)
         } finally {
@@ -127,7 +128,7 @@ class WebDavProvider(
     private fun checkResponse(connection: HttpURLConnection) {
         val code = connection.responseCode
         if (code in 200..299) return
-        val bytes = connection.errorStream?.use { it.readBytes() } ?: ByteArray(0)
+        val bytes = connection.errorStream?.use { it.readLimited() } ?: ByteArray(0)
         throw IllegalStateException("WebDAV $code: ${shortMessage(bytes)}")
     }
 
