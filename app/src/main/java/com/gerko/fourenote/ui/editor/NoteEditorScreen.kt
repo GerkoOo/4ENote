@@ -12,6 +12,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -408,7 +410,9 @@ fun NoteEditorScreen(
             )
         },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        // The pages run on under the navigation bar to the screen's edge (a page there isn't cut
+        // off short of it); the buttons at the bottom stay above the bar.
+        Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
             if (viewModel.importing || viewModel.exporting) LinearProgressIndicator(Modifier.fillMaxWidth())
             // The tools float over the pages (see ToolBar).
             Box(Modifier.weight(1f)) {
@@ -759,6 +763,7 @@ private fun PageList(
         val anyTurned by remember { derivedStateOf { pageRotations.values.any { it != 0f } } }
         val reachWidth = if (anyTurned) gridWidth else minOf(gridWidth, maxOf(maxWidth, pageWidth + 32.dp))
         val density = LocalDensity.current
+        val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         SideEffect {
             contentWidthPx = with(density) { gridWidth.toPx() }
             reachWidthPx = with(density) { reachWidth.toPx() }
@@ -836,7 +841,8 @@ private fun PageList(
                 horizontalArrangement = Arrangement.spacedBy(if (fullScreen) 0.dp else 16.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(if (fullScreen) 0.dp else 12.dp),
                 // Room at the top for the floating tool bar.
-                contentPadding = if (fullScreen) PaddingValues(0.dp) else PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp, top = TOOLBAR_SPACE),
+                // Room at the bottom to scroll the last page and the add-pages handle above the navigation bar.
+                contentPadding = if (fullScreen) PaddingValues(0.dp) else PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp + navBarBottom, top = TOOLBAR_SPACE),
                 modifier = Modifier.width(gridWidth).fillMaxHeight().onGloballyPositioned { gridBounds = it.boundsInRoot() },
             ) {
                 itemsIndexed(viewModel.pages, key = { _, page -> page.id }) { index, page ->
@@ -1031,7 +1037,7 @@ private fun PageList(
                     Text(if (target == 0) "$shown° · straighten" else "$shown° · to $target°")
                 },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null) },
-                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+                modifier = Modifier.align(Alignment.BottomStart).windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp),
             )
         }
         // Hidden in full screen; pinching still zooms.
@@ -1052,7 +1058,7 @@ private fun PageList(
             ZoomControl(
                 zoom = zoom,
                 onZoom = { target -> zoomAround(target / zoom, viewport.center) },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp),
             )
         }
         viewModel.adjustingPageId?.let { pageId ->
