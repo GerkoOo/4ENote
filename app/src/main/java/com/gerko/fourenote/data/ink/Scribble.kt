@@ -160,6 +160,8 @@ object StrikeOut {
     private const val MIN_CROSSED = 2
     private const val WORD_WIDTH_TO_HEIGHT = 1.5f
     private const val WORD_COVER = 0.7f
+    /** How much taller than the struck words a stroke may be and still go with them. */
+    private const val MAX_HEIGHT_TO_WORDS = 2f
 
     /**
      * The strike-out gesture: one stroke across the words and straight back over them the
@@ -253,13 +255,20 @@ object StrikeOut {
             b.width >= b.height * WORD_WIDTH_TO_HEIGHT && cover(b) >= WORD_COVER
         } == true
         if (crossed.size < MIN_CROSSED && !oneWord) return emptyList()
+        // A crossed stroke much taller than the words (a bracket, a long tail, a margin line, a
+        // word reaching into the next line) isn't one of them: it would stretch the band below
+        // over the lines above and under, erasing them too. The lower median is the words' height.
+        val heights = crossed.map { bounds.getValue(it).height }.sorted()
+        val typical = heights[(heights.size - 1) / 2]
+        fun wordSized(b: Shapes.Bounds) = b.height <= typical * MAX_HEIGHT_TO_WORDS
+        val words = crossed.filter { wordSized(bounds.getValue(it)) }
         // The words' height: anything along the line within it goes too (i dots, t bars, accents).
-        val top = crossed.minOf { bounds.getValue(it).top }
-        val bottom = crossed.maxOf { bounds.getValue(it).bottom }
+        val top = words.minOf { bounds.getValue(it).top }
+        val bottom = words.maxOf { bounds.getValue(it).bottom }
         val slack = (bottom - top) * 0.3f
         return candidates.filter { stroke ->
             val b = bounds.getValue(stroke)
-            stroke in crossed || (cover(b) >= MIN_COVER && b.centerY in (top - slack)..(bottom + slack))
+            stroke in words || (wordSized(b) && cover(b) >= MIN_COVER && b.centerY in (top - slack)..(bottom + slack))
         }
     }
 }

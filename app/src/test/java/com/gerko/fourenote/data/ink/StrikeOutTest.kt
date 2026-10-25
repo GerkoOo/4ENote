@@ -35,6 +35,27 @@ class StrikeOutTest {
     }
 
     @Test
+    fun aTallStrokeCrossedToo() {
+        // Two lines of words, 50 apart, and a bracket down the side of both.
+        val line1 = listOf(word("a1", 0f, 100f), word("a2", 70f, 100f))
+        val line2 = listOf(word("b1", 0f, 150f), word("b2", 70f, 150f))
+        val bracket = stroke("bracket", 140f, 95f, 135f, 140f, 140f, 185f)
+        val struck = StrikeOut.struckBy(line(-5f, 115f, 145f, 116f), line1 + line2 + bracket)
+        assertEquals(setOf("a1", "a2"), struck.map { it.id }.toSet())
+    }
+
+    @Test
+    fun aWordReachingIntoTheNextLineDoesntTakeThatLine() {
+        // A word with a long tail down to the next line, which is struck along with its neighbour.
+        val tail = stroke("tail", 0f, 130f, 10f, 100f, 20f, 130f, 30f, 100f, 40f, 130f, 50f, 100f, 60f, 170f)
+        val struck = StrikeOut.struckBy(
+            line(-5f, 115f, 135f, 116f),
+            listOf(tail, word("a2", 70f, 100f), word("b1", 0f, 150f), word("b2", 70f, 150f)),
+        )
+        assertEquals(setOf("a2"), struck.map { it.id }.toSet())
+    }
+
+    @Test
     fun aJoinedUpWordInOneStrokeCanBeStruckOut() {
         // 60 wide, 30 tall: word-shaped, and the line runs along all of it.
         assertEquals(listOf("hello"), StrikeOut.struckBy(line(-5f, 115f, 65f, 116f), listOf(word("hello", 0f, 100f))).map { it.id })
