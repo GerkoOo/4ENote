@@ -13,12 +13,16 @@ import kotlinx.coroutines.flow.Flow
  */
 private const val META =
     "id, title, '' AS inkData, createdAt, updatedAt, driveFileId, lastSyncedAt, deleted, dirty, " +
-        "remoteVersion, remotePdfId, '' AS syncedSnapshot, folderId"
+        "remoteVersion, remotePdfId, '' AS syncedSnapshot, folderId, trashedAt"
 
 @Dao
 interface NoteDao {
-    @Query("SELECT $META FROM notes WHERE deleted = 0 ORDER BY updatedAt DESC")
+    @Query("SELECT $META FROM notes WHERE deleted = 0 AND trashedAt IS NULL ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<Note>>
+
+    /** The notes in Deleted notes, most recently trashed first. */
+    @Query("SELECT $META FROM notes WHERE deleted = 0 AND trashedAt IS NOT NULL ORDER BY trashedAt DESC")
+    fun observeTrashed(): Flow<List<Note>>
 
     @Query("SELECT $META FROM notes WHERE id = :id AND deleted = 0")
     suspend fun getById(id: String): Note?
@@ -78,6 +82,17 @@ interface NoteDao {
         expectedUpdatedAt: Long,
         folderId: String?,
     ): Int
+
+    /**
+     * Moves notes into Deleted notes ([at] is when) or back out of it (null). This is local
+     * housekeeping, not an edit: the note's content and sync state stay as they are.
+     */
+    @Query("UPDATE notes SET trashedAt = :at WHERE id IN (:ids)")
+    suspend fun setTrashed(ids: List<String>, at: Long?)
+
+    /** Ids of the notes trashed before [before], for deleting them for good. */
+    @Query("SELECT id FROM notes WHERE deleted = 0 AND trashedAt IS NOT NULL AND trashedAt < :before")
+    suspend fun idsTrashedBefore(before: Long): List<String>
 
     /** Moves notes into a folder (null: the top); a move is an edit, so it syncs. */
     @Query("UPDATE notes SET folderId = :folderId, updatedAt = :now, dirty = 1 WHERE id IN (:ids)")

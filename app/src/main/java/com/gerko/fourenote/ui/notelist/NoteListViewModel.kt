@@ -99,6 +99,11 @@ class NoteListViewModel(
         onChanged()
     }
 
+    /** How many notes are in Deleted notes, for the menu entry. */
+    val trashedCount: StateFlow<Int> = repository.observeTrashed()
+        .mapLatest { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
     /** All folders (not deleted). */
     val folders: StateFlow<List<Folder>> = repository.observeFolders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -278,11 +283,22 @@ class NoteListViewModel(
         }
     }
 
-    fun deleteSelected() {
-        val chosen = notes.value.orEmpty().filter { it.id in selected }
+    /** Moves the ticked notes to Deleted notes; [onTrashed] gets their ids, for an Undo. */
+    fun deleteSelected(onTrashed: (List<String>) -> Unit = {}) {
+        val chosen = notes.value.orEmpty().filter { it.id in selected }.map { it.id }
         clearSelection()
+        if (chosen.isEmpty()) return
         viewModelScope.launch {
-            chosen.forEach { repository.delete(it) }
+            repository.moveToTrash(chosen)
+            onChanged()
+            onTrashed(chosen)
+        }
+    }
+
+    /** Undo on the "Moved to Deleted notes" snackbar. */
+    fun undoTrash(noteIds: List<String>) {
+        viewModelScope.launch {
+            repository.restoreFromTrash(noteIds)
             onChanged()
         }
     }

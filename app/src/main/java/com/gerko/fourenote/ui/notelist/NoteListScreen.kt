@@ -86,6 +86,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.produceState
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -114,11 +115,14 @@ fun NoteListScreen(
     onOpenNote: (String) -> Unit,
     onOpenCloudSettings: () -> Unit,
     onOpenSupport: () -> Unit = {},
+    onOpenTrash: () -> Unit = {},
 ) {
     val notes by viewModel.notes.collectAsState()
+    val trashedCount by viewModel.trashedCount.collectAsState()
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val cloud by syncManager.choice.collectAsState()
     val syncStatus by syncManager.status.collectAsState()
-    var confirmingDelete by remember { mutableStateOf(false) }
     val photoRequests by viewModel.photoRequests.collectAsState()
     var showingRequests by remember { mutableStateOf(false) }
     // The frame being filled with the scanner, if any.
@@ -159,6 +163,7 @@ fun NoteListScreen(
     BackHandler(enabled = !selecting && here != null) { viewModel.goUp() }
 
     Scaffold(
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
             if (selecting) {
                 TopAppBar(
@@ -178,7 +183,18 @@ fun NoteListScreen(
                         IconButton(onClick = viewModel::duplicateSelected) {
                             Icon(Icons.Filled.ContentCopy, contentDescription = "Duplicate")
                         }
-                        IconButton(onClick = { confirmingDelete = true }) {
+                        IconButton(onClick = {
+                            viewModel.deleteSelected { ids ->
+                                scope.launch {
+                                    val result = snackbar.showSnackbar(
+                                        message = if (ids.size == 1) "Moved to Deleted notes" else "${ids.size} notes moved to Deleted notes",
+                                        actionLabel = "Undo",
+                                        withDismissAction = false,
+                                    )
+                                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) viewModel.undoTrash(ids)
+                                }
+                            }
+                        }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Delete")
                         }
                     },
@@ -264,6 +280,16 @@ fun NoteListScreen(
                                     openBackup.launch(arrayOf("application/zip", "application/octet-stream"))
                                 },
                             )
+                            if (trashedCount > 0) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Deleted notes ($trashedCount)") },
+                                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                                    onClick = {
+                                        menu = false
+                                        onOpenTrash()
+                                    },
+                                )
+                            }
                             androidx.compose.material3.DropdownMenuItem(
                                 text = { Text("Look for updates by itself") },
                                 leadingIcon = {
@@ -581,23 +607,6 @@ fun NoteListScreen(
         )
     }
 
-    if (confirmingDelete) {
-        val count = viewModel.selected.size
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text(if (count == 1) "Delete note?" else "Delete $count notes?") },
-            text = { Text(if (count == 1) "It will be permanently deleted." else "They will be permanently deleted.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteSelected()
-                    confirmingDelete = false
-                }) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") }
-            },
-        )
-    }
 }
 
 @Composable

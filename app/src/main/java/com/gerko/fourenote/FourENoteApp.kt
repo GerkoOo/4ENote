@@ -13,6 +13,7 @@ import com.gerko.fourenote.ui.editor.ToolPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class FourENoteApp : Application() {
     /** Lives as long as the app, so a sync finishes even after its screen closes. */
@@ -43,4 +44,11 @@ class FourENoteApp : Application() {
     val scanInbox: ScanInbox by lazy { ScanInbox(java.io.File(filesDir, "inbox")) }
 
     val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, googleAuth, appScope, scanInbox) }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Notes that have been in Deleted notes for long enough go for good, even if the app
+        // is never opened on the trash screen.
+        appScope.launch { runCatching { repository.purgeExpiredTrash() } }
+    }
 }

@@ -35,4 +35,9 @@ data class Note(
     @ColumnInfo(defaultValue = "") val syncedSnapshot: String = "",
     /** The folder the note is in; null is the top of the home page. */
     val folderId: String? = null,
+    /**
+     * When the note was moved to Deleted notes, or null if it isn't there. Local to this device:
+     * it never syncs, so a note trashed here stays out of the home page on this device only.
+     */
+    val trashedAt: Long? = null,
 )

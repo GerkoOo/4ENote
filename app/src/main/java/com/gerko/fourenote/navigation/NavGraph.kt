@@ -22,6 +22,7 @@ private object Routes {
     const val NOTE_EDITOR = "noteEditor/{noteId}"
     const val CLOUD_SETTINGS = "cloudSettings"
     const val SUPPORT = "support"
+    const val TRASH = "trash"
     fun noteEditor(noteId: String) = "noteEditor/$noteId"
 }
 
@@ -55,7 +56,14 @@ fun FourENoteNavGraph(
                 onOpenNote = { noteId -> navController.navigate(Routes.noteEditor(noteId)) },
                 onOpenCloudSettings = { navController.navigate(Routes.CLOUD_SETTINGS) },
                 onOpenSupport = { navController.navigate(Routes.SUPPORT) },
+                onOpenTrash = { navController.navigate(Routes.TRASH) },
             )
+        }
+        composable(Routes.TRASH) {
+            val viewModel: com.gerko.fourenote.ui.notelist.TrashViewModel = viewModel(
+                factory = com.gerko.fourenote.ui.notelist.TrashViewModel.Factory(repository, syncManager::requestSync),
+            )
+            com.gerko.fourenote.ui.notelist.TrashScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable(Routes.SUPPORT) {
             com.gerko.fourenote.ui.settings.SupportScreen(onBack = { navController.popBackStack() })

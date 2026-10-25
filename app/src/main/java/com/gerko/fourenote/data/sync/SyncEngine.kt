@@ -269,7 +269,8 @@ class SyncEngine(
 
             !note.dirty -> {
                 val text = provider.download(cloud.id).decodeToString()
-                val fromCloud = NoteFile.decode(text)
+                // The trash is local: keep it, so a sync never brings a trashed note back.
+                val fromCloud = NoteFile.decode(text).copy(trashedAt = note.trashedAt)
                 if (store.replaceIfUnchanged(fromCloud, note.updatedAt, dirty = false)) {
                     store.markSynced(note.id, cloud, fromCloud.remotePdfId, text, fromCloud.updatedAt)
                     downloaded++
@@ -281,7 +282,7 @@ class SyncEngine(
                 val fromCloud = NoteFile.decode(provider.download(cloud.id).decodeToString())
                 val base = note.syncedSnapshot.takeIf { it.isNotEmpty() }?.let(NoteFile::decode)
                 val result = NoteMerger.merge(base, note, fromCloud)
-                    .copy(remotePdfId = note.remotePdfId ?: fromCloud.remotePdfId)
+                    .copy(remotePdfId = note.remotePdfId ?: fromCloud.remotePdfId, trashedAt = note.trashedAt)
                 if (store.replaceIfUnchanged(result, note.updatedAt, dirty = true)) {
                     upload(result, cloud.id)
                     merged++
@@ -317,6 +318,8 @@ class SyncEngine(
                 syncedSnapshot = text,
                 lastSyncedAt = clock(),
                 dirty = false,
+                // A note that was trashed here and deleted in the cloud comes back untrashed.
+                trashedAt = null,
             ),
         )
         downloaded++

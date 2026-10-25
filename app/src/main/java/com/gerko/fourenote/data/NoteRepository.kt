@@ -30,6 +30,9 @@ class NoteRepository(
 
     fun observeAll(): Flow<List<Note>> = dao.observeAll()
 
+    /** The notes in Deleted notes, most recently trashed first. */
+    fun observeTrashed(): Flow<List<Note>> = dao.observeTrashed()
+
     /** The home page's folders (not the deleted ones). */
     fun observeFolders(): Flow<List<Folder>> = folders?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
 
@@ -60,6 +63,39 @@ class NoteRepository(
     /** Moves notes into [folderId] (null: the top of the home page). */
     suspend fun moveNotes(noteIds: Collection<String>, folderId: String?) {
         if (noteIds.isNotEmpty()) dao.moveToFolder(noteIds.toList(), folderId, System.currentTimeMillis())
+    }
+
+    /** Moves notes to Deleted notes, where they stay for [Trash.DAYS] days. */
+    suspend fun moveToTrash(noteIds: Collection<String>) {
+        if (noteIds.isNotEmpty()) dao.setTrashed(noteIds.toList(), System.currentTimeMillis())
+    }
+
+    /**
+     * Takes notes back out of Deleted notes. A note whose folder is gone (deleted here or on
+     * another device) goes to the top of the home page instead of disappearing.
+     */
+    suspend fun restoreFromTrash(noteIds: Collection<String>) {
+        if (noteIds.isEmpty()) return
+        val live = folders?.getAll()?.filterNot { it.deleted }?.mapTo(HashSet()) { it.id }.orEmpty()
+        for (id in noteIds) {
+            val note = dao.getById(id) ?: continue
+            if (note.folderId != null && note.folderId !in live) dao.moveToFolder(listOf(id), null, note.updatedAt)
+        }
+        dao.setTrashed(noteIds.toList(), null)
+    }
+
+    /** Deletes notes for good, from Deleted notes or anywhere else. */
+    suspend fun deleteForever(notes: Collection<Note>) {
+        notes.forEach { delete(it) }
+    }
+
+    /** Deletes for good the notes that have been in Deleted notes for [Trash.DAYS] days. */
+    suspend fun purgeExpiredTrash() {
+        val now = System.currentTimeMillis()
+        val expired = dao.idsTrashedBefore(now - Trash.DAYS * 24L * 60 * 60 * 1000)
+        if (expired.isEmpty()) return
+        val byId = dao.getAllForSync().associateBy { it.id }
+        deleteForever(expired.mapNotNull { byId[it] })
     }
 
     /** Moves a folder into another (null: the top), unless that would put it inside itself. */
@@ -148,7 +184,7 @@ class NoteRepository(
     /** Every frame waiting for a photo, in all notes. Reads only the notes' outlines, not their ink. */
     suspend fun photoRequests(): List<PhotoRequest> {
         legacyMoved.await()
-        val notes = dao.getAllForSync().filterNot { it.deleted }
+        val notes = dao.getAllForSync().filterNot { it.deleted || it.trashedAt != null }
         return notes.flatMap { note ->
             val outline = ink.loadOutline(note.id) ?: return@flatMap emptyList()
             outline.pages.withIndex().flatMap { (index, page) ->
@@ -192,7 +228,7 @@ class NoteRepository(
     suspend fun placeInboxScans(inbox: com.gerko.fourenote.data.scan.ScanInbox): Int {
         val scans = inbox.pending()
         if (scans.isEmpty()) return 0
-        val notes = dao.getAllForSync().filterNot { it.deleted }.associateBy { it.id }
+        val notes = dao.getAllForSync().filterNot { it.deleted || it.trashedAt != null }.associateBy { it.id }
         val open = photoRequests()
             .sortedWith(
                 compareByDescending<PhotoRequest> { notes[it.noteId]?.updatedAt ?: 0L }
@@ -262,6 +298,8 @@ class NoteRepository(
     }
 
     override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean {
+        // Deleted notes are local to this device: a cloud copy must not bring one back.
+        val trashedAt = dao.getById(note.id)?.trashedAt
         val replaced = dao.replaceContentIfUnchanged(
             id = note.id,
             title = note.title,
@@ -271,7 +309,10 @@ class NoteRepository(
             expectedUpdatedAt = expectedUpdatedAt,
             folderId = note.folderId,
         ) > 0
-        if (replaced) ink.save(note.id, InkSerializer.decode(note.inkData))
+        if (replaced) {
+            ink.save(note.id, InkSerializer.decode(note.inkData))
+            if (trashedAt != null) dao.setTrashed(listOf(note.id), trashedAt)
+        }
         return replaced
     }
 
