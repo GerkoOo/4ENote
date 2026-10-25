@@ -40,4 +40,9 @@ data class Note(
      * it never syncs, so a note trashed here stays out of the home page on this device only.
      */
     val trashedAt: Long? = null,
+    /**
+     * Needs the fingerprint, face or screen lock to open. It syncs, so a note locked on one
+     * device is locked on all of them; the unlock itself is only remembered for this session.
+     */
+    @ColumnInfo(defaultValue = "0") val locked: Boolean = false,
 )

@@ -87,6 +87,9 @@ class MainActivity : FragmentActivity() {
     override fun onStop() {
         val app = application as FourENoteApp
         app.appLock.onAppStopped(System.currentTimeMillis())
+        // Leaving the app (or the screen going off) locks every note again. The PIN screen is a
+        // separate activity, so going to it isn't leaving.
+        if (!com.gerko.fourenote.data.security.Biometric.prompting) app.noteLock.relockAll()
         app.syncManager.stopAutoSync()
         super.onStop()
     }

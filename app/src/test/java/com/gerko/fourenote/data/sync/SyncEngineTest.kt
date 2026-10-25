@@ -68,7 +68,7 @@ class SyncEngineTest {
             if (current.updatedAt != expectedUpdatedAt) return false
             notes[note.id] = current.copy(
                 title = note.title, inkData = note.inkData, createdAt = note.createdAt,
-                updatedAt = note.updatedAt, dirty = dirty,
+                updatedAt = note.updatedAt, dirty = dirty, locked = note.locked,
             )
             return true
         }
@@ -297,6 +297,29 @@ class SyncEngineTest {
         assertEquals(listOf("Lecture (big).pdf", "big.4enote"), cloudFiles())
         // And once it is there, quiet syncs upload nothing.
         assertEquals(0, a.sync().uploaded)
+    }
+
+    @Test
+    fun aLockedNoteUploadsNoPdfCopy() {
+        a.save(Note(id = "n1", title = "Diary", inkData = ink("s1"), locked = true))
+        a.sync()
+        b.sync()
+        assertEquals(listOf("n1.4enote"), cloudFiles())
+        assertTrue(b.notes.getValue("n1").locked)
+        assertEquals(setOf("s1"), b.strokeIds("n1"))
+    }
+
+    @Test
+    fun lockingASyncedNoteRemovesItsPdfCopy() {
+        sharedNote()
+        assertEquals(listOf("Biology (n1).pdf", "n1.4enote"), cloudFiles())
+        a.save(a.notes.getValue("n1").copy(locked = true))
+        a.sync()
+        assertEquals(listOf("n1.4enote"), cloudFiles())
+        assertNull(a.notes.getValue("n1").remotePdfId)
+        // And the lock reaches the other device.
+        b.sync()
+        assertTrue(b.notes.getValue("n1").locked)
     }
 
     @Test

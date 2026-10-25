@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
  */
 private const val META =
     "id, title, '' AS inkData, createdAt, updatedAt, driveFileId, lastSyncedAt, deleted, dirty, " +
-        "remoteVersion, remotePdfId, '' AS syncedSnapshot, folderId, trashedAt"
+        "remoteVersion, remotePdfId, '' AS syncedSnapshot, folderId, trashedAt, locked"
 
 @Dao
 interface NoteDao {
@@ -93,6 +93,10 @@ interface NoteDao {
     /** Ids of the notes trashed before [before], for deleting them for good. */
     @Query("SELECT id FROM notes WHERE deleted = 0 AND trashedAt IS NOT NULL AND trashedAt < :before")
     suspend fun idsTrashedBefore(before: Long): List<String>
+
+    /** Locks or unlocks notes; the lock is an edit, so it syncs. */
+    @Query("UPDATE notes SET locked = :locked, updatedAt = :now, dirty = 1 WHERE id IN (:ids)")
+    suspend fun setLocked(ids: List<String>, locked: Boolean, now: Long)
 
     /** Moves notes into a folder (null: the top); a move is an edit, so it syncs. */
     @Query("UPDATE notes SET folderId = :folderId, updatedAt = :now, dirty = 1 WHERE id IN (:ids)")

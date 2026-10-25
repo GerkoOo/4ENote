@@ -283,6 +283,17 @@ class NoteListViewModel(
         }
     }
 
+    /** Locks or unlocks the ticked notes; the lock syncs, so it reaches the other devices. */
+    fun setLocked(locked: Boolean) {
+        val chosen = selected
+        clearSelection()
+        if (chosen.isEmpty()) return
+        viewModelScope.launch {
+            repository.setLocked(chosen, locked)
+            onChanged()
+        }
+    }
+
     /** Moves the ticked notes to Deleted notes; [onTrashed] gets their ids, for an Undo. */
     fun deleteSelected(onTrashed: (List<String>) -> Unit = {}) {
         val chosen = notes.value.orEmpty().filter { it.id in selected }.map { it.id }

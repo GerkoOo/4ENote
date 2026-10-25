@@ -83,6 +83,8 @@ object NoteMerger {
             title = title,
             // Moved to a folder on one side (or both: the more recent move).
             folderId = pick(base?.folderId, local.folderId, remote.folderId, localIsNewer),
+            // Locking is a single value like the title: the side that changed it wins.
+            locked = pick(base?.locked, local.locked, remote.locked, localIsNewer),
             inkData = InkSerializer.encode(
                 InkDocument(pages.ifEmpty { listOf(InkPage()) }, paper, layers.ifEmpty { listOf(InkLayer.BASE) }),
             ),

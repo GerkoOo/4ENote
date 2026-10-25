@@ -60,6 +60,11 @@ class NoteRepository(
         dao.upsert(folder.copy(deleted = true, updatedAt = now))
     }
 
+    /** Locks or unlocks notes; the lock syncs, so it reaches the other devices. */
+    suspend fun setLocked(noteIds: Collection<String>, locked: Boolean) {
+        if (noteIds.isNotEmpty()) dao.setLocked(noteIds.toList(), locked, System.currentTimeMillis())
+    }
+
     /** Moves notes into [folderId] (null: the top of the home page). */
     suspend fun moveNotes(noteIds: Collection<String>, folderId: String?) {
         if (noteIds.isNotEmpty()) dao.moveToFolder(noteIds.toList(), folderId, System.currentTimeMillis())
@@ -164,7 +169,11 @@ class NoteRepository(
     /** A new note with the same pages, ink and pictures, titled as a copy. Uploads on the next sync. */
     suspend fun duplicate(note: Note): Note {
         legacyMoved.await()
-        val copy = Note(title = "${note.title.ifBlank { "Untitled" }} (copy)", folderId = note.folderId)
+        val copy = Note(
+            title = "${note.title.ifBlank { "Untitled" }} (copy)",
+            folderId = note.folderId,
+            locked = note.locked,
+        )
         ink.copy(note.id, copy.id)
         attachments.copyAll(note.id, copy.id)
         dao.upsert(copy)

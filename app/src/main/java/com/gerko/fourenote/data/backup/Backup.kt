@@ -60,7 +60,8 @@ class Backup(
                 all.forEach { n ->
                     put(
                         JSONObject().put("id", n.id).put("title", n.title).put("createdAt", n.createdAt)
-                            .put("updatedAt", n.updatedAt).put("folder", n.folderId ?: JSONObject.NULL),
+                            .put("updatedAt", n.updatedAt).put("folder", n.folderId ?: JSONObject.NULL)
+                            .put("locked", n.locked),
                     )
                 }
             }.toString(),
@@ -109,6 +110,7 @@ class Backup(
                             createdAt = o.optLong("createdAt"),
                             updatedAt = o.optLong("updatedAt"),
                             folderId = if (o.isNull("folder")) null else o.optString("folder").ifEmpty { null },
+                            locked = o.optBoolean("locked", false),
                         )
                     }.associateBy { it.id }
                     for ((id, note) in backed!!) {
@@ -152,6 +154,7 @@ class Backup(
                 createdAt = note.createdAt,
                 updatedAt = maxOf(now, note.updatedAt),
                 folderId = note.folderId,
+                locked = note.locked,
                 deleted = false,
                 dirty = true,
                 // Restoring brings a note back out of Deleted notes too.

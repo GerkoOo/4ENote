@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Badge
 import com.gerko.fourenote.data.ink.InkDocument
@@ -100,6 +101,7 @@ import com.gerko.fourenote.data.attachments.BackgroundLoader
 import com.gerko.fourenote.data.ink.PageBackground
 import com.gerko.fourenote.data.sync.CloudChoice
 import com.gerko.fourenote.data.sync.SyncManager
+import com.gerko.fourenote.data.security.Biometric
 import com.gerko.fourenote.data.sync.SyncStatus
 import com.gerko.fourenote.ui.editor.SmartInvert
 import com.gerko.fourenote.ui.editor.drawInkStroke
@@ -184,6 +186,29 @@ fun NoteListScreen(
                         }
                         IconButton(onClick = viewModel::duplicateSelected) {
                             Icon(Icons.Filled.ContentCopy, contentDescription = "Duplicate")
+                        }
+                        // Locking and unlocking both need the user to prove who they are.
+                        val allLocked = notes.orEmpty().filter { it.id in viewModel.selected }.all { it.locked }
+                        IconButton(onClick = {
+                            if (!Biometric.canAuthenticate(context)) {
+                                scope.launch { snackbar.showSnackbar("Set up a screen lock in Android settings first") }
+                                return@IconButton
+                            }
+                            val activity = context as? androidx.fragment.app.FragmentActivity ?: return@IconButton
+                            Biometric.authenticate(
+                                activity = activity,
+                                title = if (allLocked) "Remove the lock" else "Lock the notes",
+                                onSuccess = { viewModel.setLocked(!allLocked) },
+                                onFail = { message ->
+                                    if (message != null) scope.launch { snackbar.showSnackbar(message) }
+                                },
+                            )
+                        }) {
+                            if (allLocked) {
+                                Icon(Icons.Filled.LockOpen, contentDescription = "Remove lock")
+                            } else {
+                                Icon(Icons.Filled.Lock, contentDescription = "Lock")
+                            }
                         }
                         IconButton(onClick = {
                             viewModel.deleteSelected { ids ->
@@ -717,6 +742,24 @@ private fun NoteCard(
 /** Miniature of the note's first page, background included. */
 @Composable
 private fun NoteThumbnail(note: Note, backgrounds: BackgroundLoader, load: suspend (String) -> InkDocument?) {
+    // A locked note's content is never read or drawn, not even as a miniature.
+    if (note.locked) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = "Locked",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(48.dp),
+            )
+        }
+        return
+    }
     // Only the first page is read, from disk, and again only when the note has changed.
     val loaded by produceState<InkDocument?>(null, note.id, note.updatedAt) { value = load(note.id) }
     val doc = loaded ?: InkDocument()

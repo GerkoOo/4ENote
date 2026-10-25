@@ -1,6 +1,8 @@
 package com.gerko.fourenote.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -65,6 +67,7 @@ fun FourENoteNavGraph(
             val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.gerko.fourenote.FourENoteApp
             com.gerko.fourenote.ui.settings.SecurityScreen(
                 appLock = app.appLock,
+                noteLock = app.noteLock,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -82,13 +85,45 @@ fun FourENoteNavGraph(
         }
         composable(Routes.NOTE_EDITOR) { backStackEntry ->
             val noteId = backStackEntry.arguments?.getString("noteId") ?: return@composable
-            val viewModel: NoteEditorViewModel = viewModel(
-                key = noteId,
-                factory = NoteEditorViewModel.Factory(
-                    noteId, repository, attachments, toolPreferences, syncManager::requestSync, syncManager::requestSync,
-                ),
-            )
-            NoteEditorScreen(viewModel = viewModel, backgrounds = backgrounds, onBack = { navController.popBackStack() })
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.gerko.fourenote.FourENoteApp
+            val noteLock = app.noteLock
+            // The note's lock, read once per note; null while it loads. A note not saved yet (a new
+            // one is written in the background while the editor opens) can't be locked.
+            val note by androidx.compose.runtime.produceState<com.gerko.fourenote.data.Note?>(null, noteId) {
+                value = repository.getById(noteId) ?: com.gerko.fourenote.data.Note(id = noteId)
+            }
+            val unlockedIds by noteLock.unlocked.collectAsState()
+            val allUnlocked by noteLock.allUnlocked.collectAsState()
+            val open = note?.let { !it.locked || allUnlocked || it.id in unlockedIds } == true
+            // Closing the note (or leaving the app) makes it ask again next time.
+            androidx.compose.runtime.DisposableEffect(noteId) {
+                onDispose { noteLock.relock(noteId) }
+            }
+            when {
+                note == null -> Unit
+                open -> {
+                    // An open locked note mustn't show in the recent-apps thumbnail either.
+                    if (note?.locked == true && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+                        androidx.compose.runtime.DisposableEffect(activity) {
+                            activity?.setRecentsScreenshotEnabled(false)
+                            onDispose { activity?.setRecentsScreenshotEnabled(!app.appLock.enabled) }
+                        }
+                    }
+                    val viewModel: NoteEditorViewModel = viewModel(
+                        key = noteId,
+                        factory = NoteEditorViewModel.Factory(
+                            noteId, repository, attachments, toolPreferences, syncManager::requestSync, syncManager::requestSync,
+                        ),
+                    )
+                    NoteEditorScreen(viewModel = viewModel, backgrounds = backgrounds, onBack = { navController.popBackStack() })
+                }
+                else -> com.gerko.fourenote.ui.settings.NoteLockedScreen(
+                    title = note?.title.orEmpty(),
+                    onUnlocked = { noteLock.unlocked(noteId) },
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
     }
 }

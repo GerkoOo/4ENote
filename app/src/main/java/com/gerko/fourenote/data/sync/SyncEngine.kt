@@ -262,7 +262,7 @@ class SyncEngine(
 
             // Unchanged in the cloud: upload local edits, or add a PDF copy the note is still missing
             // (for instance one skipped by an older version of the app).
-            cloud.version == note.remoteVersion -> if (note.dirty || (pdfExporter != null && note.remotePdfId == null)) {
+            cloud.version == note.remoteVersion -> if (note.dirty || (pdfExporter != null && note.remotePdfId == null && !note.locked)) {
                 upload(note, cloud.id)
                 uploaded++
             }
@@ -294,15 +294,21 @@ class SyncEngine(
     private suspend fun upload(listed: Note, remoteId: String?) {
         // A merged note already carries its ink; one listed for sync doesn't yet.
         val note = if (listed.inkData.isEmpty()) store.withContent(listed) else listed
-        val pdfId = pdfExporter?.let { export ->
-            export(note)?.let { pdf ->
-                try {
-                    provider.upload(pdfName(note), PDF_MIME_TYPE, UploadContent.of(pdf), note.remotePdfId).id
-                } finally {
-                    pdf.delete()
+        // A locked note gets no readable copy in the cloud; one left from before it was locked goes.
+        val pdfId = if (note.locked) {
+            note.remotePdfId?.let { provider.delete(it) }
+            null
+        } else {
+            pdfExporter?.let { export ->
+                export(note)?.let { pdf ->
+                    try {
+                        provider.upload(pdfName(note), PDF_MIME_TYPE, UploadContent.of(pdf), note.remotePdfId).id
+                    } finally {
+                        pdf.delete()
+                    }
                 }
-            }
-        } ?: note.remotePdfId
+            } ?: note.remotePdfId
+        }
         val text = NoteFile.encode(note, pdfId)
         val file = provider.upload(NoteFile.fileName(note.id), NoteFile.MIME_TYPE, UploadContent.of(text.encodeToByteArray()), remoteId)
         store.markSynced(note.id, file, pdfId, text, expectedUpdatedAt = note.updatedAt)

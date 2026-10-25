@@ -37,6 +37,11 @@ class FourENoteApp : Application() {
         com.gerko.fourenote.data.security.AppLock(this)
     }
 
+    /** Which locked notes are open in this session (see NoteLock). */
+    val noteLock: com.gerko.fourenote.data.security.NoteLock by lazy {
+        com.gerko.fourenote.data.security.NoteLock(this)
+    }
+
     /** Looks for new versions in the background (see UpdateWatch). */
     val updateWatch: com.gerko.fourenote.data.update.UpdateWatch by lazy {
         com.gerko.fourenote.data.update.UpdateWatch(this, BuildConfig.VERSION_NAME)
