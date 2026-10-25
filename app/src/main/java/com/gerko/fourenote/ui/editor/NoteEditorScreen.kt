@@ -54,6 +54,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalView
@@ -297,6 +298,8 @@ fun NoteEditorScreen(
 
     // Full screen hides the app's bars and the system's; the dial and gestures still work.
     var fullScreen by rememberSaveable { mutableStateOf(false) }
+    // With the tablet's auto-rotate off, a button next to full screen turns the screen by hand.
+    val rotationLocked = rememberRotationLocked()
     val view = LocalView.current
     DisposableEffect(fullScreen) {
         val window = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
@@ -374,6 +377,11 @@ fun NoteEditorScreen(
                     }
                     IconButton(onClick = { showingFocus = true }) {
                         Icon(Icons.Filled.Timer, contentDescription = "Focus timer")
+                    }
+                    if (rotationLocked) {
+                        IconButton(onClick = { context.findActivity()?.let(::rotateScreen) }) {
+                            Icon(Icons.Filled.ScreenRotation, contentDescription = "Rotate screen")
+                        }
                     }
                     IconButton(onClick = { fullScreen = true }) {
                         Icon(Icons.Filled.Fullscreen, contentDescription = "Full screen")
@@ -462,11 +470,15 @@ fun NoteEditorScreen(
     )
     if (showingFocus) com.gerko.fourenote.ui.focus.FocusDialog(focusTimer, onDismiss = { showingFocus = false })
     if (fullScreen) {
-        FilledTonalIconButton(
-            onClick = { fullScreen = false },
-            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).alpha(0.7f),
-        ) {
-            Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit full screen")
+        Row(Modifier.align(Alignment.TopEnd).padding(12.dp).alpha(0.7f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (rotationLocked) {
+                FilledTonalIconButton(onClick = { context.findActivity()?.let(::rotateScreen) }) {
+                    Icon(Icons.Filled.ScreenRotation, contentDescription = "Rotate screen")
+                }
+            }
+            FilledTonalIconButton(onClick = { fullScreen = false }) {
+                Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit full screen")
+            }
         }
     }
     dialAt?.let { PenDial(viewModel, it, darkPaper, onDismiss = { dialAt = null }, onAddColor = { pickingColor = true }) }
