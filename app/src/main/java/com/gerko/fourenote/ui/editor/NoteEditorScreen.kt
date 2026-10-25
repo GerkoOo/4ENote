@@ -773,7 +773,8 @@ private fun PageList(
             // Item offsets start inside the grid's padding (the room for the tool bar and the side margin).
             val padStart = if (fullScreen) 0f else with(density) { 16.dp.toPx() }
             val left = padStart + item.offset.x + (item.size.width - w) / 2 - viewPanX()
-            val top = gridState.layoutInfo.beforeContentPadding + item.offset.y - viewPanY() + if (fullScreen) (item.size.height - h) / 2 else 0f
+            val centered = fullScreen || !arrange
+            val top = gridState.layoutInfo.beforeContentPadding + item.offset.y - viewPanY() + if (centered) (item.size.height - h) / 2 else 0f
             val z = viewZoom()
             return Rect(left * z, top * z, (left + w) * z, (top + h) * z)
         }
@@ -844,16 +845,21 @@ private fun PageList(
                     val dragged = draggingPage == page.id
                     val itemWidth = if (fullScreen) fitWidth(page.width / page.height) else pageWidth
                     val itemWidthPx = with(density) { itemWidth.toPx() }
+                    // Each page sits in a square as wide as its diagonal, in the middle, so it fits whole at
+                    // any angle: no corner is cut off or lies over another page, and starting to turn a
+                    // page doesn't move it. Arranging packs the pages tight instead.
+                    val turned = !arrange
+                    val turnedSide = androidx.compose.ui.unit.Dp(kotlin.math.hypot(itemWidth.value, itemWidth.value * page.height / page.width))
                     Box(
                         Modifier
                             .fillMaxWidth()
                             // Each page gets a whole screen in full screen, centered in it.
                             .then(if (fullScreen) Modifier.heightIn(min = this@BoxWithConstraints.maxHeight) else Modifier)
-                            // A turned page lies over its neighbours, so its corners aren't hidden under them.
-                            .zIndex(if (dragged) 1f else if ((pageRotations[page.id] ?: 0f) != 0f && !arrange) 0.5f else 0f)
+                            .then(if (turned) Modifier.heightIn(min = turnedSide) else Modifier)
+                            .zIndex(if (dragged) 1f else 0f)
                             // The other pages slide out of the way of a page being moved.
                             .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = if (dragged) null else spring()),
-                        contentAlignment = if (fullScreen) Alignment.Center else Alignment.TopCenter,
+                        contentAlignment = if (fullScreen || turned) Alignment.Center else Alignment.TopCenter,
                     ) {
                     Column(
                         Modifier
