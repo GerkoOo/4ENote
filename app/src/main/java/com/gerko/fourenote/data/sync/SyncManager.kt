@@ -13,8 +13,10 @@ import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.sync.google.GoogleAuth
 import com.gerko.fourenote.data.sync.google.GoogleDriveProvider
+import com.gerko.fourenote.data.sync.webdav.WebDavProvider
 import com.gerko.fourenote.export.PdfExporter
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,13 +25,23 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.UnknownHostException
+
+/** A short message for a failed WebDAV connection test. */
+internal fun webDavErrorMessage(e: Exception): String = when {
+    e.message?.startsWith("WebDAV 401") == true -> "Wrong user name or password"
+    e is UnknownHostException || e.cause is UnknownHostException -> "Server not found"
+    else -> e.message ?: e.javaClass.simpleName
+}
 
 /** Where notes sync to. */
 enum class CloudChoice(val label: String) {
     NONE("Not connected"),
     TEST("Test cloud (a folder on this tablet)"),
     GOOGLE_DRIVE("Google Drive"),
+    WEBDAV("Nextcloud / WebDAV"),
     ONEDRIVE("OneDrive"),
 }
 
@@ -54,6 +66,8 @@ class SyncManager(
     private val inbox: com.gerko.fourenote.data.scan.ScanInbox,
 ) {
     private val prefs = context.getSharedPreferences("sync", Context.MODE_PRIVATE)
+    // Kept apart from "sync" so the backup rules can exclude just the password.
+    private val webDavPrefs = context.getSharedPreferences("webdav", Context.MODE_PRIVATE)
     private val mutex = Mutex()
     private var autoSync: Job? = null
 
@@ -65,9 +79,14 @@ class SyncManager(
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     val status: StateFlow<SyncStatus> = _status
 
-    /** Whether [choice] can be picked now: Google Drive once signed in, OneDrive not yet. */
+    private val _webDavAccount = MutableStateFlow(webDavAccountLabel())
+    /** "user @ host" of the saved WebDAV server, or null when none is set up. */
+    val webDavAccount: StateFlow<String?> = _webDavAccount
+
+    /** Whether [choice] can be picked now: Google Drive once signed in, WebDAV once set up, OneDrive not yet. */
     fun isAvailable(choice: CloudChoice) = when (choice) {
         CloudChoice.GOOGLE_DRIVE -> googleAuth.configured && googleAuth.account.value != null
+        CloudChoice.WEBDAV -> webDavCredentials() != null
         CloudChoice.ONEDRIVE -> false
         else -> true
     }
@@ -82,6 +101,38 @@ class SyncManager(
         googleAuth.signOut()
         prefs.edit().remove(KEY_DRIVE_FOLDER).apply()
         if (_choice.value == CloudChoice.GOOGLE_DRIVE) select(CloudChoice.NONE)
+    }
+
+    /**
+     * Checks the server answers with these credentials, then saves them and switches to WebDAV.
+     * Returns null on success, or a short message to show the user; nothing is saved on failure.
+     */
+    suspend fun connectWebDav(url: String, user: String, password: String): String? {
+        val trimmedUrl = url.trim()
+        val trimmedUser = user.trim()
+        val error = try {
+            withContext(Dispatchers.IO) {
+                WebDavProvider(trimmedUrl, trimmedUser, password).listFiles()
+            }
+            null
+        } catch (e: Exception) {
+            webDavErrorMessage(e)
+        }
+        if (error != null) return error
+        webDavPrefs.edit()
+            .putString(KEY_WEBDAV_URL, trimmedUrl)
+            .putString(KEY_WEBDAV_USER, trimmedUser)
+            .putString(KEY_WEBDAV_PASSWORD, password)
+            .apply()
+        _webDavAccount.value = webDavAccountLabel()
+        select(CloudChoice.WEBDAV)
+        return null
+    }
+
+    fun disconnectWebDav() {
+        webDavPrefs.edit().clear().apply()
+        _webDavAccount.value = null
+        if (_choice.value == CloudChoice.WEBDAV) select(CloudChoice.NONE)
     }
 
     fun select(choice: CloudChoice) {
@@ -183,12 +234,31 @@ class SyncManager(
             if (found != null) prefs.edit().putString(KEY_DRIVE_FOLDER, found).apply()
             prefs.getString(KEY_DRIVE_FOLDER, null)
         }
+        CloudChoice.WEBDAV -> webDavCredentials()?.let { (url, user, password) ->
+            WebDavProvider(url, user, password)
+        }
         CloudChoice.ONEDRIVE, CloudChoice.NONE -> null
+    }
+
+    private fun webDavCredentials(): Triple<String, String, String>? {
+        val url = webDavPrefs.getString(KEY_WEBDAV_URL, null) ?: return null
+        val user = webDavPrefs.getString(KEY_WEBDAV_USER, null) ?: return null
+        val password = webDavPrefs.getString(KEY_WEBDAV_PASSWORD, null) ?: return null
+        return Triple(url, user, password)
+    }
+
+    private fun webDavAccountLabel(): String? {
+        val (url, user, _) = webDavCredentials() ?: return null
+        val host = runCatching { java.net.URI(url).host }.getOrNull() ?: url
+        return "$user @ $host"
     }
 
     private companion object {
         const val KEY_CHOICE = "cloud"
         const val KEY_DRIVE_FOLDER = "driveFolder"
+        const val KEY_WEBDAV_URL = "url"
+        const val KEY_WEBDAV_USER = "user"
+        const val KEY_WEBDAV_PASSWORD = "password"
         const val AUTO_SYNC_INTERVAL_MS = 60_000L
     }
 }

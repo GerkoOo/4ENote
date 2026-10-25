@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The WebDAV password stays on this device: it is not part of cloud backups. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="webdav.xml" />
+</full-backup-content>
