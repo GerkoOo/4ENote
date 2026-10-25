@@ -144,7 +144,6 @@ class Backup(
         var updated = 0
         for (id in taking) {
             val note = backed!!.getValue(id)
-            if (!File(File(inkRoot, id), "manifest.json").isFile) continue
             val local = here[id]
             // Kept as an edit (dirty, newer than before) so sync takes it, keeping this device's
             // link to the cloud copy so it is updated rather than duplicated.
@@ -155,6 +154,8 @@ class Backup(
                 folderId = note.folderId,
                 deleted = false,
                 dirty = true,
+                // Restoring brings a note back out of Deleted notes too.
+                trashedAt = null,
             )
             saveNote(restored)
             if (local == null || local.deleted) added++ else updated++

@@ -84,6 +84,27 @@ class BackupTest {
         assertFalse(a.notes.getValue("n1").deleted)
     }
 
+    @Test
+    fun aNoteWithoutInkComesBackToo() {
+        val a = Device()
+        a.notes["n1"] = Note(id = "n1", title = "Only a title", updatedAt = 100, dirty = false)
+        val file = a.save()
+        val b = Device()
+        val result = runBlocking { b.backup.restore(file.inputStream()) }
+        assertEquals(1, result.added)
+        assertEquals("Only a title", b.notes.getValue("n1").title)
+    }
+
+    @Test
+    fun aRestoredNoteLeavesDeletedNotes() {
+        val a = Device()
+        a.write("n1", "Maths", 100, "ink")
+        val file = a.save()
+        a.notes["n1"] = a.notes.getValue("n1").copy(trashedAt = 50, updatedAt = 50)
+        runBlocking { a.backup.restore(file.inputStream()) }
+        assertEquals(null, a.notes.getValue("n1").trashedAt)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun anyOtherZipIsRefused() {
         val other = ByteArrayOutputStream().also { out ->

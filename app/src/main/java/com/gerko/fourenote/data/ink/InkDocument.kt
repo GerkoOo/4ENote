@@ -276,6 +276,12 @@ data class InkDocument(
     val paper: PaperStyle = PaperStyle.LINED,
     val layers: List<InkLayer> = listOf(InkLayer.BASE),
 ) {
+    /** Nothing was put in it: one page with no ink, text, pictures or background. */
+    val isBlank: Boolean
+        get() = pages.size == 1 && pages[0].let {
+            it.strokes.isEmpty() && it.texts.isEmpty() && it.images.isEmpty() && it.background == null
+        }
+
     /** The page's strokes on visible layers, in drawing order (bottom layer first). */
     fun visibleStrokes(page: InkPage): List<InkStroke> {
         val order = layers.withIndex().filter { it.value.visible }.associate { it.value.id to it.index }

@@ -22,6 +22,15 @@ object PenKeys {
         if (held != 0) usedWhileHeld = true
     }
 
+    /**
+     * Forgets held buttons when the app loses focus (a notification, a dialog, the screen going
+     * off): their release goes elsewhere, and the pen would otherwise keep that button's tool.
+     */
+    fun releaseAll() {
+        held = 0
+        usedWhileHeld = false
+    }
+
     fun dispatch(event: KeyEvent): Boolean {
         val listener = listener ?: return false
         val button = buttonFor(event) ?: return false

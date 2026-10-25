@@ -44,6 +44,11 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean = PenKeys.dispatch(event) || super.dispatchKeyEvent(event)
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) PenKeys.releaseAll()
+    }
+
     override fun onStart() {
         super.onStart()
         (application as FourENoteApp).syncManager.startAutoSync()

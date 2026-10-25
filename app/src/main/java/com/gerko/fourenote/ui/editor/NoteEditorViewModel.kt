@@ -158,7 +158,9 @@ class NoteEditorViewModel(
             try {
                 val file = withContext(Dispatchers.IO) {
                     val dir = java.io.File(attachments.context.cacheDir, "exports").apply { mkdirs() }
-                    dir.listFiles()?.forEach { it.delete() }
+                    // Earlier exports may still be on their way to another app; only old ones go.
+                    val hourAgo = System.currentTimeMillis() - 60 * 60 * 1000L
+                    dir.listFiles()?.filter { it.lastModified() < hourAgo }?.forEach { it.delete() }
                     java.io.File(dir, "$name.pdf").also {
                         com.gerko.fourenote.export.PdfExporter.export(base.id, snapshot, attachments, it)
                     }
@@ -801,7 +803,10 @@ class NoteEditorViewModel(
                 val frame = page.images[i]
                 val filled = byId[frame.id] ?: continue
                 if (!frame.waitingForPhoto) continue
-                page.images[i] = filled
+                // The photo's shape comes from the other device; where the frame is and its size stay ours.
+                val aspect = filled.width / filled.height.coerceAtLeast(1f)
+                val width = minOf(frame.width, frame.height * aspect)
+                page.images[i] = frame.copy(file = filled.file, width = width, height = width / aspect)
                 changed = true
             }
         }
@@ -1358,11 +1363,15 @@ class NoteEditorViewModel(
     override fun onCleared() {
         textRecognizer?.close()
         mathRecognizer?.close()
+        // A new note left without anything in it isn't kept (one already in the cloud is).
+        val blank = note != null && (title.isBlank() || title == "Untitled")
+        val leftBlank = blank && InkDocument(pages.map { it.toPage() }, paper, layers.toList()).isBlank
         // The screen is gone but the last edits may not be saved yet: finish that first,
         // then let sync know the note is free.
         CoroutineScope(Dispatchers.Default + NonCancellable).launch {
             writePendingSave()
             repository.markClosed(noteId)
+            if (leftBlank) repository.getById(noteId)?.takeIf { it.remoteId == null }?.let { repository.delete(it) }
             withContext(Dispatchers.Main) { onClosed() }
         }
     }

@@ -62,3 +62,13 @@ class SafeNameTest {
         assertThrows(java.io.IOException::class.java) { ByteArray(11).inputStream().readLimited(limit = 10) }
     }
 }
+
+class BlankNoteTest {
+    @Test
+    fun onlyANoteWithNothingInItIsBlank() {
+        val page = com.gerko.fourenote.data.ink.InkPage()
+        assertTrue(InkDocument(listOf(page)).isBlank)
+        assertFalse(InkDocument(listOf(page, com.gerko.fourenote.data.ink.InkPage())).isBlank)
+        assertFalse(InkDocument(listOf(page.copy(texts = listOf(com.gerko.fourenote.data.ink.PageText(x = 0f, y = 0f, width = 10f, text = "a"))))).isBlank)
+    }
+}
