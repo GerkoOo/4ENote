@@ -97,6 +97,10 @@ dependencies {
     implementation("androidx.camera:camera-view:1.6.1")
     // Syncs once a connection is back, even with the app closed (AndroidX, Apache 2.0).
     implementation("androidx.work:work-runtime-ktx:2.11.2")
+    // The app lock's fingerprint, face and screen-lock prompt (AndroidX, Apache 2.0).
+    implementation("androidx.biometric:biometric:1.1.0")
+    // BiometricPrompt needs a FragmentActivity; MainActivity extends it.
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     // Draws LaTeX as a typeset formula, offline (JLaTeXMath, GPL-2.0-or-later).
     implementation("ru.noties:jlatexmath-android:0.2.0")
 

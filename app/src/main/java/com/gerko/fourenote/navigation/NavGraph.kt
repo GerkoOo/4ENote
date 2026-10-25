@@ -23,6 +23,7 @@ private object Routes {
     const val CLOUD_SETTINGS = "cloudSettings"
     const val SUPPORT = "support"
     const val TRASH = "trash"
+    const val SECURITY = "security"
     fun noteEditor(noteId: String) = "noteEditor/$noteId"
 }
 
@@ -57,6 +58,14 @@ fun FourENoteNavGraph(
                 onOpenCloudSettings = { navController.navigate(Routes.CLOUD_SETTINGS) },
                 onOpenSupport = { navController.navigate(Routes.SUPPORT) },
                 onOpenTrash = { navController.navigate(Routes.TRASH) },
+                onOpenSecurity = { navController.navigate(Routes.SECURITY) },
+            )
+        }
+        composable(Routes.SECURITY) {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.gerko.fourenote.FourENoteApp
+            com.gerko.fourenote.ui.settings.SecurityScreen(
+                appLock = app.appLock,
+                onBack = { navController.popBackStack() },
             )
         }
         composable(Routes.TRASH) {

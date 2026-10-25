@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.LocalCafe
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Badge
 import com.gerko.fourenote.data.ink.InkDocument
@@ -116,6 +117,7 @@ fun NoteListScreen(
     onOpenCloudSettings: () -> Unit,
     onOpenSupport: () -> Unit = {},
     onOpenTrash: () -> Unit = {},
+    onOpenSecurity: () -> Unit = {},
 ) {
     val notes by viewModel.notes.collectAsState()
     val trashedCount by viewModel.trashedCount.collectAsState()
@@ -290,6 +292,14 @@ fun NoteListScreen(
                                     },
                                 )
                             }
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Privacy & lock") },
+                                leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
+                                onClick = {
+                                    menu = false
+                                    onOpenSecurity()
+                                },
+                            )
                             androidx.compose.material3.DropdownMenuItem(
                                 text = { Text("Look for updates by itself") },
                                 leadingIcon = {

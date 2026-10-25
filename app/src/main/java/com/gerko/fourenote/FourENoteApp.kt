@@ -32,6 +32,11 @@ class FourENoteApp : Application() {
 
     val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }
 
+    /** The optional fingerprint/face/PIN lock in front of the whole app. */
+    val appLock: com.gerko.fourenote.data.security.AppLock by lazy {
+        com.gerko.fourenote.data.security.AppLock(this)
+    }
+
     /** Looks for new versions in the background (see UpdateWatch). */
     val updateWatch: com.gerko.fourenote.data.update.UpdateWatch by lazy {
         com.gerko.fourenote.data.update.UpdateWatch(this, BuildConfig.VERSION_NAME)
