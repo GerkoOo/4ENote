@@ -283,13 +283,10 @@ class NoteListViewModel(
         }
     }
 
-    /** Locks or unlocks the ticked notes; the lock syncs, so it reaches the other devices. */
-    fun setLocked(locked: Boolean) {
-        val chosen = selected
-        clearSelection()
-        if (chosen.isEmpty()) return
+    /** Locks or unlocks one note; the lock syncs, so it reaches the other devices. */
+    fun setLocked(noteId: String, locked: Boolean) {
         viewModelScope.launch {
-            repository.setLocked(chosen, locked)
+            repository.setLocked(listOf(noteId), locked)
             onChanged()
         }
     }

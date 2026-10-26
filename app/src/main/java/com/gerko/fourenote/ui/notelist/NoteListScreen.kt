@@ -187,29 +187,6 @@ fun NoteListScreen(
                         IconButton(onClick = viewModel::duplicateSelected) {
                             Icon(Icons.Filled.ContentCopy, contentDescription = "Duplicate")
                         }
-                        // Locking and unlocking both need the user to prove who they are.
-                        val allLocked = notes.orEmpty().filter { it.id in viewModel.selected }.all { it.locked }
-                        IconButton(onClick = {
-                            if (!Unlock.canUnlock(context)) {
-                                scope.launch { snackbar.showSnackbar("Set up a screen lock in Android settings first") }
-                                return@IconButton
-                            }
-                            val activity = context as? androidx.fragment.app.FragmentActivity ?: return@IconButton
-                            Unlock.authenticate(
-                                activity = activity,
-                                title = if (allLocked) "Remove the lock" else "Lock the notes",
-                                onSuccess = { viewModel.setLocked(!allLocked) },
-                                onFail = { message ->
-                                    if (message != null) scope.launch { snackbar.showSnackbar(message) }
-                                },
-                            )
-                        }) {
-                            if (allLocked) {
-                                Icon(Icons.Filled.LockOpen, contentDescription = "Remove lock")
-                            } else {
-                                Icon(Icons.Filled.Lock, contentDescription = "Lock")
-                            }
-                        }
                         IconButton(onClick = {
                             viewModel.deleteSelected { ids ->
                                 scope.launch {
@@ -436,6 +413,25 @@ fun NoteListScreen(
                         selected = note.id in viewModel.selected,
                         onClick = { if (selecting) viewModel.toggleSelected(note.id) else onOpenNote(note.id) },
                         onLongClick = { viewModel.toggleSelected(note.id) },
+                        // While selecting, taps tick notes, so the lock on the card is hidden.
+                        onToggleLock = if (selecting) null else {
+                            {
+                                // Locking and unlocking both need the user to prove who they are.
+                                val activity = context as? androidx.fragment.app.FragmentActivity
+                                when {
+                                    !Unlock.canUnlock(context) ->
+                                        scope.launch { snackbar.showSnackbar("Set a 4ENote password in Privacy & lock, or a screen lock in Android settings, first") }
+                                    activity != null -> Unlock.authenticate(
+                                        activity = activity,
+                                        title = if (note.locked) "Remove the lock" else "Lock the note",
+                                        onSuccess = { viewModel.setLocked(note.id, !note.locked) },
+                                        onFail = { message ->
+                                            if (message != null) scope.launch { snackbar.showSnackbar(message) }
+                                        },
+                                    )
+                                }
+                            }
+                        },
                         loadThumbnail = viewModel::thumbnail,
                         onDragStart = { finger ->
                             draggingNote = note.id
@@ -651,6 +647,8 @@ private fun NoteCard(
     selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    /** Locks or unlocks the note from the lock in its corner; null hides that lock. */
+    onToggleLock: (() -> Unit)?,
     loadThumbnail: suspend (String) -> InkDocument?,
     onDragStart: (finger: androidx.compose.ui.geometry.Offset) -> Unit = {},
     onDrag: (delta: androidx.compose.ui.geometry.Offset, finger: androidx.compose.ui.geometry.Offset) -> Unit = { _, _ -> },
@@ -721,6 +719,21 @@ private fun NoteCard(
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(28.dp)
                         .background(MaterialTheme.colorScheme.surface, CircleShape),
                 )
+            } else if (onToggleLock != null) {
+                IconButton(
+                    onClick = onToggleLock,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+                ) {
+                    Icon(
+                        if (note.locked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                        contentDescription = if (note.locked) "Remove lock" else "Lock",
+                        tint = if (note.locked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), CircleShape)
+                            .padding(6.dp),
+                    )
+                }
             }
         }
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {

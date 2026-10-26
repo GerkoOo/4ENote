@@ -203,7 +203,7 @@ fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
 
             Text("Locked notes", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Lock a note from the home page: select it and tap the lock. A locked note asks for your " +
+                "Lock a note from the home page: tap the lock in the corner of its card. A locked note asks for your " +
                     "fingerprint, face or " + (if (passwordSet) "4ENote password" else "PIN") + " each time it is opened, and gets no PDF copy in the cloud.",
                 style = MaterialTheme.typography.bodyMedium,
             )
