@@ -207,6 +207,15 @@ fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
                     "fingerprint, face or " + (if (passwordSet) "4ENote password" else "PIN") + " each time it is opened, and gets no PDF copy in the cloud.",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            // Honest scope: the lock keeps out someone who picks up the tablet, not root or forensic tools.
+            Text(
+                "On this tablet, locking hides a note behind the lock; the note itself is not encrypted here, so it " +
+                    "keeps out someone who picks up your tablet, not someone with root access or forensic tools. " +
+                    "In the cloud, locked notes are encrypted once a 4ENote password is set. Notes are not part of " +
+                    "Android backups; use 4ENote's own backup or sync to move them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),

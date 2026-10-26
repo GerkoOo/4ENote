@@ -143,8 +143,12 @@ private fun Modifier.sideways() = layout { measurable, constraints ->
 
 /** Short buzz when a phase ends, so a break (or getting back to work) isn't missed. */
 fun buzz(context: Context) {
-    val vibrator = context.getSystemService(VibratorManager::class.java)?.defaultVibrator
-        ?: @Suppress("DEPRECATION") context.getSystemService(Vibrator::class.java)
+    // VibratorManager only exists from Android 12; naming it on older versions crashes.
+    val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION") context.getSystemService(Vibrator::class.java)
+    }
     runCatching { vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 180, 120, 180), -1)) }
 }
 
