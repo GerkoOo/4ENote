@@ -30,4 +30,4 @@ jobs:
         run: ./gradlew assembleDebug --console=plain
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --console=plain
+        run: ./gradlew testDebugUnitTest :shared:jvmTest --console=plain
