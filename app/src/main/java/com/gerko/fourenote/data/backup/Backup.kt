@@ -40,6 +40,10 @@ class Backup(
     private val saveFolders: suspend (List<Folder>) -> Unit,
     /** Forgets what the ink store keeps in memory for a note, before its files are replaced. */
     private val forgetInk: suspend (String) -> Unit,
+    /** A note's ink file as plain bytes (a locked note's are encrypted on the device). */
+    private val readInk: suspend (noteId: String, file: File) -> ByteArray = { _, file -> file.readBytes() },
+    /** Encrypts a restored note's ink on the device when it is locked, or not. */
+    private val sealInk: suspend (noteId: String, locked: Boolean) -> Unit = { _, _ -> },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     data class Restored(val added: Int, val updated: Int, val kept: Int, val folders: Int)
@@ -69,9 +73,10 @@ class Backup(
         text("folders.json", FolderFile.encode(folders().filterNot { it.deleted }))
         for (note in all) {
             val ink = File(inkRoot, note.id)
-            File(ink, "manifest.json").takeIf { it.isFile }?.let { addFile(zip, "ink/${note.id}/manifest.json", it) }
+            File(ink, "manifest.json").takeIf { it.isFile }
+                ?.let { addBytes(zip, "ink/${note.id}/manifest.json", readInk(note.id, it)) }
             File(ink, "pages").listFiles().orEmpty().filter { it.isFile && it.name.endsWith(".ink") }
-                .forEach { addFile(zip, "ink/${note.id}/pages/${it.name}", it) }
+                .forEach { addBytes(zip, "ink/${note.id}/pages/${it.name}", readInk(note.id, it)) }
             File(attachmentsRoot, note.id).listFiles().orEmpty().filter { it.isFile && !it.name.startsWith(".") }
                 .forEach { addFile(zip, "attachments/${note.id}/${it.name}", it) }
         }
@@ -161,6 +166,7 @@ class Backup(
                 trashedAt = null,
             )
             saveNote(restored)
+            sealInk(id, restored.locked)
             if (local == null || local.deleted) added++ else updated++
         }
         // Folders: the newer of each; any a restored note is in comes back if it was deleted here.
@@ -184,6 +190,12 @@ class Backup(
             parts.size == 3 && parts[0] == "attachments" -> parts[1] to File(File(attachmentsRoot, parts[1]), parts[2])
             else -> null
         }
+    }
+
+    private fun addBytes(zip: ZipOutputStream, name: String, bytes: ByteArray) {
+        zip.putNextEntry(ZipEntry(name))
+        zip.write(bytes)
+        zip.closeEntry()
     }
 
     private fun addFile(zip: ZipOutputStream, name: String, file: File) {

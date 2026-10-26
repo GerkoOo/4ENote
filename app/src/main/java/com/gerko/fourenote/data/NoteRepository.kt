@@ -26,7 +26,10 @@ class NoteRepository(
 ) : SyncStore {
     private val openNotes = ConcurrentHashMap.newKeySet<String>()
 
-    private val legacyMoved: Deferred<Unit> = scope.async { moveLegacyInk() }
+    private val legacyMoved: Deferred<Unit> = scope.async {
+        moveLegacyInk()
+        sealToMatch()
+    }
 
     fun observeAll(): Flow<List<Note>> = dao.observeAll()
 
@@ -62,7 +65,24 @@ class NoteRepository(
 
     /** Locks or unlocks notes; the lock syncs, so it reaches the other devices. */
     suspend fun setLocked(noteIds: Collection<String>, locked: Boolean) {
-        if (noteIds.isNotEmpty()) dao.setLocked(noteIds.toList(), locked, System.currentTimeMillis())
+        if (noteIds.isEmpty()) return
+        dao.setLocked(noteIds.toList(), locked, System.currentTimeMillis())
+        for (id in noteIds) seal(id, locked)
+    }
+
+    /** Encrypts locked notes' ink on this device and decrypts unlocked ones (see InkStore.setSealed). */
+    private suspend fun seal(noteId: String, locked: Boolean) {
+        try {
+            ink.setSealed(noteId, locked)
+        } catch (e: Exception) {
+            // Left as it is; the next start tries again.
+            Log.w(TAG, "Couldn't ${if (locked) "encrypt" else "decrypt"} note $noteId", e)
+        }
+    }
+
+    /** Brings every note's files in line with its lock: after a crash halfway, or an older version. */
+    private suspend fun sealToMatch() {
+        for (note in dao.getAllForSync()) seal(note.id, note.locked)
     }
 
     /** Moves notes into [folderId] (null: the top of the home page). */
@@ -124,6 +144,8 @@ class NoteRepository(
         saveNote = { dao.upsert(it) },
         saveFolders = { folders?.upsertAll(it) },
         forgetInk = { id -> ink.forget(id) },
+        readInk = { id, file -> ink.plainBytes(id, file) },
+        sealInk = { id, locked -> seal(id, locked) },
     )
 
     override suspend fun foldersForSync(): List<Folder>? = folders?.getAll()
@@ -300,6 +322,8 @@ class NoteRepository(
     }
 
     override suspend fun insertFromCloud(note: Note, snapshot: ByteArray) {
+        // Sealed before the first byte is written, if it comes locked.
+        seal(note.id, note.locked)
         ink.save(note.id, InkSerializer.decode(note.inkData))
         ink.writeCompressedSnapshot(note.id, snapshot)
         dao.upsert(note.copy(inkData = "", syncedSnapshot = ""))
@@ -316,8 +340,10 @@ class NoteRepository(
             dirty = dirty,
             expectedUpdatedAt = expectedUpdatedAt,
             folderId = note.folderId,
+            locked = note.locked,
         ) > 0
         if (replaced) {
+            seal(note.id, note.locked)
             ink.save(note.id, InkSerializer.decode(note.inkData))
             if (trashedAt != null) dao.setTrashed(listOf(note.id), trashedAt)
         }

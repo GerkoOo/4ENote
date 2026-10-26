@@ -27,7 +27,7 @@ class FourENoteApp : Application() {
 
     val repository: NoteRepository by lazy {
         val db = AppDatabase.getInstance(this)
-        NoteRepository(db.noteDao(), attachments, InkStore(java.io.File(filesDir, "ink")), appScope, db.folderDao())
+        NoteRepository(db.noteDao(), attachments, InkStore(java.io.File(filesDir, "ink"), com.gerko.fourenote.data.security.DeviceKey(this)), appScope, db.folderDao())
     }
 
     val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }

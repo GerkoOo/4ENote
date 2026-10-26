@@ -55,7 +55,7 @@ class NotesKeyring(private val store: Store, private val sealer: Sealer) {
             override fun encryptedVersion(noteId: String) = prefs.getString("enc:$noteId", null)
             override fun setEncryptedVersion(noteId: String, value: String) = prefs.edit().putString("enc:$noteId", value).apply()
         },
-        KeystoreSealer,
+        KeystoreSealer("4enote-notes-key"),
     )
 
     private var cached: NotesKey? = null
@@ -188,34 +188,33 @@ class NotesKeyring(private val store: Store, private val sealer: Sealer) {
         else -> State.OFF
     }
 
-    /** AES-GCM with a key in the Android Keystore; it opens without asking (the app gate is [Unlock]). */
-    private object KeystoreSealer : Sealer {
-        private const val ALIAS = "4enote-notes-key"
+}
 
-        private fun secretKey(): SecretKey {
-            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            (keyStore.getKey(ALIAS, null) as? SecretKey)?.let { return it }
-            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            generator.init(
-                KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build(),
-            )
-            return generator.generateKey()
-        }
+/** AES-GCM with a key ([alias]) in the Android Keystore; it opens without asking (the app gate is [Unlock]). */
+class KeystoreSealer(private val alias: String) : NotesKeyring.Sealer {
+    private fun secretKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (keyStore.getKey(alias, null) as? SecretKey)?.let { return it }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build(),
+        )
+        return generator.generateKey()
+    }
 
-        override fun seal(plain: ByteArray): ByteArray {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-            return cipher.iv + cipher.doFinal(plain)
-        }
+    override fun seal(plain: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        return cipher.iv + cipher.doFinal(plain)
+    }
 
-        override fun open(sealed: ByteArray): ByteArray {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, sealed, 0, 12))
-            return cipher.doFinal(sealed, 12, sealed.size - 12)
-        }
+    override fun open(sealed: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, sealed, 0, 12))
+        return cipher.doFinal(sealed, 12, sealed.size - 12)
     }
 }

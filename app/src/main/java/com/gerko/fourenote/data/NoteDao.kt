@@ -70,7 +70,7 @@ interface NoteDao {
      */
     @Query(
         """UPDATE notes SET title = :title, createdAt = :createdAt,
-           updatedAt = :updatedAt, dirty = :dirty, folderId = :folderId
+           updatedAt = :updatedAt, dirty = :dirty, folderId = :folderId, locked = :locked
            WHERE id = :id AND updatedAt = :expectedUpdatedAt""",
     )
     suspend fun replaceContentIfUnchanged(
@@ -81,6 +81,7 @@ interface NoteDao {
         dirty: Boolean,
         expectedUpdatedAt: Long,
         folderId: String?,
+        locked: Boolean,
     ): Int
 
     /**
