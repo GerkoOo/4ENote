@@ -35,12 +35,17 @@ class SyncEngineTest {
         }
         val notes = linkedMapOf<String, Note>()
         val open = mutableSetOf<String>()
+        val keys = com.gerko.fourenote.data.security.NotesKeyring(
+            com.gerko.fourenote.data.security.NotesKeyringTest.MemoryStore(),
+            com.gerko.fourenote.data.security.NotesKeyringTest.PlainSealer,
+        )
         val engine = SyncEngine(
             this,
             LocalFolderCloudProvider(cloudDir),
             pdfExporter = { note -> tmp.newFile().apply { writeText("PDF ${note.title}") } },
             clock = clock,
             inbox = inbox,
+            keys = keys,
         )
 
         fun save(note: Note) {
@@ -277,6 +282,10 @@ class SyncEngineTest {
 
     @Test
     fun noteTooLongForAPdfCopyStillSyncs() {
+        val keys = com.gerko.fourenote.data.security.NotesKeyring(
+            com.gerko.fourenote.data.security.NotesKeyringTest.MemoryStore(),
+            com.gerko.fourenote.data.security.NotesKeyringTest.PlainSealer,
+        )
         val engine = SyncEngine(a, LocalFolderCloudProvider(cloudDir), pdfExporter = { null }, clock = clock)
         a.save(Note(id = "big", title = "Lecture", inkData = ink("s1")))
         runBlocking { engine.sync() }
@@ -465,5 +474,100 @@ class SyncEngineTest {
         a.sync()
         b.sync()
         assertTrue(b.folders.single().deleted)
+    }
+
+    private val password = "Blue-Kettle-42!".toCharArray()
+
+    private fun cloudText(name: String) = java.io.File(cloudDir, name).readText()
+
+    @Test
+    fun lockedNoteIsEncryptedInTheCloudAndOpensOnADeviceWithThePassword() {
+        a.keys.passwordSet(password)
+        a.save(Note(id = "n1", title = "Diary", inkData = ink("secret"), locked = true))
+        a.addPicture("n1", "photo.jpg", "PHOTO")
+        a.sync()
+        assertTrue(cloudFiles().contains("lock.json"))
+        assertTrue(cloudFiles().contains("n1~photo.jpg.4el"))
+        assertTrue(cloudFiles().none { it == "n1~photo.jpg" || it.endsWith(".pdf") })
+        assertTrue(!cloudText("n1.4enote").contains("Diary") && !cloudText("n1.4enote").contains("secret"))
+        assertTrue(!cloudText("n1~photo.jpg.4el").contains("PHOTO"))
+
+        // Without the password, B leaves it alone.
+        val result = b.sync()
+        assertEquals(1, result.needPassword)
+        assertNull(b.notes["n1"])
+        assertEquals(com.gerko.fourenote.data.security.NotesKeyring.State.NEEDS_PASSWORD, b.keys.state.value)
+        assertTrue(cloudFiles().contains("n1.4enote"))
+
+        assertTrue(b.keys.unlockWith(password))
+        assertEquals(0, b.sync().needPassword)
+        assertEquals("Diary", b.notes.getValue("n1").title)
+        assertEquals(setOf("secret"), b.strokeIds("n1"))
+        assertEquals("PHOTO", b.files.getValue("n1").getValue("photo.jpg").readText())
+
+        // Edits on both sides still merge through the encryption.
+        a.addStrokes("n1", "fromA")
+        b.addStrokes("n1", "fromB")
+        a.sync()
+        assertEquals(1, b.sync().merged)
+        a.sync()
+        assertEquals(setOf("secret", "fromA", "fromB"), a.strokeIds("n1"))
+        assertTrue(!cloudText("n1.4enote").contains("fromA"))
+    }
+
+    @Test
+    fun noteLockedBeforeThePasswordIsEncryptedOnceItIsSet() {
+        a.save(Note(id = "n1", title = "Diary", inkData = ink("s1"), locked = true))
+        a.addPicture("n1", "photo.jpg", "PHOTO")
+        a.sync()
+        assertTrue(cloudText("n1.4enote").contains("Diary"))
+        a.keys.passwordSet(password)
+        a.sync()
+        assertTrue(!cloudText("n1.4enote").contains("Diary"))
+        assertTrue(cloudFiles().contains("n1~photo.jpg.4el") && !cloudFiles().contains("n1~photo.jpg"))
+        // Nothing more to do on the next sync.
+        assertEquals(0, a.sync().uploaded)
+    }
+
+    @Test
+    fun unlockingANoteStoresItReadableAgain() {
+        a.keys.passwordSet(password)
+        a.save(Note(id = "n1", title = "Diary", inkData = ink("s1"), locked = true))
+        a.addPicture("n1", "photo.jpg", "PHOTO")
+        a.sync()
+        a.save(a.notes.getValue("n1").copy(locked = false))
+        a.sync()
+        assertTrue(cloudText("n1.4enote").contains("Diary"))
+        assertTrue(cloudFiles().contains("n1~photo.jpg") && !cloudFiles().contains("n1~photo.jpg.4el"))
+    }
+
+    @Test
+    fun deviceWithoutThePasswordDoesNotOverwriteOrDeleteEncryptedPictures() {
+        sharedNote()
+        b.addPicture("n1", "photo.jpg", "PHOTO")
+        b.sync()
+        a.sync()
+        a.keys.passwordSet(password)
+        a.save(a.notes.getValue("n1").copy(locked = true))
+        a.sync()
+        // B still has the note unlocked and plain, but no key: the encrypted cloud copy stays as it is.
+        b.addStrokes("n1", "fromB")
+        b.sync()
+        assertTrue(cloudFiles().contains("n1~photo.jpg.4el") && !cloudFiles().contains("n1~photo.jpg"))
+        assertTrue(!cloudText("n1.4enote").contains("Biology"))
+        assertTrue(b.notes.getValue("n1").dirty)
+    }
+
+    @Test
+    fun encryptedNoteCopiedOverAnotherNotesNameIsRefused() {
+        a.keys.passwordSet(password)
+        a.save(Note(id = "n1", title = "Diary", inkData = ink("s1"), locked = true))
+        a.sync()
+        b.keys.reconcile(cloudText("lock.json"))
+        b.keys.unlockWith(password)
+        java.io.File(cloudDir, "n1.4enote").copyTo(java.io.File(cloudDir, "n2.4enote"))
+        val result = b.sync()
+        assertNull(b.notes["n2"])
+        assertEquals(1, result.errors.size)
     }
 }

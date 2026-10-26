@@ -225,6 +225,7 @@ private fun statusText(status: SyncStatus): String = when (status) {
             if (r.merged > 0) add("${r.merged} merged")
             if (r.deletedHere + r.deletedInCloud > 0) add("${r.deletedHere + r.deletedInCloud} deleted")
             if (r.errors.isNotEmpty()) add("${r.errors.size} failed: ${r.errors.first()}")
+            if (r.needPassword > 0) add("${r.needPassword} locked waiting for your 4ENote password (Privacy & lock)")
         }
         "Synced $when_ · " + parts.ifEmpty { listOf("everything up to date") }.joinToString(", ")
     }

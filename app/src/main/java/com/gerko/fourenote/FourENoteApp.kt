@@ -37,6 +37,11 @@ class FourENoteApp : Application() {
         com.gerko.fourenote.data.security.AppPassword(this)
     }
 
+    /** The key that encrypts locked notes in the cloud (see NotesKeyring). */
+    val notesKeyring: com.gerko.fourenote.data.security.NotesKeyring by lazy {
+        com.gerko.fourenote.data.security.NotesKeyring(this)
+    }
+
     val appLock: com.gerko.fourenote.data.security.AppLock by lazy {
         com.gerko.fourenote.data.security.AppLock(this)
     }
@@ -57,7 +62,7 @@ class FourENoteApp : Application() {
     /** Scans taken from the home page, waiting for the note with their photo frame. */
     val scanInbox: ScanInbox by lazy { ScanInbox(java.io.File(filesDir, "inbox")) }
 
-    val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, googleAuth, appScope, scanInbox) }
+    val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, googleAuth, appScope, scanInbox, notesKeyring) }
 
     override fun onCreate() {
         super.onCreate()

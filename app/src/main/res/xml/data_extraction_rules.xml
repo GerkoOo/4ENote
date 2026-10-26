@@ -5,10 +5,12 @@
         <exclude domain="sharedpref" path="webdav.xml" />
         <exclude domain="sharedpref" path="google-auth.xml" />
         <exclude domain="sharedpref" path="app-password.xml" />
+        <exclude domain="sharedpref" path="notes-key.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="webdav.xml" />
         <exclude domain="sharedpref" path="google-auth.xml" />
         <exclude domain="sharedpref" path="app-password.xml" />
+        <exclude domain="sharedpref" path="notes-key.xml" />
     </device-transfer>
 </data-extraction-rules>

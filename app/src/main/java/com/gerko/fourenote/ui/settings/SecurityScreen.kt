@@ -32,12 +32,20 @@ import com.gerko.fourenote.data.security.Unlock
 import androidx.compose.foundation.verticalScroll
 import kotlinx.coroutines.launch
 import com.gerko.fourenote.data.security.NoteLock
+import com.gerko.fourenote.data.security.NotesKeyring
+import androidx.compose.runtime.collectAsState
 
 @Composable
 fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? FragmentActivity
-    val appPassword = (context.applicationContext as com.gerko.fourenote.FourENoteApp).appPassword
+    val app = context.applicationContext as com.gerko.fourenote.FourENoteApp
+    val appPassword = app.appPassword
+    val keyring = app.notesKeyring
+    val encryption by keyring.state.collectAsState()
+    val waiting by keyring.waiting.collectAsState()
+    var enteringOtherPassword by remember { mutableStateOf(false) }
+    var checkingCloud by remember { mutableStateOf(false) }
     var passwordSet by remember { mutableStateOf(appPassword.isSet) }
     var choosingPassword by remember { mutableStateOf(false) }
     var savingPassword by remember { mutableStateOf(false) }
@@ -107,8 +115,20 @@ fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 androidx.compose.material3.Button(
-                    onClick = { proveThen(if (passwordSet) "Change the password" else "Set a password") { choosingPassword = true } },
-                    enabled = !savingPassword,
+                    onClick = {
+                        proveThen(if (passwordSet) "Change the password" else "Set a password") {
+                            scope.launch {
+                                // A password set on another device has to be used here too: look in the cloud first.
+                                if (encryption == NotesKeyring.State.OFF) {
+                                    checkingCloud = true
+                                    app.syncManager.syncNow()
+                                    checkingCloud = false
+                                }
+                                if (keyring.state.value == NotesKeyring.State.NEEDS_PASSWORD) enteringOtherPassword = true else choosingPassword = true
+                            }
+                        }
+                    },
+                    enabled = !savingPassword && !checkingCloud,
                 ) { Text(if (passwordSet) "Change password" else "Set password") }
                 if (passwordSet) {
                     androidx.compose.material3.OutlinedButton(
@@ -118,6 +138,7 @@ fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
                 }
             }
             if (savingPassword) Text("Saving…", style = MaterialTheme.typography.bodySmall)
+            if (checkingCloud) Text("Looking for a password set on another device…", style = MaterialTheme.typography.bodySmall)
             passwordError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
             androidx.compose.material3.HorizontalDivider()
 
@@ -226,11 +247,24 @@ fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             }
 
+            Text("Encryption in the cloud", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Encryption of locked notes in the cloud comes in a later version.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                when (encryption) {
+                    NotesKeyring.State.ON ->
+                        "On. Locked notes and their pictures are encrypted (AES-256) on this device before they go to the cloud; " +
+                            "nobody with access to your cloud can read them. Another device opens them once you enter your 4ENote password there. " +
+                            "If you forget the password and lose all your devices, locked notes can't be recovered."
+                    NotesKeyring.State.NEEDS_PASSWORD ->
+                        "Your locked notes in the cloud are encrypted with the 4ENote password set on another device. " +
+                            "Enter it here to sync them" + (if (waiting > 0) " ($waiting waiting)." else ".")
+                    NotesKeyring.State.OFF ->
+                        "Off. Set a 4ENote password above to encrypt locked notes before they go to the cloud. Until then, they are stored there readable."
+                },
+                style = MaterialTheme.typography.bodyMedium,
             )
+            if (encryption == NotesKeyring.State.NEEDS_PASSWORD) {
+                androidx.compose.material3.Button(onClick = { enteringOtherPassword = true }) { Text("Enter password") }
+            }
         }
     }
 
@@ -241,20 +275,45 @@ fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
                 savingPassword = true
                 // Hashing is slow on purpose; keep it off the main thread.
                 scope.launch {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { appPassword.set(chars) }
+                    val keyed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        // The notes key is wrapped with the new password for the cloud first; if another
+                        // device's password turned up meanwhile, that one has to be entered instead.
+                        keyring.passwordSet(chars).also { if (it) appPassword.set(chars) }
+                    }
                     chars.fill(' ')
                     savingPassword = false
-                    passwordSet = true
+                    if (keyed) {
+                        passwordSet = true
+                        app.syncManager.requestSync()
+                    } else {
+                        enteringOtherPassword = true
+                    }
                 }
             },
             onDismiss = { choosingPassword = false },
+        )
+    }
+    if (enteringOtherPassword) {
+        EnterOtherDevicePasswordDialog(
+            check = { chars -> keyring.unlockWith(chars).also { if (it) appPassword.set(chars) } },
+            onDone = {
+                enteringOtherPassword = false
+                passwordSet = true
+                app.syncManager.requestSync()
+            },
+            onDismiss = { enteringOtherPassword = false },
         )
     }
     if (confirmingRemove) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmingRemove = false },
             title = { Text("Remove the 4ENote password?") },
-            text = { Text("The tablet's screen lock will open 4ENote and locked notes again when the fingerprint or face isn't used.") },
+            text = {
+                Text(
+                    "The tablet's screen lock will open 4ENote and locked notes again when the fingerprint or face isn't used. " +
+                        "Locked notes stay encrypted in the cloud: other devices still open them with the last password.",
+                )
+            },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
                     appPassword.remove()

@@ -4,6 +4,10 @@ import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.scan.ScanInbox
+import com.gerko.fourenote.data.security.LockFile
+import com.gerko.fourenote.data.security.LockedNoteFile
+import com.gerko.fourenote.data.security.NotesKey
+import com.gerko.fourenote.data.security.NotesKeyring
 import java.io.File
 
 /** The local side of sync; implemented over Room by NoteRepository. */
@@ -59,6 +63,8 @@ data class SyncResult(
     val deletedInCloud: Int = 0,
     val skippedOpen: Int = 0,
     val errors: List<String> = emptyList(),
+    /** Locked notes left alone because this device lacks the notes key (see NotesKeyring). */
+    val needPassword: Int = 0,
 )
 
 /**
@@ -85,12 +91,18 @@ class SyncEngine(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Scans waiting for their photo frame, kept in the cloud too so any device can place them. */
     private val inbox: ScanInbox? = null,
+    /** Encrypts locked notes and their pictures; without it they sync readable, as before encryption. */
+    private val keys: NotesKeyring? = null,
 ) {
     private var uploaded = 0
     private var downloaded = 0
     private var merged = 0
     private var deletedHere = 0
     private var deletedInCloud = 0
+    /** Notes whose cloud copy is encrypted with a key this device lacks: nothing of theirs is touched. */
+    private val needKey = HashSet<String>()
+    /** Notes not brought in step with the cloud this time (open, failed, or [needKey]). */
+    private val unsettled = HashSet<String>()
 
     suspend fun sync(): SyncResult {
         uploaded = 0
@@ -98,10 +110,15 @@ class SyncEngine(
         merged = 0
         deletedHere = 0
         deletedInCloud = 0
+        needKey.clear()
+        unsettled.clear()
         var skippedOpen = 0
         val errors = mutableListOf<String>()
 
-        val cloudNotes = provider.listFiles()
+        val listed = provider.listFiles()
+        // The lock file goes first: whether locked notes may be encrypted (or read) depends on it.
+        keys?.let { syncLockFile(it, listed) }
+        val cloudNotes = listed
             .mapNotNull { file -> NoteFile.noteIdOf(file.name)?.let { it to file } }
             .toMap()
         val localNotes = store.notesForSync()
@@ -119,16 +136,21 @@ class SyncEngine(
                 if (uploadOnly) {
                     runCatching { syncNote(note, cloud) }
                         .onFailure { errors += "${note.title.ifBlank { "Untitled" }}: ${it.message}" }
+                    unsettled += note.id
                     continue
                 }
+                unsettled += note.id
                 skippedOpen++
                 if (cloud != null && cloud.version != note.remoteVersion) {
-                    runCatching { filledFrames(cloud) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { fills += note.id to it }
+                    runCatching { filledFrames(cloud, note.id) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { fills += note.id to it }
                 }
                 continue
             }
             runCatching { syncNote(note, cloudNotes[note.id]) }
-                .onFailure { errors += "${note.title.ifBlank { "Untitled" }}: ${it.message}" }
+                .onFailure {
+                    unsettled += note.id
+                    errors += "${note.title.ifBlank { "Untitled" }}: ${it.message}"
+                }
         }
 
         val localIds = localNotes.mapTo(HashSet()) { it.id }
@@ -143,7 +165,52 @@ class SyncEngine(
         inbox?.let { runCatching { syncInbox(it) }.onFailure { errors += "Scans: ${it.message}" } }
         for ((noteId, frames) in fills) store.deliverFilledFrames(noteId, frames)
 
-        return SyncResult(uploaded, downloaded, merged, deletedHere, deletedInCloud, skippedOpen, errors)
+        keys?.reportWaiting(needKey.size)
+        return SyncResult(uploaded, downloaded, merged, deletedHere, deletedInCloud, skippedOpen, errors, needKey.size)
+    }
+
+    private suspend fun syncLockFile(keys: NotesKeyring, files: List<RemoteFile>) {
+        val cloud = files.firstOrNull { it.name == LockFile.NAME }
+        val text = cloud?.let { provider.download(it.id).decodeToString() }
+        val upload = keys.reconcile(text) ?: return
+        provider.upload(LockFile.NAME, LockFile.MIME_TYPE, UploadContent.of(upload.encodeToByteArray()), cloud?.id)
+        keys.uploaded(upload)
+    }
+
+    /**
+     * The plain note file of [cloud], or null when it is encrypted with a key this device lacks
+     * (the note is then left alone and counted in [needKey]).
+     */
+    private suspend fun readNote(cloud: RemoteFile, noteId: String): String? {
+        val text = provider.download(cloud.id).decodeToString()
+        if (!LockedNoteFile.isLocked(text)) return text
+        val key = keys?.key()?.takeIf { it.id == LockedNoteFile.keyId(text) }
+        if (key == null) {
+            needKey += noteId
+            unsettled += noteId
+            return null
+        }
+        val plain = LockedNoteFile.decode(text, key)
+        // The id inside is the one the file was encrypted for; a file copied over another note's name is refused.
+        require(NoteFile.decode(plain).id == noteId) { "Note file under the wrong name" }
+        keys.encryptedVersion(noteId, cloud.version)
+        return plain
+    }
+
+    /**
+     * What a locked note is uploaded with: the notes key; null to upload it readable (no
+     * 4ENote password anywhere yet); or [Skip] while the key is missing here or not in the cloud yet.
+     */
+    private sealed interface Sealing {
+        data class With(val key: NotesKey) : Sealing
+        data object Plain : Sealing
+        data object Skip : Sealing
+    }
+
+    private fun sealingFor(note: Note): Sealing {
+        if (!note.locked || keys == null) return Sealing.Plain
+        keys.keyForUpload()?.let { return Sealing.With(it) }
+        return if (keys.state.value == NotesKeyring.State.OFF) Sealing.Plain else Sealing.Skip
     }
 
     /**
@@ -160,15 +227,38 @@ class SyncEngine(
         val cloudByNote = inCloud.groupBy({ it.first.first }, { it.first.second to it.second })
 
         for (note in notes) {
+            if (note.id in needKey) continue
+            val sealing = sealingFor(note)
+            if (sealing == Sealing.Skip) continue
+            val key = (sealing as? Sealing.With)?.key
             val local = store.attachments(note.id)
-            val remote = cloudByNote[note.id].orEmpty().toMap()
+            // Encrypted copies are named "<file>.4el"; a note keeps one kind, readable or encrypted.
+            val all = cloudByNote[note.id].orEmpty()
+            val plainRemote = all.filterNot { it.first.endsWith(ENCRYPTED_SUFFIX) }.toMap()
+            val sealedRemote = all.filter { it.first.endsWith(ENCRYPTED_SUFFIX) }.associate { it.first.removeSuffix(ENCRYPTED_SUFFIX) to it.second }
+            val wanted = if (key != null) sealedRemote else plainRemote
+            val other = if (key != null) plainRemote else sealedRemote
+            // A note whose lock may have changed elsewhere (not in step this time) gets nothing swapped.
+            val settled = note.id !in unsettled
             for ((name, file) in local) {
-                if (name !in remote) {
+                if (name in wanted || (!settled && name in other)) continue
+                if (key != null) {
+                    val cloudName = NoteFile.attachmentName(note.id, name) + ENCRYPTED_SUFFIX
+                    val sealed = key.encrypt(file.readBytes(), cloudName)
+                    provider.upload(cloudName, "application/octet-stream", UploadContent.of(sealed), null)
+                } else {
                     provider.upload(NoteFile.attachmentName(note.id, name), mimeType(name), UploadContent.of(file), null)
                 }
+                other[name]?.let { provider.delete(it.id) }
             }
-            for ((name, file) in remote) {
+            for ((name, file) in plainRemote) {
                 if (name !in local) store.saveAttachment(note.id, name, provider.download(file.id))
+            }
+            for ((name, file) in sealedRemote) {
+                if (name in local || name in plainRemote) continue
+                val cloudName = NoteFile.attachmentName(note.id, name) + ENCRYPTED_SUFFIX
+                val noteKey = keys?.key() ?: continue
+                store.saveAttachment(note.id, name, noteKey.decrypt(provider.download(file.id), cloudName))
             }
         }
         for ((key, file) in inCloud) {
@@ -234,8 +324,8 @@ class SyncEngine(
     }
 
     // The photo frames in the cloud copy of a note that have been filled.
-    private suspend fun filledFrames(cloud: RemoteFile): List<PageImage> {
-        val note = NoteFile.decode(provider.download(cloud.id).decodeToString())
+    private suspend fun filledFrames(cloud: RemoteFile, noteId: String): List<PageImage> {
+        val note = NoteFile.decode(readNote(cloud, noteId) ?: return emptyList())
         return InkSerializer.decode(note.inkData).pages.flatMap { page -> page.images.filter { it.requested && it.file.isNotEmpty() } }
     }
 
@@ -255,20 +345,17 @@ class SyncEngine(
             }
 
             // New note, or deleted elsewhere but edited here: the edit wins and it uploads again.
-            cloud == null -> {
-                upload(note, remoteId = null)
-                uploaded++
-            }
+            cloud == null -> if (upload(note, remoteId = null)) uploaded++
 
-            // Unchanged in the cloud: upload local edits, or add a PDF copy the note is still missing
-            // (for instance one skipped by an older version of the app).
-            cloud.version == note.remoteVersion -> if (note.dirty || (pdfExporter != null && note.remotePdfId == null && !note.locked)) {
-                upload(note, cloud.id)
-                uploaded++
+            // Unchanged in the cloud: upload local edits, add a PDF copy the note is still missing
+            // (for instance one skipped by an older version of the app), or encrypt a locked note
+            // that went up readable before the 4ENote password was set.
+            cloud.version == note.remoteVersion -> if (note.dirty || (pdfExporter != null && note.remotePdfId == null && !note.locked) || needsSealing(note, cloud)) {
+                if (upload(note, cloud.id)) uploaded++
             }
 
             !note.dirty -> {
-                val text = provider.download(cloud.id).decodeToString()
+                val text = readNote(cloud, note.id) ?: return
                 // The trash is local: keep it, so a sync never brings a trashed note back.
                 val fromCloud = NoteFile.decode(text).copy(trashedAt = note.trashedAt)
                 if (store.replaceIfUnchanged(fromCloud, note.updatedAt, dirty = false)) {
@@ -278,20 +365,33 @@ class SyncEngine(
             }
 
             else -> {
+                val fromCloud = NoteFile.decode(readNote(cloud, note.id) ?: return)
                 val note = store.withContent(note)
-                val fromCloud = NoteFile.decode(provider.download(cloud.id).decodeToString())
                 val base = note.syncedSnapshot.takeIf { it.isNotEmpty() }?.let(NoteFile::decode)
                 val result = NoteMerger.merge(base, note, fromCloud)
                     .copy(remotePdfId = note.remotePdfId ?: fromCloud.remotePdfId, trashedAt = note.trashedAt)
                 if (store.replaceIfUnchanged(result, note.updatedAt, dirty = true)) {
-                    upload(result, cloud.id)
-                    merged++
+                    if (upload(result, cloud.id)) merged++
                 }
             }
         }
     }
 
-    private suspend fun upload(listed: Note, remoteId: String?) {
+    // A locked note in the cloud not yet encrypted with this device's key.
+    private fun needsSealing(note: Note, cloud: RemoteFile): Boolean {
+        if (!note.locked || keys == null) return false
+        val key = keys.keyForUpload() ?: return false
+        return keys.encryptedVersion(note.id) != "${key.id}:${cloud.version}"
+    }
+
+    /** Returns false when the note waits for the notes key (see [Sealing.Skip]). */
+    private suspend fun upload(listed: Note, remoteId: String?): Boolean {
+        val sealing = sealingFor(listed)
+        if (sealing == Sealing.Skip) {
+            needKey += listed.id
+            unsettled += listed.id
+            return false
+        }
         // A merged note already carries its ink; one listed for sync doesn't yet.
         val note = if (listed.inkData.isEmpty()) store.withContent(listed) else listed
         // A locked note gets no readable copy in the cloud; one left from before it was locked goes.
@@ -310,12 +410,18 @@ class SyncEngine(
             } ?: note.remotePdfId
         }
         val text = NoteFile.encode(note, pdfId)
-        val file = provider.upload(NoteFile.fileName(note.id), NoteFile.MIME_TYPE, UploadContent.of(text.encodeToByteArray()), remoteId)
+        val key = (sealing as? Sealing.With)?.key
+        val content = if (key != null) LockedNoteFile.encode(note.id, text, key) else text
+        val file = provider.upload(NoteFile.fileName(note.id), NoteFile.MIME_TYPE, UploadContent.of(content.encodeToByteArray()), remoteId)
+        if (key != null) keys?.encryptedVersion(note.id, file.version)
+        // The snapshot kept here (the base for merging) is the plain note file.
         store.markSynced(note.id, file, pdfId, text, expectedUpdatedAt = note.updatedAt)
+        return true
     }
 
     private suspend fun downloadNew(file: RemoteFile) {
-        val text = provider.download(file.id).decodeToString()
+        val noteId = NoteFile.noteIdOf(file.name) ?: return
+        val text = readNote(file, noteId) ?: return
         val note = NoteFile.decode(text)
         store.insertFromCloud(
             note.copy(
@@ -333,6 +439,8 @@ class SyncEngine(
 
     companion object {
         const val PDF_MIME_TYPE = "application/pdf"
+        /** Added to the cloud name of a locked note's picture or PDF page once it is encrypted. */
+        const val ENCRYPTED_SUFFIX = ".4el"
 
         /** "Title (1a2b3c4d).pdf": readable, and unique even when titles repeat. */
         fun pdfName(note: Note): String {

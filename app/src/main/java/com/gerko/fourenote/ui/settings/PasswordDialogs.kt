@@ -165,3 +165,51 @@ private fun formatWait(ms: Long): String {
     val seconds = (ms + 999) / 1000
     return if (seconds < 60) "$seconds s" else "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')} min"
 }
+
+/**
+ * Entering the 4ENote password set on another device, which opens the locked notes it encrypted.
+ * [check] is slow (it unwraps the notes key): it runs off the main thread here.
+ */
+@Composable
+fun EnterOtherDevicePasswordDialog(check: (CharArray) -> Boolean, onDone: () -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    var shown by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun submit() {
+        if (checking || text.isEmpty()) return
+        checking = true
+        error = null
+        val chars = text.toCharArray()
+        scope.launch {
+            val ok = withContext(Dispatchers.Default) { check(chars) }
+            chars.fill(' ')
+            checking = false
+            if (ok) onDone() else error = "Wrong password"
+            text = ""
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!checking) onDismiss() },
+        title = { Text("Password from your other device") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "A 4ENote password was already set on another device, and your locked notes in the cloud are encrypted with it. " +
+                        "Enter it here: it becomes this device's password too, and the locked notes sync.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                PasswordField(text, { text = it }, "4ENote password", shown, { shown = it }, enabled = !checking, onDone = ::submit)
+                when {
+                    checking -> Text("Checking…")
+                    error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = ::submit, enabled = !checking && text.isNotEmpty()) { Text("Unlock") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !checking) { Text("Cancel") } },
+    )
+}

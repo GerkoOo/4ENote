@@ -4,4 +4,5 @@
     <exclude domain="sharedpref" path="webdav.xml" />
     <exclude domain="sharedpref" path="google-auth.xml" />
     <exclude domain="sharedpref" path="app-password.xml" />
+    <exclude domain="sharedpref" path="notes-key.xml" />
 </full-backup-content>

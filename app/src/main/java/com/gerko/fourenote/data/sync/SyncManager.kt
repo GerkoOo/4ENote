@@ -64,6 +64,7 @@ class SyncManager(
     val googleAuth: GoogleAuth,
     private val scope: CoroutineScope,
     private val inbox: com.gerko.fourenote.data.scan.ScanInbox,
+    private val keys: com.gerko.fourenote.data.security.NotesKeyring,
 ) {
     private val prefs = context.getSharedPreferences("sync", Context.MODE_PRIVATE)
     // Kept apart from "sync" so the backup rules can exclude just the password.
@@ -164,7 +165,7 @@ class SyncManager(
         return mutex.withLock {
             _status.value = SyncStatus.Syncing
             try {
-                val engine = SyncEngine(repository, provider, ::exportPdf, inbox = inbox)
+                val engine = SyncEngine(repository, provider, ::exportPdf, inbox = inbox, keys = keys)
                 var result = engine.sync()
                 // Scans that found their frame make notes to upload (and scans to remove from the cloud).
                 if (repository.placeInboxScans(inbox) > 0) result = engine.sync()
