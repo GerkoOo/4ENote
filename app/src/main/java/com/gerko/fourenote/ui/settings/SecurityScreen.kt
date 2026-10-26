@@ -209,8 +209,8 @@ fun SecurityScreen(appLock: AppLock, noteLock: NoteLock, onBack: () -> Unit) {
             )
             // Honest scope: the lock keeps out someone who picks up the tablet, not root or forensic tools.
             Text(
-                "On this tablet, a locked note's handwriting, text and pictures are encrypted with a key kept by the " +
-                    "tablet's hardware; imported PDF pages are not encrypted here yet. The lock keeps out someone who " +
+                "On this tablet, a locked note's handwriting, text, pictures and PDF pages are encrypted with a key " +
+                    "kept by the tablet's hardware. The lock keeps out someone who " +
                     "picks up your tablet or copies its files, not someone who can run code as 4ENote (root access). " +
                     "In the cloud, locked notes are encrypted once a 4ENote password is set. Notes are not part of " +
                     "Android backups; use 4ENote's own backup or sync to move them.",

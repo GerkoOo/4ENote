@@ -84,7 +84,11 @@ object PdfExporter {
         val sourcePage = pdfBackground?.let { bg ->
             val file = attachments.file(noteId, bg.file)
             if (!file.exists()) return@let null
-            val source = sources.getOrPut(bg.file) { PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()) }
+            val source = sources.getOrPut(bg.file) {
+                // A locked note's PDF is encrypted on the device: read it decrypted, as a stream.
+                if (attachments.isSealedFile(file)) attachments.openPlain(file).use { PDDocument.load(it, MemoryUsageSetting.setupTempFileOnly()) }
+                else PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly())
+            }
             source.takeIf { bg.pageIndex < it.numberOfPages }?.getPage(bg.pageIndex)
         }
         // Rotated source pages are drawn as an image instead, to keep their orientation simple.
@@ -148,7 +152,7 @@ object PdfExporter {
             when (background) {
                 is PageBackground.Image -> imageFor(out, attachments, file)
                 // Only rotated PDF pages get here: draw them as an image at print resolution.
-                is PageBackground.PdfPage -> renderPdfPage(file, background.pageIndex, (page.width * 2).toInt())
+                is PageBackground.PdfPage -> renderPdfPage(attachments, file, background.pageIndex, (page.width * 2).toInt())
                     ?.let { bitmap -> JPEGFactory.createFromImage(out, bitmap, 0.85f).also { bitmap.recycle() } }
             }
         }.getOrNull() ?: return
@@ -205,8 +209,8 @@ object PdfExporter {
         return LosslessFactory.createFromImage(out, shown).also { shown.recycle() }
     }
 
-    private fun renderPdfPage(file: File, index: Int, width: Int): Bitmap? =
-        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+    private fun renderPdfPage(attachments: AttachmentStore, file: File, index: Int, width: Int): Bitmap? =
+        attachments.openPdf(file).use { fd ->
             PdfRenderer(fd).use { renderer ->
                 if (index >= renderer.pageCount) return null
                 renderer.openPage(index).use { page ->

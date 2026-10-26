@@ -324,8 +324,8 @@ class NoteRepository(
     override fun attachmentBytes(noteId: String, file: java.io.File): ByteArray = attachments.readPlain(file)
 
     override fun attachmentUpload(noteId: String, file: java.io.File): com.gerko.fourenote.data.sync.UploadContent =
-        // Sealed pictures go up as their plain bytes; the rest (PDFs, unlocked notes) straight from the file.
-        if (attachments.isSealed(noteId)) com.gerko.fourenote.data.sync.UploadContent.of(attachments.readPlain(file))
+        // A sealed file goes up as its plain content, streamed (a PDF can be huge).
+        if (attachments.isSealedFile(file)) com.gerko.fourenote.data.sync.UploadContent(attachments.plainLength(file)) { attachments.openPlain(file) }
         else com.gerko.fourenote.data.sync.UploadContent.of(file)
 
     override suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {

@@ -58,20 +58,90 @@ class SealedAttachmentStoreTest {
     }
 
     @Test
-    fun lockingAndUnlockingRewriteExistingPicturesButNotPdfs() = runBlocking {
+    fun lockingAndUnlockingRewriteExistingPictures() = runBlocking {
         val picture = store.storeImage(noteId, png().inputStream(), keepTransparency = true)
         val file = store.file(noteId, picture.file)
         val original = file.readBytes()
-        val pdf = store.file(noteId, "pdf-x.pdf").apply { writeBytes("%PDF-1.4 fake".encodeToByteArray()) }
 
         store.setSealed(noteId, true)
         assertTrue(NotesKey.isEncrypted(file.readBytes()))
-        assertFalse("PDFs stay readable for now", NotesKey.isEncrypted(pdf.readBytes()))
         assertArrayEquals(original, store.readPlain(file))
 
         store.setSealed(noteId, false)
         assertArrayEquals(original, file.readBytes())
         assertFalse(store.isSealed(noteId))
+    }
+
+    /** A real PDF of several pages, each with a noisy picture, so it spans many 64 KB pieces. */
+    private fun bigPdf(): ByteArray {
+        val document = android.graphics.pdf.PdfDocument()
+        val random = kotlin.random.Random(3)
+        repeat(3) { index ->
+            val page = document.startPage(android.graphics.pdf.PdfDocument.PageInfo.Builder(300, 400, index + 1).create())
+            val noise = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888)
+            for (x in 0 until 200) for (y in 0 until 200) noise.setPixel(x, y, random.nextInt() or 0xFF000000.toInt())
+            page.canvas.drawBitmap(noise, 50f, 50f + index * 20, null)
+            document.finishPage(page)
+        }
+        return ByteArrayOutputStream().also { document.writeTo(it); document.close() }.toByteArray()
+    }
+
+    private fun render(fd: android.os.ParcelFileDescriptor, index: Int): IntArray = fd.use {
+        android.graphics.pdf.PdfRenderer(it).use { renderer ->
+            renderer.openPage(index).use { page ->
+                val bitmap = Bitmap.createBitmap(150, 200, Bitmap.Config.ARGB_8888)
+                page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                IntArray(150 * 200).also { pixels -> bitmap.getPixels(pixels, 0, 150, 0, 0, 150, 200) }
+            }
+        }
+    }
+
+    @Test
+    fun aLockedNotesPdfIsEncryptedInPiecesAndStillRenders() = runBlocking {
+        val pdf = bigPdf()
+        assertTrue("needs several pieces: ${pdf.size}", pdf.size > 3 * SealedPdf.CHUNK)
+        val pages = store.importPdf(noteId, pdf.inputStream())
+        val name = (pages[0].background as com.gerko.fourenote.data.ink.PageBackground.PdfPage).file
+        val file = store.file(noteId, name)
+        val plainPage2 = render(store.openPdf(file), 2)
+
+        store.setSealed(noteId, true)
+        val sealedBytes = file.readBytes()
+        assertTrue(SealedPdf.isSealed(sealedBytes))
+        assertFalse("no plain PDF text left", String(sealedBytes, Charsets.ISO_8859_1).contains("%PDF"))
+        assertArrayEquals(plainPage2, render(store.openPdf(file), 2))
+        assertArrayEquals(pdf, store.openPlain(file).use { it.readBytes() })
+        assertEquals(pdf.size.toLong(), store.plainLength(file))
+
+        store.setSealed(noteId, false)
+        assertArrayEquals(pdf, file.readBytes())
+    }
+
+    @Test
+    fun aPdfImportedIntoALockedNoteIsSealedRightAway() = runBlocking {
+        store.setSealed(noteId, true)
+        val pages = store.importPdf(noteId, bigPdf().inputStream())
+        assertEquals(3, pages.size)
+        val name = (pages[0].background as com.gerko.fourenote.data.ink.PageBackground.PdfPage).file
+        assertTrue(SealedPdf.isSealed(store.file(noteId, name).readBytes()))
+        // Nothing plain left behind under another name.
+        assertEquals(listOf(name), store.dir(noteId).list()!!.filter { !it.startsWith(".sealed") })
+    }
+
+    @Test
+    fun aTamperedPieceOfASealedPdfDoesNotRead() = runBlocking {
+        val pages = store.importPdf(noteId, bigPdf().inputStream())
+        val name = (pages[0].background as com.gerko.fourenote.data.ink.PageBackground.PdfPage).file
+        val file = store.file(noteId, name)
+        store.setSealed(noteId, true)
+        val bytes = file.readBytes()
+        bytes[SealedPdf.CHUNK + 100] = (bytes[SealedPdf.CHUNK + 100].toInt() xor 1).toByte()
+        file.writeBytes(bytes)
+        try {
+            store.openPlain(file).use { it.readBytes() }
+            org.junit.Assert.fail("A changed byte must not read as a PDF")
+        } catch (expected: Exception) {
+        }
     }
 
     @Test

@@ -26,26 +26,54 @@ import java.util.UUID
  * Files a note's pages are drawn on (scanned photos, imported PDFs), kept in
  * a private folder per note. Pages refer to them by file name.
  *
- * A locked note's folder holds a `.sealed` marker, and then its pictures are encrypted with
- * [sealing] (the device key), each bound to its name; [readPlain] gives them back. PDFs stay
- * readable for now: Android's PDF renderer can only open a real file.
+ * A locked note's folder holds a `.sealed` marker, and then its files are encrypted with
+ * [sealing] (the device key), each bound to its name: pictures whole, PDFs in pieces (see
+ * [SealedPdf]) so they can still be rendered page by page. [openPlain] and [openPdf] read them.
  */
 class AttachmentStore(val context: Context, private val sealing: FileSealing? = null) {
     val root = File(context.filesDir, "attachments")
 
     private fun marker(noteId: String) = File(dir(noteId), SEALED_MARKER)
 
-    /** Whether this note's pictures are kept encrypted (see [setSealed]). */
+    /** Whether this note's files are kept encrypted (see [setSealed]). */
     fun isSealed(noteId: String) = marker(noteId).isFile
 
     /** A file's plain content, whether it is kept encrypted or not. */
     fun readPlain(file: File): ByteArray = openPlain(file).use { it.readBytes() }
 
-    /** A file's plain content as a stream: a plain file (even a huge PDF) is read as it goes. */
+    /** A file's plain content as a stream: a plain file or a sealed PDF (even a huge one) is read as it goes. */
     fun openPlain(file: File): InputStream {
+        val sealing = sealing ?: return file.inputStream().buffered()
+        val head = head(file)
+        return when {
+            SealedPdf.isSealed(head) -> SealedPdf.inputStream(file, sealing, nameOf(file)).buffered()
+            sealing.isSealed(head) -> sealing.open(file.readBytes(), nameOf(file)).inputStream()
+            else -> file.inputStream().buffered()
+        }
+    }
+
+    /** How many plain bytes [openPlain] gives (for uploads, which need the size first). */
+    fun plainLength(file: File): Long {
+        val sealing = sealing ?: return file.length()
+        val head = head(file)
+        return when {
+            SealedPdf.isSealed(head) -> SealedPdf.plainLength(file, sealing, nameOf(file))
+            sealing.isSealed(head) -> readPlain(file).size.toLong()
+            else -> file.length()
+        }
+    }
+
+    /** Whether this file is kept encrypted (in either form). */
+    fun isSealedFile(file: File): Boolean {
+        val head = head(file)
+        return SealedPdf.isSealed(head) || sealing?.isSealed(head) == true
+    }
+
+    /** A read-only file descriptor of a PDF for Android's renderer, decrypting a sealed one as it is read. */
+    fun openPdf(file: File): ParcelFileDescriptor {
         val sealing = sealing
-        if (sealing == null || !sealing.isSealed(head(file))) return file.inputStream().buffered()
-        return sealing.open(file.readBytes(), nameOf(file)).inputStream()
+        if (sealing == null || !SealedPdf.isSealed(head(file))) return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        return SealedPdf.open(context, file, sealing, nameOf(file))
     }
 
     private fun head(file: File): ByteArray = file.inputStream().use { input ->
@@ -81,28 +109,47 @@ class AttachmentStore(val context: Context, private val sealing: FileSealing? = 
                 if (sealed) file.delete()
                 continue
             }
-            if (!sealable(file.name)) continue
-            val bytes = file.readBytes()
-            val isSealed = sealing.isSealed(bytes)
+            val head = head(file)
+            val isSealed = SealedPdf.isSealed(head) || sealing.isSealed(head)
             if (isSealed == sealed) continue
-            val name = nameOf(file)
-            writeAtomically(file) { it.write(if (sealed) sealing.seal(bytes, name) else sealing.open(bytes, name)) }
+            if (sealed) {
+                sealInto(file, file.inputStream().buffered(), file.length())
+            } else {
+                // Through a temporary file: the plain copy is written while the sealed one is read.
+                val plain = File(dir, ".${file.name}.plain")
+                openPlain(file).use { input -> writeAtomically(plain) { input.copyTo(it) } }
+                java.nio.file.Files.move(plain.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+            }
         }
         if (!sealed) marker.delete()
     }
 
-    // PDFs are read by Android's renderer straight from the file, so they can't be sealed yet.
-    private fun sealable(name: String) = !name.endsWith(".pdf", ignoreCase = true)
+    private fun isPdf(name: String) = name.endsWith(".pdf", ignoreCase = true)
 
-    // The name a sealed picture is bound to: its own (unique) file name, so a copied note still opens it.
+    // The name a sealed file is bound to: its own (unique) file name, so a copied note still opens it.
     private fun nameOf(file: File) = "attachments/" + file.name
 
-    /** Writes a note's file, encrypted when the note is sealed and the file can be. */
+    /** Seals [length] plain bytes from [input] into [target]: PDFs in pieces, pictures whole. */
+    private fun sealInto(target: File, input: InputStream, length: Long) {
+        val sealing = sealing ?: error("No device key to seal files with")
+        input.use { source ->
+            if (isPdf(target.name)) {
+                // Into a temporary file first: [target] may be the plain file being read.
+                val sealed = File(target.parentFile, ".${target.name}.sealing")
+                writeAtomically(sealed) { SealedPdf.seal(source, length, it, sealing, nameOf(target)) }
+                java.nio.file.Files.move(sealed.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+            } else {
+                val plain = source.readBytes()
+                writeAtomically(target) { it.write(sealing.seal(plain, nameOf(target))) }
+            }
+        }
+    }
+
+    /** Writes a note's file, encrypted when the note is sealed. */
     private fun writeNoteFile(noteId: String, target: File, write: (OutputStream) -> Unit) {
-        if (!isSealed(noteId) || !sealable(target.name)) return writeAtomically(target, write)
-        val sealing = sealing ?: error("No device key to seal pictures with")
+        if (!isSealed(noteId)) return writeAtomically(target, write)
         val plain = ByteArrayOutputStream().also(write).toByteArray()
-        writeAtomically(target) { it.write(sealing.seal(plain, nameOf(target))) }
+        sealInto(target, plain.inputStream(), plain.size.toLong())
     }
 
     fun dir(noteId: String) = File(root, SafeName.require(noteId, "note id"))
@@ -113,9 +160,11 @@ class AttachmentStore(val context: Context, private val sealing: FileSealing? = 
     /** Copies a PDF into the note and returns one page per PDF page, shaped like it. */
     suspend fun importPdf(noteId: String, source: InputStream): List<InkPage> = withContext(Dispatchers.IO) {
         val name = "pdf-${UUID.randomUUID()}.pdf"
-        val target = copy(noteId, name, source)
+        // A locked note's PDF is read in plain under a hidden name, then sealed into place.
+        val sealed = isSealed(noteId)
+        val plain = copy(noteId, if (sealed) ".import-$name" else name, source)
         try {
-            ParcelFileDescriptor.open(target, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            val pages = ParcelFileDescriptor.open(plain, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
                 PdfRenderer(fd).use { renderer ->
                     List(renderer.pageCount) { index ->
                         renderer.openPage(index).use { page ->
@@ -124,9 +173,13 @@ class AttachmentStore(val context: Context, private val sealing: FileSealing? = 
                     }
                 }
             }
+            if (sealed) sealInto(file(noteId, name), plain.inputStream().buffered(), plain.length())
+            pages
         } catch (e: Exception) {
-            target.delete()
+            plain.delete()
             throw IllegalArgumentException("This PDF can't be opened (it may be damaged or password protected)", e)
+        } finally {
+            if (sealed) plain.delete()
         }
     }
 

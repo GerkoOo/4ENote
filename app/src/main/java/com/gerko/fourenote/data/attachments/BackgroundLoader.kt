@@ -54,7 +54,8 @@ class BackgroundLoader(private val attachments: AttachmentStore) {
     }
 
     private fun renderPdfPage(file: java.io.File, index: Int, width: Int): Bitmap =
-        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+        // Through the attachment store: a locked note's PDF is decrypted piece by piece as it is read.
+        attachments.openPdf(file).use { fd ->
             PdfRenderer(fd).use { renderer ->
                 renderer.openPage(index).use { page ->
                     val height = (width.toLong() * page.height / page.width).toInt().coerceAtLeast(1)
