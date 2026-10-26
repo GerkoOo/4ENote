@@ -12,6 +12,16 @@ Open the file on your Android tablet (Android 8 or newer) and allow your browser
 to install apps when asked. This is a beta. Google Drive sync works for test
 users while the Google sign-in is being verified; OneDrive is not ready yet.
 
+To check that an APK really is 4ENote's, compare its signing certificate with this SHA-256
+fingerprint (for example with `apksigner verify --print-certs 4ENote.apk`):
+
+```
+D1:69:AD:59:9D:60:94:B7:F1:1E:EF:FD:91:3F:4C:95:3D:B5:1B:C6:17:55:C4:A3:FA:E3:E2:DD:D2:EB:27:1A
+```
+
+Releases up to 0.3.0 were signed with a development key; 0.4.0 and later use this one, so
+moving from 0.3.0 to 0.4.0 means uninstalling first (make a 4ENote backup before).
+
 Website: [gerkooo.github.io/4ENote](https://gerkooo.github.io/4ENote/)
 
 ## Features

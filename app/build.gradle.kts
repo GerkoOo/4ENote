@@ -19,8 +19,8 @@ android {
         applicationId = "com.gerko.fourenote"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Google Drive sign-in: the OAuth client id of an Android client with "custom URI scheme"
         // enabled, from local.properties (google.clientId=...). Builds without it hide Google Drive.
@@ -33,11 +33,32 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
+    // The release key lives outside the project (its path in local.properties as release.signing,
+    // a file with storeFile, storePassword, keyAlias, keyPassword). Its SHA-256 fingerprint is in
+    // the README, so a downloaded APK can be checked. Builds without it (CI) use the debug key.
+    val releaseSigning = Properties().apply {
+        val localProperties = Properties().apply {
+            rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+        }
+        localProperties.getProperty("release.signing")?.let(::file)?.takeIf { it.isFile }?.inputStream()?.use { load(it) }
+    }
+    signingConfigs {
+        if (releaseSigning.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Until a store signing key exists, release builds use the debug key so they install
-            // over development builds on test devices without losing notes.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: run {
+                logger.warn("No release key (release.signing in local.properties): signing the release build with the debug key")
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
