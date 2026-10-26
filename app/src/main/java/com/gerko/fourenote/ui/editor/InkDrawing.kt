@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.gerko.fourenote.data.ink.Calligraphy
 import com.gerko.fourenote.data.ink.InkStroke
+import com.gerko.fourenote.data.ink.lineage
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.ink.PaperStyle
 import com.gerko.fourenote.data.ink.outline
@@ -274,8 +275,8 @@ fun InkStroke.erasedAround(
     x: Float,
     y: Float,
     radius: Float,
-    /** What the pieces replace (see [InkStroke.replaces]): this stroke, or what it was cut from earlier in the same rub. */
-    replacing: String? = id,
+    /** What the pieces replace (see [InkStroke.replaces]): this stroke and its own, or (for a piece cut again in the same rub) what it was cut from. */
+    replacing: List<String> = lineage(),
 ): List<InkStroke>? {
     if (!isHitBy(x, y, radius)) return null
     val reach = radius + width / 2

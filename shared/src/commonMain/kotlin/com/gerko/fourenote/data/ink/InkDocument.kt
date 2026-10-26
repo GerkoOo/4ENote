@@ -56,11 +56,19 @@ class InkStroke(
     /** Variable-width strokes only: cut straight off at both ends (the pointed pen) instead of rounded. */
     val squareEnds: Boolean = false,
     /**
-     * The stroke this one was made from by an edit (moved, resized, recoloured, partly erased).
-     * When two devices edit the same stroke, sync keeps one side's result instead of both.
+     * The strokes this one was made from by edits (moved, resized, recoloured, partly erased),
+     * newest first, at most [MAX_REPLACED]: when two devices edit the same stroke, sync keeps one
+     * side's result instead of both, also after several edits on one side before a sync.
      */
-    val replaces: String? = null,
-)
+    val replaces: List<String> = emptyList(),
+) {
+    companion object {
+        const val MAX_REPLACED = 8
+    }
+}
+
+/** [replaces] for a stroke made from this one by an edit. */
+fun InkStroke.lineage(): List<String> = (listOf(id) + replaces).take(InkStroke.MAX_REPLACED)
 
 fun newStrokeId(): String = newId()
 
@@ -90,11 +98,11 @@ fun InkStroke.transformed(
     layerId = layerId,
     nibAngle = nibAngle,
     squareEnds = squareEnds,
-    replaces = if (replacing) id else null,
+    replaces = if (replacing) lineage() else emptyList(),
 )
 
 fun InkStroke.withColor(newColor: Int) =
-    InkStroke(newColor, width, highlighter, points, widths, layerId, nibAngle = nibAngle, squareEnds = squareEnds, replaces = id)
+    InkStroke(newColor, width, highlighter, points, widths, layerId, nibAngle = nibAngle, squareEnds = squareEnds, replaces = lineage())
 
 /** True if most of this stroke's points fall inside the lasso [polygon] (packed x, y pairs). */
 fun InkStroke.isInsideLasso(polygon: FloatArray): Boolean {
@@ -588,7 +596,7 @@ object InkSerializer {
         stroke.nibAngle?.let { w.key("nib").num(it) }
         if (stroke.squareEnds) w.key("sq").bool(true)
         stroke.widths?.let { widths -> w.key("pw").nums(widths) { (it * 100).roundToInt() / 100f } }
-        stroke.replaces?.let { w.key("rp").str(it) }
+        if (stroke.replaces.isNotEmpty()) w.key("rp").arr(stroke.replaces) { w.str(it) }
     }
 
     private fun writeText(w: Writer, t: PageText) {
@@ -788,11 +796,13 @@ object InkSerializer {
             var layer = ""
             var nib: Float? = null
             var square = false
-            var replaces: String? = null
+            var replaces: List<String> = emptyList()
             reader.obj { key ->
                 when (key) {
                     "p" -> points = reader.floats()
                     "pw" -> widths = reader.floats()
+                    "rp" -> replaces = (reader.element() as? JsonArray).orEmpty()
+                        .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.take(InkStroke.MAX_REPLACED)
                     else -> {
                         val v = reader.element() as? JsonPrimitive
                         when (key) {
@@ -803,7 +813,6 @@ object InkSerializer {
                             "l" -> layer = v?.contentOrNull.orEmpty()
                             "nib" -> nib = v?.doubleOrNull?.toFloat() ?: 0f
                             "sq" -> square = v?.booleanOrNull ?: false
-                            "rp" -> replaces = v?.contentOrNull
                         }
                     }
                 }

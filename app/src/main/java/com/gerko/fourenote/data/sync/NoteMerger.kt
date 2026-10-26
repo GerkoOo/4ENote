@@ -154,8 +154,10 @@ object NoteMerger {
     /**
      * A stroke edited on both sides (moved here, recoloured there) is replaced by new strokes on
      * each, and [merged] holds both: it would show twice. Like any single value, the newer side's
-     * edit is kept and the other side's replacement strokes go. A copy (the stroke is still there
-     * on its side) is not a replacement and always stays.
+     * edit is kept and the other side's replacement strokes go. What a stroke replaces is the
+     * newest of its [InkStroke.replaces] that the base has, so several edits on one side before a
+     * sync still meet the other side's. A copy (the stroke is still there on its side) is not a
+     * replacement and always stays.
      */
     private fun oneEditPerStroke(
         merged: List<InkStroke>,
@@ -168,10 +170,13 @@ object NoteMerger {
         fun replacements(side: List<InkStroke>, other: List<InkStroke>): Map<String, List<InkStroke>> {
             val sideIds = side.mapTo(HashSet()) { it.id }
             val otherIds = other.mapTo(HashSet()) { it.id }
-            return side.filter { s ->
-                val original = s.replaces
-                original != null && original in baseIds && original !in sideIds && s.id !in baseIds && s.id !in otherIds
-            }.groupBy { it.replaces!! }
+            val result = HashMap<String, MutableList<InkStroke>>()
+            for (s in side) {
+                if (s.id in baseIds || s.id in otherIds) continue
+                val original = s.replaces.firstOrNull { it in baseIds } ?: continue
+                if (original !in sideIds) result.getOrPut(original) { mutableListOf() } += s
+            }
+            return result
         }
         val fromLocal = replacements(local, remote)
         val fromRemote = replacements(remote, local)

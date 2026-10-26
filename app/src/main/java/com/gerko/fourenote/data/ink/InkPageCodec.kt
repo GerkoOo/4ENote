@@ -19,8 +19,8 @@ import kotlin.math.roundToInt
  */
 object InkPageCodec {
     private const val MAGIC = 0x34455031 // "4EP1"
-    // 2: strokes can carry what they replace (see InkStroke.replaces).
-    private const val VERSION = 2
+    // 2: strokes can carry what they replace (see InkStroke.replaces), one id; 3: a list of them.
+    private const val VERSION = 3
 
     private const val HIGHLIGHTER = 1
     private const val HAS_WIDTHS = 2
@@ -55,10 +55,13 @@ object InkPageCodec {
                             (if (widths != null) HAS_WIDTHS else 0) or
                             (if (nib != null) HAS_NIB else 0) or
                             (if (stroke.squareEnds) SQUARE_ENDS else 0) or
-                            (if (replaces != null) HAS_REPLACES else 0),
+                            (if (replaces.isNotEmpty()) HAS_REPLACES else 0),
                     )
                     if (nib != null) writeFloat(nib)
-                    if (replaces != null) writeUTF(replaces)
+                    if (replaces.isNotEmpty()) {
+                        writeVarInt(replaces.size)
+                        for (r in replaces) writeUTF(r)
+                    }
                     val n = stroke.points.size / 2
                     writeVarInt(n)
                     var lastX = 0
@@ -99,7 +102,11 @@ object InkPageCodec {
                 val width = readFloat()
                 val flags = readByte().toInt()
                 val nib = if (flags and HAS_NIB != 0) readFloat() else null
-                val replaces = if (flags and HAS_REPLACES != 0) readUTF() else null
+                val replaces = when {
+                    flags and HAS_REPLACES == 0 -> emptyList()
+                    version == 2 -> listOf(readUTF())
+                    else -> List(readVarInt()) { readUTF() }.take(InkStroke.MAX_REPLACED)
+                }
                 val n = readVarInt()
                 val points = FloatArray(2 * n)
                 var x = 0

@@ -74,20 +74,25 @@ class InkStoreTest {
     }
 
     @Test
-    fun keepsTheLastThreeUploadsOfANote() = runBlocking {
+    fun keepsADaysUploadsOfANoteAndAlwaysTheLastThree() = runBlocking {
         fun gz(text: String) = java.io.ByteArrayOutputStream().also { out ->
             java.util.zip.GZIPOutputStream(out).use { it.write(text.encodeToByteArray()) }
         }.toByteArray()
+        val hour = 60 * 60 * 1000L
         store.save("note", InkDocument())
-        for (v in listOf("v1", "v2/with:odd\"chars", "v3", "v4")) store.recordSent("note", v, gz("text $v"))
-        assertNull(store.readSent("note", "v1"))
-        assertEquals("text v2/with:odd\"chars", store.readSent("note", "v2/with:odd\"chars"))
-        assertEquals("text v4", store.readSent("note", "v4"))
-        // Recording one again makes it the newest: then the oldest other one goes.
-        store.recordSent("note", "v2/with:odd\"chars", gz("text v2/with:odd\"chars"))
-        store.recordSent("note", "v5", gz("text v5"))
-        assertNull(store.readSent("note", "v3"))
-        assertEquals("text v2/with:odd\"chars", store.readSent("note", "v2/with:odd\"chars"))
+        // Five uploads within an hour, the version with characters a file name can't hold.
+        for (i in 1..5) store.recordSent("note", "v$i/odd:\"", gz("text $i"), now = i * 60_000L)
+        for (i in 1..5) assertEquals("text $i", store.readSent("note", "v$i/odd:\""))
+        // A day and a half later: only the newest three stay.
+        store.recordSent("note", "v6", gz("text 6"), now = 36 * hour)
+        assertNull(store.readSent("note", "v1/odd:\""))
+        assertNull(store.readSent("note", "v3/odd:\""))
+        assertEquals("text 4", store.readSent("note", "v4/odd:\""))
+        assertEquals("text 6", store.readSent("note", "v6"))
+        // At most 30, however recent.
+        for (i in 7..40) store.recordSent("note", "v$i", gz("text $i"), now = 36 * hour + i)
+        assertNull(store.readSent("note", "v10"))
+        assertEquals("text 11", store.readSent("note", "v11"))
     }
 
     @Test
@@ -95,13 +100,15 @@ class InkStoreTest {
         val original = InkStroke(color = 1, width = 2f, highlighter = false, points = floatArrayOf(0f, 0f, 5f, 5f), id = "orig")
         val moved = original.transformed(10f, 0f, 1f, 1f, 0f, 0f)
         val copy = original.transformed(10f, 0f, 1f, 1f, 0f, 0f, replacing = false)
-        assertEquals("orig", moved.replaces)
-        assertEquals(null, copy.replaces)
-        assertEquals("orig", original.withColor(7).replaces)
+        assertEquals(listOf("orig"), moved.replaces)
+        assertEquals(emptyList<String>(), copy.replaces)
+        assertEquals(listOf("orig"), original.withColor(7).replaces)
+        // A second edit keeps the first one's ancestry, newest first.
+        assertEquals(listOf(moved.id, "orig"), moved.withColor(7).replaces)
         val binary = InkPageCodec.decode(InkPageCodec.encode(listOf(moved, copy)))
-        assertEquals(listOf("orig", null), binary.map { it.replaces })
+        assertEquals(listOf(listOf("orig"), emptyList()), binary.map { it.replaces })
         val json = InkSerializer.decode(InkSerializer.encode(InkDocument(listOf(InkPage(strokes = listOf(moved, copy))))))
-        assertEquals(listOf("orig", null), json.pages.single().strokes.map { it.replaces })
+        assertEquals(listOf(listOf("orig"), emptyList()), json.pages.single().strokes.map { it.replaces })
     }
 
     @Test

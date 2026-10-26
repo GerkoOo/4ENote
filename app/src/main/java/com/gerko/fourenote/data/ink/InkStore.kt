@@ -150,19 +150,29 @@ class InkStore(val root: File, private val sealing: FileSealing? = null) {
     }
 
     /**
-     * Keeps this device's upload of the note at [version] among its last [SENT_KEPT] ones: another
-     * device that read one of them says so in its file, and this is then the base for merging it.
+     * Keeps this device's upload of the note at [version]: another device that read it says so
+     * in its file, and it is then the base for merging that file. That device read it in the same
+     * sync that uploads, so a day covers it with room to spare; the newest [SENT_MIN] are always
+     * kept, and at most [SENT_MAX] or [SENT_MAX_BYTES] in all.
      */
-    suspend fun recordSent(noteId: String, version: String, compressed: ByteArray) = locked(noteId) {
+    suspend fun recordSent(noteId: String, version: String, compressed: ByteArray, now: Long = System.currentTimeMillis()) = locked(noteId) {
         val dir = sentDir(noteId).apply { mkdirs() }
         val name = sentName(version)
         writeNoteFile(noteId, File(dir, "$name.4enote.gz")) { it.write(compressed) }
         writeAtomically(File(dir, "$name.version")) { it.write(version.encodeToByteArray()) }
-        // Newest first, in a list of its own: file times can be a whole second coarse.
+        // Newest first ("name time" per line), in a list of its own: file times can be a whole second coarse.
         val order = File(dir, "order")
-        val names = (listOf(name) + (order.takeIf { it.isFile }?.readLines().orEmpty() - name)).filter { it.isNotBlank() }
-        writeAtomically(order) { it.write(names.take(SENT_KEPT).joinToString("\n").encodeToByteArray()) }
-        for (old in names.drop(SENT_KEPT)) {
+        val earlier = order.takeIf { it.isFile }?.readLines().orEmpty()
+            .mapNotNull { line -> line.split(' ').takeIf { it.size == 2 }?.let { it[0] to (it[1].toLongOrNull() ?: 0L) } }
+            .filter { it.first != name }
+        val all = listOf(name to now) + earlier
+        var bytes = 0L
+        val kept = all.filterIndexed { i, (old, at) ->
+            bytes += File(dir, "$old.4enote.gz").length()
+            i < SENT_MIN || (i < SENT_MAX && now - at < SENT_KEEP_MS && bytes <= SENT_MAX_BYTES)
+        }
+        writeAtomically(order) { it.write(kept.joinToString("\n") { "${it.first} ${it.second}" }.encodeToByteArray()) }
+        for ((old, _) in all - kept.toSet()) {
             File(dir, "$old.4enote.gz").delete()
             File(dir, "$old.version").delete()
         }
@@ -304,7 +314,10 @@ class InkStore(val root: File, private val sealing: FileSealing? = null) {
 
     private companion object {
         /** This device's uploads of a note kept as merge bases (see [recordSent]). */
-        const val SENT_KEPT = 3
+        const val SENT_MIN = 3
+        const val SENT_MAX = 30
+        const val SENT_KEEP_MS = 24 * 60 * 60 * 1000L
+        const val SENT_MAX_BYTES = 64L * 1024 * 1024
         const val SEALED_MARKER = "sealed"
         // Enough to tell a sealed file by its first bytes.
         const val HEAD_SIZE = 4

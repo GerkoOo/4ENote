@@ -94,6 +94,7 @@ class SyncEngineTest {
 
         /** This device's uploads: note id to version to text. */
         val sent = mutableMapOf<String, MutableMap<String, String>>()
+        // The real store keeps a day's uploads (InkStore.recordSent): all of them in a test.
         override suspend fun sentSnapshot(note: Note, version: String) = sent[note.id]?.get(version)
 
         /** Other devices' files as last merged: note id to device id to (version, text). */
@@ -764,10 +765,48 @@ class SyncEngineTest {
             val strokes = d.doc("n1").pages.single().strokes
             // s2 and one edited s1: A's move (the tie goes to A on both devices).
             assertEquals(2, strokes.size)
-            val edited = strokes.single { it.replaces == "s1" }
+            val edited = strokes.single { it.replaces.firstOrNull() == "s1" }
             assertEquals(50f, edited.points[0])
             assertEquals(0, edited.color)
         }
+    }
+
+    @Test
+    fun oneStrokeMovedTwiceOnOneDeviceAndRecolouredOnTheOtherShowsOnce() {
+        sharedNote()
+        a.editStroke("n1", "s1") { listOf(it.transformed(20f, 0f, 1f, 1f, 0f, 0f)) }
+        val moved = a.doc("n1").pages.single().strokes.first { it.id != "s2" }.id
+        a.editStroke("n1", moved) { listOf(it.transformed(30f, 0f, 1f, 1f, 0f, 0f)) }
+        b.editStroke("n1", "s1") { listOf(it.withColor(0xFFFF0000.toInt())) }
+        a.sync()
+        b.sync()
+        a.sync()
+        for (d in listOf(a, b)) assertEquals(2, d.doc("n1").pages.single().strokes.size)
+        assertEquals(a.strokeIds("n1"), b.strokeIds("n1"))
+    }
+
+    @Test
+    fun anEraseStaysErasedWhenOneDeviceUploadsManyTimesWhileTheOthersUploadIsUnderway() {
+        sharedNote()
+        a.addStrokes("n1", "doomed")
+        a.sync()
+        b.sync()
+        b.addStrokes("n1", "fromB")
+        // B has read A's file; before B's upload goes out, A erases a stroke and syncs many times.
+        b.beforeUpload = {
+            a.removeStroke("n1", "doomed")
+            a.sync()
+            repeat(5) { i ->
+                a.addStrokes("n1", "more$i")
+                a.sync()
+            }
+        }
+        b.sync()
+        a.sync()
+        b.sync()
+        assertFalse("doomed" in a.strokeIds("n1"))
+        assertFalse("doomed" in b.strokeIds("n1"))
+        assertTrue("fromB" in a.strokeIds("n1"))
     }
 
     @Test
@@ -788,8 +827,8 @@ class SyncEngineTest {
         sharedNote()
         // A's rub cuts s1 in two, then cuts one piece again: all pieces replace s1.
         a.editStroke("n1", "s1") { s ->
-            val left = InkStroke(s.color, s.width, false, floatArrayOf(0f, 0f, 3f, 3f), replaces = "s1")
-            val right = InkStroke(s.color, s.width, false, floatArrayOf(7f, 7f, 10f, 10f), replaces = "s1")
+            val left = InkStroke(s.color, s.width, false, floatArrayOf(0f, 0f, 3f, 3f), replaces = listOf("s1"))
+            val right = InkStroke(s.color, s.width, false, floatArrayOf(7f, 7f, 10f, 10f), replaces = listOf("s1"))
             listOf(left, right)
         }
         b.editStroke("n1", "s1") { listOf(it.transformed(50f, 0f, 1f, 1f, 0f, 0f)) }

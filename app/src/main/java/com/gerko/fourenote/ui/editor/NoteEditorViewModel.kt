@@ -22,6 +22,7 @@ import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.ink.TextStyleSpec
 import com.gerko.fourenote.data.ink.InkStroke
+import com.gerko.fourenote.data.ink.lineage
 import com.gerko.fourenote.data.ink.PaperStyle
 import com.gerko.fourenote.data.ink.Scribble
 import com.gerko.fourenote.data.ink.StrikeOut
@@ -435,7 +436,7 @@ class NoteEditorViewModel(
         var i = 0
         while (i < strokes.size) {
             val stroke = strokes[i]
-            val replacing = if (stroke.id in cutThisRub) stroke.replaces else stroke.id
+            val replacing = if (stroke.id in cutThisRub) stroke.replaces else stroke.lineage()
             val pieces = if (stroke.layerId == activeLayerId) stroke.erasedAround(x, y, ERASER_RADIUS_DP, replacing) else null
             if (pieces == null) {
                 i++
