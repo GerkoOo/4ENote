@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="InkLayersTest[jvm]" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-26T00:08:15.036Z" hostname="gerko" time="0.002">
+  <properties/>
+  <testcase name="layersAndStrokeLayerRoundTrip[jvm]" classname="com.gerko.fourenote.data.ink.InkLayersTest" time="0.001"/>
+  <testcase name="hiddenLayersAreLeftOutAndUpperLayersDrawOnTop[jvm]" classname="com.gerko.fourenote.data.ink.InkLayersTest" time="0.001"/>
+  <testcase name="notesFromBeforeLayersGetOneBaseLayer[jvm]" classname="com.gerko.fourenote.data.ink.InkLayersTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
