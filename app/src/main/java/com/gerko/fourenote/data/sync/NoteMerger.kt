@@ -6,6 +6,7 @@ import com.gerko.fourenote.data.ink.InkLayer
 import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.InkStroke
+import com.gerko.fourenote.data.ink.withoutDeadLinks
 
 /**
  * Three-way merge of a note edited on two devices since their last common
@@ -62,7 +63,17 @@ object NoteMerger {
                                 )
                             },
                         placement = pick(basePage?.placement, localPage.placement, remotePage.placement, localIsNewer),
-                    )
+                        // Links are edited in place too: per link, the newer side's version.
+                        links = mergeById(basePage?.links.orEmpty(), localPage.links, remotePage.links) { it.id }
+                            .map { link ->
+                                pick(
+                                    basePage?.links?.firstOrNull { it.id == link.id },
+                                    localPage.links.firstOrNull { it.id == link.id } ?: link,
+                                    remotePage.links.firstOrNull { it.id == link.id } ?: link,
+                                    localIsNewer,
+                                )
+                            },
+                    ).withoutDeadLinks()
                 }
             }
 

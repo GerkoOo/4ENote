@@ -233,6 +233,31 @@ data class PageText(
 )
 
 /**
+ * Where a link points: a note, optionally one of its pages, optionally some objects on that page
+ * (stroke, text and image ids), and optionally a sticky note (not built yet).
+ */
+data class LinkTarget(
+    val noteId: String,
+    val pageId: String? = null,
+    val objectIds: List<String> = emptyList(),
+    /** Reserved for sticky notes, which do not exist yet. */
+    val stickyId: String? = null,
+)
+
+/**
+ * A link from objects on this page ([strokeIds], [textIds], [imageIds]) to [target]. The anchors
+ * are the objects the link is drawn from; a link with no anchors left is dropped (see
+ * [withoutDeadLinks]).
+ */
+data class PageLink(
+    val id: String = newId(),
+    val strokeIds: List<String> = emptyList(),
+    val textIds: List<String> = emptyList(),
+    val imageIds: List<String> = emptyList(),
+    val target: LinkTarget,
+)
+
+/**
  * Where a page's background sits: its top-left corner at ([x], [y]) in page
  * units and its size as a multiple ([scale]) of the page. The default fills
  * the page exactly.
@@ -254,6 +279,7 @@ data class InkPage(
     /** Show the background (PDF page or scan) with smart-inverted colors, for reading in the dark. */
     val invertBackground: Boolean = false,
     val texts: List<PageText> = emptyList(),
+    val links: List<PageLink> = emptyList(),
 ) {
     companion object {
         /** A4 at 96 units per inch. */
@@ -267,6 +293,24 @@ data class InkPage(
             background = background,
         )
     }
+}
+
+/**
+ * Drops links that no longer hang on anything on the page: those with no anchors at all, and
+ * those whose anchors were all erased. Moving or recoloring strokes gives them new ids, so the
+ * editor must carry the link over to the new ids or it is dropped here.
+ */
+fun InkPage.withoutDeadLinks(): InkPage {
+    if (links.isEmpty()) return this
+    val strokeIds = strokes.mapTo(HashSet()) { it.id }
+    val textIds = texts.mapTo(HashSet()) { it.id }
+    val imageIds = images.mapTo(HashSet()) { it.id }
+    val alive = links.filter { link ->
+        link.strokeIds.any { it in strokeIds } ||
+            link.textIds.any { it in textIds } ||
+            link.imageIds.any { it in imageIds }
+    }
+    return if (alive.size == links.size) this else copy(links = alive)
 }
 
 /**
@@ -369,6 +413,22 @@ object InkSerializer {
                 }
             }
         }
+        if (page.links.isNotEmpty()) {
+            w.key("links").arr(page.links) { link ->
+                w.obj {
+                    w.key("id").str(link.id)
+                    if (link.strokeIds.isNotEmpty()) w.key("s").strs(link.strokeIds)
+                    if (link.textIds.isNotEmpty()) w.key("t").strs(link.textIds)
+                    if (link.imageIds.isNotEmpty()) w.key("i").strs(link.imageIds)
+                    w.key("to").obj {
+                        w.key("note").str(link.target.noteId)
+                        link.target.pageId?.let { w.key("page").str(it) }
+                        if (link.target.objectIds.isNotEmpty()) w.key("obj").strs(link.target.objectIds)
+                        link.target.stickyId?.let { w.key("sticky").str(it) }
+                    }
+                }
+            }
+        }
         if (page.texts.isNotEmpty()) {
             w.key("texts").arr(page.texts) { t ->
                 val st = t.style
@@ -455,6 +515,16 @@ object InkSerializer {
 
         fun str(value: String) {
             JsonReader.quote(value, out)
+            first = false
+        }
+
+        fun strs(values: List<String>) {
+            out.append('[')
+            values.forEachIndexed { i, value ->
+                if (i > 0) out.append(',')
+                JsonReader.quote(value, out)
+            }
+            out.append(']')
             first = false
         }
 
@@ -633,8 +703,31 @@ object InkSerializer {
                 ),
             )
         }
+        val linksJson = json.array("links") ?: JsonArray(emptyList())
+        val links = linksJson.mapNotNull { element ->
+            // A damaged link is skipped; it must not cost the whole note.
+            val o = element as? JsonObject ?: return@mapNotNull null
+            val to = o.objectOrNull("to") ?: return@mapNotNull null
+            val id = o.string("id")
+            val noteId = to.string("note")
+            // Ids name files, so a hostile or damaged one is dropped rather than trusted.
+            if (!SafeName.isSafeFromCloud(id) || !SafeName.isSafeFromCloud(noteId)) return@mapNotNull null
+            PageLink(
+                id = id,
+                strokeIds = o.strings("s"),
+                textIds = o.strings("t"),
+                imageIds = o.strings("i"),
+                target = LinkTarget(
+                    noteId = noteId,
+                    pageId = to.string("page").takeIf { it.isNotEmpty() },
+                    objectIds = to.strings("obj"),
+                    stickyId = to.string("sticky").takeIf { it.isNotEmpty() },
+                ),
+            )
+        }
         return InkPage(
             texts = texts,
+            links = links,
             invertBackground = bgJson?.boolean("invert") ?: false,
             images = images,
             placement = placement,
@@ -673,6 +766,9 @@ object InkSerializer {
         (this[key] as? JsonPrimitive)?.booleanOrNull ?: default
 
     private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
+
+    private fun JsonObject.strings(key: String): List<String> =
+        (this[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
 
     private fun JsonObject.objectOrNull(key: String): JsonObject? = this[key] as? JsonObject
 

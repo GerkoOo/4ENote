@@ -113,6 +113,68 @@ class BackgroundPlacementTest {
     }
 }
 
+class PageLinkTest {
+    private fun stroke(id: String) = InkStroke(1, 3f, false, floatArrayOf(0f, 0f, 5f, 5f), id = id)
+
+    @Test
+    fun linksWithEveryKindOfTargetRoundTrip() {
+        val links = listOf(
+            PageLink(id = "l1", strokeIds = listOf("s1"), target = LinkTarget(noteId = "note-a")),
+            PageLink(id = "l2", textIds = listOf("t1"), target = LinkTarget(noteId = "note-b", pageId = "page-2")),
+            PageLink(
+                id = "l3",
+                imageIds = listOf("i1"),
+                target = LinkTarget(noteId = "note-c", pageId = "page-3", objectIds = listOf("s9", "t9")),
+            ),
+            PageLink(id = "l4", strokeIds = listOf("s1"), target = LinkTarget(noteId = "note-d", stickyId = "sticky-1")),
+        )
+        val page = InkPage(
+            id = "p",
+            strokes = listOf(stroke("s1")),
+            texts = listOf(PageText(id = "t1", x = 0f, y = 0f, width = 100f)),
+            images = listOf(PageImage(id = "i1", file = "a.png", x = 0f, y = 0f, width = 10f, height = 10f)),
+            links = links,
+        )
+        val back = InkSerializer.decode(InkSerializer.encode(InkDocument(listOf(page))))
+        assertEquals(links, back.pages[0].links)
+    }
+
+    @Test
+    fun pagesWithoutLinksWriteNoLinksKey() {
+        val doc = InkDocument(listOf(InkPage(id = "p", strokes = listOf(stroke("s1")))))
+        assertFalse(InkSerializer.encode(doc).contains("links"))
+    }
+
+    @Test
+    fun unsafeIdsAndEmptyTargetsAreDropped() {
+        val json = """{"v":3,"pages":[{"id":"p","w":794,"h":1123,"strokes":[],"links":[""" +
+            """{"id":"ok","s":["s1"],"to":{"note":"note-a"}},""" +
+            """{"id":"../evil","s":["s1"],"to":{"note":"note-a"}},""" +
+            """{"id":"l2","s":["s1"],"to":{"note":"../evil"}},""" +
+            """{"id":"l3","s":["s1"],"to":{"note":""}},""" +
+            """42,{"id":"l4","s":["s1"]}""" +
+            """]}]}"""
+        val links = InkSerializer.decode(json).pages[0].links
+        assertEquals(listOf("ok"), links.map { it.id })
+    }
+
+    @Test
+    fun deadLinksAreDropped() {
+        val page = InkPage(
+            id = "p",
+            strokes = listOf(stroke("s1")),
+            texts = listOf(PageText(id = "t1", x = 0f, y = 0f, width = 100f)),
+            links = listOf(
+                PageLink(id = "alive", strokeIds = listOf("s1"), target = LinkTarget(noteId = "a")),
+                PageLink(id = "gone", strokeIds = listOf("s2"), target = LinkTarget(noteId = "b")),
+                PageLink(id = "empty", target = LinkTarget(noteId = "c")),
+                PageLink(id = "text", textIds = listOf("t1"), target = LinkTarget(noteId = "d")),
+            ),
+        )
+        assertEquals(listOf("alive", "text"), page.withoutDeadLinks().links.map { it.id })
+    }
+}
+
 class PageImageTest {
     private val image = PageImage(id = "i", file = "a.png", x = 100f, y = 100f, width = 80f, height = 40f)
 
