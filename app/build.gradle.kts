@@ -33,9 +33,17 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
+    gradle.taskGraph.whenReady {
+        if (allTasks.any { it.name.startsWith("assembleRelease") || it.name.startsWith("bundleRelease") || it.name.startsWith("packageRelease") } &&
+            signingConfigs.findByName("release") == null
+        ) {
+            throw GradleException("No release key: set release.signing in local.properties (see README, Building)")
+        }
+    }
+
     // The release key lives outside the project (its path in local.properties as release.signing,
     // a file with storeFile, storePassword, keyAlias, keyPassword). Its SHA-256 fingerprint is in
-    // the README, so a downloaded APK can be checked. Builds without it (CI) use the debug key.
+    // the README, so a downloaded APK can be checked. CI builds only debug, which needs no key.
     val releaseSigning = Properties().apply {
         val localProperties = Properties().apply {
             rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
@@ -55,10 +63,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.findByName("release") ?: run {
-                logger.warn("No release key (release.signing in local.properties): signing the release build with the debug key")
-                signingConfigs.getByName("debug")
-            }
+            // No silent fallback to the debug key: without the release key a release build fails
+            // (see the check below), so a debug-signed APK can't be published by mistake.
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

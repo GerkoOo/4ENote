@@ -6,17 +6,20 @@ on the emulator. Report problems at https://github.com/GerkoOo/4ENote/issues.
 
 ## 0.4.0 (not released yet)
 
-Signed with the new release key (fingerprint in the README): uninstall 0.3.0 first, after making
-a 4ENote backup, then restore it.
+Signed with the new release key (fingerprint in the README) plus a signed hand-over from the old
+development key, so on Android 9+ it updates 0.3.0 in place and keeps the notes. On Android 8,
+uninstall 0.3.0 first after making a 4ENote backup, then restore it.
 
 Trusted
 - Saving: every file is written to a hidden temporary file, flushed to disk and then moved into
   place, so a crash never leaves a half-written page or picture.
-- Sync merges both devices' changes (ink, pages, text boxes, pictures, links, sticky notes,
-  title, lock); 13 offline-conflict tests cover what happens when both edit the same note.
 - Backups: a backup restored on another device comes back byte for byte (tested on every push).
 
 Beta
+- Sync merges both devices' changes (ink, pages, text boxes, pictures, links, sticky notes,
+  title, lock); 13 offline-conflict tests cover both devices editing the same note, but only
+  against a simulated cloud. Not yet tested on two real tablets, nor with Wi-Fi dropping
+  mid-upload, a slow Google Drive or device clocks that differ.
 - Locked notes are encrypted on the tablet (handwriting, text, pictures, PDF pages) with a key
   kept by the tablet's hardware, and in the cloud once a 4ENote password is set. See the lock
   settings for what this does and does not protect against. Not yet reviewed by a second person.

@@ -19,8 +19,13 @@ fingerprint (for example with `apksigner verify --print-certs 4ENote.apk`):
 D1:69:AD:59:9D:60:94:B7:F1:1E:EF:FD:91:3F:4C:95:3D:B5:1B:C6:17:55:C4:A3:FA:E3:E2:DD:D2:EB:27:1A
 ```
 
-Releases up to 0.3.0 were signed with a development key; 0.4.0 and later use this one, so
-moving from 0.3.0 to 0.4.0 means uninstalling first (make a 4ENote backup before).
+Releases up to 0.3.0 were signed with a development key; 0.4.0 and later use this one and carry
+a signed hand-over from the old key (APK key rotation), so on Android 9 and newer they update an
+older 4ENote in place, notes and all. On Android 8 the old version has to be uninstalled first,
+which deletes its notes: make a 4ENote backup before and restore it after.
+
+The fingerprint shows who signed an APK, not that it was built from this exact code: release
+APKs are built on the author's computer, and the build isn't reproducible yet.
 
 Website: [gerkooo.github.io/4ENote](https://gerkooo.github.io/4ENote/)
 
