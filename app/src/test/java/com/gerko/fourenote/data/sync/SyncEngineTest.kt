@@ -5,8 +5,14 @@ import com.gerko.fourenote.data.ink.InkDocument
 import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.InkStroke
+import com.gerko.fourenote.data.ink.LinkTarget
+import com.gerko.fourenote.data.ink.PageImage
+import com.gerko.fourenote.data.ink.PageLink
+import com.gerko.fourenote.data.ink.PageText
+import com.gerko.fourenote.data.ink.StickyNote
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -569,5 +575,174 @@ class SyncEngineTest {
         val result = b.sync()
         assertNull(b.notes["n2"])
         assertEquals(1, result.errors.size)
+    }
+
+    // Offline conflicts: both devices change the same note without syncing, then both sync.
+    // Whatever both did must end up merged on both, or (for a single value) the newer side's,
+    // never silently lost.
+
+    private fun Device.doc(noteId: String) = InkSerializer.decode(notes.getValue(noteId).inkData)
+
+    private fun Device.edit(noteId: String, change: (InkDocument) -> InkDocument) {
+        val note = notes.getValue(noteId)
+        save(note.copy(inkData = InkSerializer.encode(change(doc(noteId)))))
+    }
+
+    private fun InkDocument.editPage(pageId: String, change: (InkPage) -> InkPage) =
+        copy(pages = pages.map { if (it.id == pageId) change(it) else it })
+
+    /** A shared note with pages p1 (strokes s1, s2, text t1, t2, a picture, a sticky) and p2. */
+    private fun richNote(): String {
+        val p1 = InkPage(
+            id = "p1",
+            strokes = listOf(stroke("s1"), stroke("s2")),
+            texts = listOf(PageText(id = "t1", x = 10f, y = 10f, width = 100f, text = "one"), PageText(id = "t2", x = 10f, y = 50f, width = 100f, text = "two")),
+            images = listOf(PageImage(id = "i1", file = "a.png", x = 100f, y = 100f, width = 80f, height = 40f)),
+            stickies = listOf(StickyNote(id = "st", x = 300f, y = 300f)),
+        )
+        a.save(Note(id = "n1", title = "Biology", inkData = InkSerializer.encode(InkDocument(listOf(p1, InkPage(id = "p2"))))))
+        a.sync()
+        b.sync()
+        return "n1"
+    }
+
+    /** A syncs, then B (which merges), then A again: afterwards both must hold the same note. */
+    private fun syncBoth(): InkDocument {
+        a.sync()
+        b.sync()
+        a.sync()
+        assertEquals(InkSerializer.encode(b.doc("n1")), InkSerializer.encode(a.doc("n1")))
+        assertEquals(b.notes.getValue("n1").title, a.notes.getValue("n1").title)
+        assertEquals(b.notes.getValue("n1").locked, a.notes.getValue("n1").locked)
+        return a.doc("n1")
+    }
+
+    @Test
+    fun offlinePagesAddedOnBothDevicesAreBothKept() {
+        richNote()
+        a.edit("n1") { it.copy(pages = it.pages + InkPage(id = "fromA")) }
+        b.edit("n1") { it.copy(pages = it.pages + InkPage(id = "fromB")) }
+        assertEquals(setOf("p1", "p2", "fromA", "fromB"), syncBoth().pages.map { it.id }.toSet())
+    }
+
+    @Test
+    fun offlinePageDeletedOnOneDeviceWhileTheOtherWritesOnAnother() {
+        richNote()
+        a.edit("n1") { it.copy(pages = it.pages.filter { p -> p.id != "p2" }) }
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(strokes = p.strokes + stroke("fromB")) } }
+        val doc = syncBoth()
+        assertEquals(listOf("p1"), doc.pages.map { it.id })
+        assertEquals(setOf("s1", "s2", "fromB"), doc.pages.single().strokes.map { it.id }.toSet())
+    }
+
+    @Test
+    fun offlineEditsOfDifferentTextBoxesAreBothKept() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t1") t.copy(text = "one from A") else t }) } }
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t2") t.copy(text = "two from B") else t }) } }
+        val texts = syncBoth().pages.first().texts.associate { it.id to it.text }
+        assertEquals(mapOf("t1" to "one from A", "t2" to "two from B"), texts)
+    }
+
+    @Test
+    fun offlineEditsOfTheSameTextBoxKeepTheNewerOne() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t1") t.copy(text = "older, A") else t }) } }
+        // B edits after A (the shared clock moves on), so B's is newer.
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t1") t.copy(text = "newer, B") else t }) } }
+        assertEquals("newer, B", syncBoth().pages.first().texts.first { it.id == "t1" }.text)
+    }
+
+    @Test
+    fun offlinePicturesMovedOnBothKeepTheNewerPlaceAndAddedOnesAreKept() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(images = p.images.map { i -> i.copy(x = 111f) } + PageImage(id = "iA", file = "b.png", x = 1f, y = 1f, width = 10f, height = 10f)) } }
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(images = p.images.map { i -> i.copy(x = 222f) } + PageImage(id = "iB", file = "c.png", x = 1f, y = 1f, width = 10f, height = 10f)) } }
+        val images = syncBoth().pages.first().images
+        assertEquals(setOf("i1", "iA", "iB"), images.map { it.id }.toSet())
+        assertEquals(222f, images.first { it.id == "i1" }.x)
+    }
+
+    @Test
+    fun offlineLinksAddedOnBothAreBothKept() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(links = p.links + PageLink(id = "lA", strokeIds = listOf("s1"), target = LinkTarget("other"))) } }
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(links = p.links + PageLink(id = "lB", strokeIds = listOf("s2"), target = LinkTarget("other"))) } }
+        assertEquals(setOf("lA", "lB"), syncBoth().pages.first().links.map { it.id }.toSet())
+    }
+
+    @Test
+    fun offlineLinkWhoseInkIsErasedOnTheOtherDeviceIsDropped() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(links = p.links + PageLink(id = "lA", strokeIds = listOf("s1"), target = LinkTarget("other"))) } }
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(strokes = p.strokes.filter { s -> s.id != "s1" }) } }
+        val page = syncBoth().pages.first()
+        assertEquals(setOf("s2"), page.strokes.map { it.id }.toSet())
+        assertEquals(emptyList<PageLink>(), page.links)
+    }
+
+    @Test
+    fun offlineInkInTheSameStickyOnBothIsBothKept() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(stickies = p.stickies.map { st -> st.copy(strokes = st.strokes + stroke("inkA")) }) } }
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(stickies = p.stickies.map { st -> st.copy(strokes = st.strokes + stroke("inkB")) }) } }
+        assertEquals(setOf("inkA", "inkB"), syncBoth().pages.first().stickies.single().strokes.map { it.id }.toSet())
+    }
+
+    @Test
+    fun offlineStickyMovedOnOneAndFoldedOnTheOtherTakesTheNewerFrame() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(stickies = p.stickies.map { st -> st.copy(x = 50f, strokes = st.strokes + stroke("inkA")) }) } }
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(stickies = p.stickies.map { st -> st.copy(folded = true) }) } }
+        val sticky = syncBoth().pages.first().stickies.single()
+        // Position, size, colour and folding are one value: the newer side's (B) wins whole,
+        // so A's move is lost, but A's ink inside the sticky is kept.
+        assertTrue(sticky.folded)
+        assertEquals(300f, sticky.x)
+        assertEquals(setOf("inkA"), sticky.strokes.map { it.id }.toSet())
+    }
+
+    @Test
+    fun offlineStickyDeletedOnOneDeviceAndUntouchedOnTheOtherIsDeleted() {
+        richNote()
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(stickies = emptyList()) } }
+        b.edit("n1") { it.editPage("p2") { p -> p.copy(strokes = listOf(stroke("elsewhere"))) } }
+        val doc = syncBoth()
+        assertEquals(emptyList<StickyNote>(), doc.pages.first().stickies)
+        assertEquals(listOf("elsewhere"), doc.pages[1].strokes.map { it.id })
+    }
+
+    @Test
+    fun offlineTitleChangedOnBothKeepsTheNewer() {
+        richNote()
+        a.save(a.notes.getValue("n1").copy(title = "Older title"))
+        b.save(b.notes.getValue("n1").copy(title = "Newer title"))
+        syncBoth()
+        assertEquals("Newer title", a.notes.getValue("n1").title)
+    }
+
+    @Test
+    fun offlineLockOnOneDeviceAndInkOnTheOtherKeepsBoth() {
+        richNote()
+        a.save(a.notes.getValue("n1").copy(locked = true))
+        b.addStrokes("n1", "fromB")
+        val doc = syncBoth()
+        assertTrue(a.notes.getValue("n1").locked)
+        assertTrue(doc.pages.first().strokes.any { it.id == "fromB" })
+    }
+
+    @Test
+    fun offlineDeleteOnOneDeviceWhileTheOtherEditsIt() {
+        richNote()
+        a.delete("n1")
+        b.addStrokes("n1", "fromB")
+        a.sync()
+        b.sync()
+        a.sync()
+        // Current behaviour, written down: the edit made after the delete brings the note back
+        // with that edit on both devices, so writing on a note someone deleted elsewhere is not lost.
+        assertFalse(a.notes.getValue("n1").deleted)
+        assertTrue(a.strokeIds("n1").contains("fromB"))
+        assertTrue(b.strokeIds("n1").contains("fromB"))
     }
 }

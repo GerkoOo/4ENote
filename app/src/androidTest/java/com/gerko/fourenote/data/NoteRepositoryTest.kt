@@ -91,4 +91,17 @@ class NoteRepositoryTest {
         assertEquals(2, repository.loadDocument("n").pages.size)
         assertEquals(1, repository.loadThumbnail("n")!!.pages.size)
     }
+
+    // The real database query, not a fake: a lock set on another device must reach a note that
+    // is already here (it once only reached new notes).
+    @Test
+    fun aLockFromTheCloudReachesANoteAlreadyHere() = runBlocking {
+        val repository = repository()
+        val note = Note(id = "lockme", title = "Diary", inkData = InkSerializer.encode(InkDocument()), updatedAt = 1_000)
+        repository.insertFromCloud(note, ByteArray(0))
+        assertTrue(repository.replaceIfUnchanged(note.copy(locked = true, updatedAt = 2_000), expectedUpdatedAt = 1_000, dirty = false))
+        assertTrue(dao.getById("lockme")!!.locked)
+        assertTrue(repository.replaceIfUnchanged(note.copy(locked = false, updatedAt = 3_000), expectedUpdatedAt = 2_000, dirty = false))
+        assertEquals(false, dao.getById("lockme")!!.locked)
+    }
 }
