@@ -213,7 +213,10 @@ fun InkCanvas(
     var dragScaleY by remember { mutableStateOf(1f) }
     var eraserAt by remember { mutableStateOf<Offset?>(null) }
     val pathCache = remember { WeakHashMap<InkStroke, Path>() }
-    val inkCache = remember { InkBitmapCache() }
+    val budgetContext = androidx.compose.ui.platform.LocalContext.current
+    val inkCache = remember { InkBitmapCache(InkCacheBudget.of(budgetContext)) }
+    // A page off screen keeps no picture, so its share of the budget goes to the ones shown.
+    androidx.compose.runtime.DisposableEffect(inkCache) { onDispose { inkCache.release() } }
     val bounds = remember(selection) { selectionBounds(selection) }
     val accent = MaterialTheme.colorScheme.primary
 
@@ -1370,7 +1373,7 @@ private fun pointedWidths(points: FloatArray, pressures: FloatArray, slantDegree
  * strokes only grew (a stroke was added) just the new ones are painted onto it; anything else
  * (erasing, undo, zoom, paper or pictures changing) paints it afresh.
  */
-private class InkBitmapCache {
+private class InkBitmapCache(private val budget: InkCacheBudget) {
     private var bitmap: ImageBitmap? = null
     private var baseKey: Any? = null
     private var drawn: List<InkStroke> = emptyList()
@@ -1384,11 +1387,13 @@ private class InkBitmapCache {
         drawStrokes: DrawScope.(List<InkStroke>) -> Unit,
         zoom: Float = 1f,
     ) {
-        // Painted at the zoomed size so it stays sharp, but never bigger than about 16 million
-        // pixels (a whole page at high zoom would take too much memory).
+        if (bitmap == null) budget.register()
+        // Painted at the zoomed size so it stays sharp, but within this page's share of the
+        // memory budget, and in steps so pinching doesn't make a new picture every frame.
         val logical = scope.size.width * scope.size.height
-        val resolution = minOf(zoom.coerceAtLeast(1f), kotlin.math.sqrt(MAX_CACHE_PIXELS / logical.coerceAtLeast(1f)))
-            .coerceAtLeast(1f)
+        val resolution = snappedResolution(
+            minOf(zoom.coerceAtLeast(1f), kotlin.math.sqrt(budget.pixelsPerPage() / logical.coerceAtLeast(1f))),
+        )
         val width = (scope.size.width * resolution).roundToInt().coerceAtLeast(1)
         val height = (scope.size.height * resolution).roundToInt().coerceAtLeast(1)
         var picture = bitmap
@@ -1416,6 +1421,15 @@ private class InkBitmapCache {
             dstSize = androidx.compose.ui.unit.IntSize(scope.size.width.roundToInt(), scope.size.height.roundToInt()),
             filterQuality = FilterQuality.Medium,
         )
+    }
+
+    /** Lets go of the picture and its share of the budget. */
+    fun release() {
+        if (bitmap == null) return
+        bitmap = null
+        baseKey = null
+        drawn = emptyList()
+        budget.unregister()
     }
 }
 
@@ -1463,5 +1477,3 @@ private const val TAP_SLOP_DP = 8f
 // How far two fingers must twist before the page turns with them, so pinching and scrolling don't turn it.
 private const val ROTATE_START_DEG = 6f
 
-/** The largest ink picture kept for a page, in pixels. */
-private const val MAX_CACHE_PIXELS = 16_000_000f
