@@ -1,41 +1,12 @@
 package com.gerko.fourenote.ui.editor
 
-import androidx.compose.material.icons.filled.Crop
-import androidx.compose.runtime.SideEffect
-import androidx.compose.foundation.gestures.scrollable
-import androidx.compose.ui.layout.layout
-import androidx.compose.material.icons.filled.ViewModule
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.WindowInsets
 import kotlin.math.ln
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.ui.unit.Dp
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.AddAPhoto
-import com.gerko.fourenote.ui.scan.ScanDialog
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.Title
-import kotlin.math.abs
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Remove
@@ -49,55 +20,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AssistChip
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.zIndex
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.ScreenRotation
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DonutLarge
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Switch
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.InvertColors
 import androidx.compose.foundation.Image
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -127,11 +55,100 @@ import androidx.compose.material.icons.filled.HistoryEdu
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.runtime.produceState
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.filled.BorderColor
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.material.icons.outlined.CleaningServices
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.HighlightAlt
+import androidx.compose.material3.VerticalDivider
+import com.gerko.fourenote.data.ink.Smoothing
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.ui.layout.layout
+import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.unit.Dp
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SelectAll
+import com.gerko.fourenote.ui.scan.ScanDialog
+import kotlin.math.abs
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.InvertColors
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.draw.shadow
@@ -144,7 +161,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -156,26 +172,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.BorderColor
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Draw
-import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.outlined.CleaningServices
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
@@ -187,9 +190,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.HighlightAlt
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -202,7 +203,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import com.gerko.fourenote.data.ink.PaperStyle
-import com.gerko.fourenote.data.ink.Smoothing
 import kotlin.math.roundToInt
 import com.gerko.fourenote.data.ink.Tool
 
@@ -1420,154 +1420,6 @@ private fun PageList(
     }
 }
 
-/** A link that leads nowhere, with the page it is on, so it can be removed. */
-private data class BrokenLink(
-    val pageId: String,
-    val link: com.gerko.fourenote.data.ink.PageLink,
-    val resolution: LinkResolution,
-)
-
-/** Explains why a link didn't open, and offers to remove it or open the note it names. */
-@Composable
-private fun BrokenLinkDialog(
-    broken: BrokenLink,
-    onOpenNote: () -> Unit,
-    onRemove: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val pageMissing = broken.resolution as? LinkResolution.PageNotFound
-    val objectsMissing = broken.resolution as? LinkResolution.ObjectsNotFound
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                when {
-                    objectsMissing != null -> "Linked objects not found"
-                    pageMissing != null -> "Linked page not found"
-                    else -> "Note not found"
-                },
-            )
-        },
-        text = {
-            Text(
-                when {
-                    objectsMissing != null -> "The ink or pictures this link points to were erased or moved."
-                    pageMissing != null -> "The page was deleted. You can open the note instead."
-                    else -> "The note this link points to was deleted or isn't on this device."
-                },
-            )
-        },
-        confirmButton = {
-            when {
-                objectsMissing != null -> TextButton(onClick = onOpenNote) { Text("Open page") }
-                pageMissing != null -> TextButton(onClick = onOpenNote) { Text("Open note") }
-                else -> TextButton(onClick = onRemove) { Text("Remove link") }
-            }
-        },
-        dismissButton = {
-            Row {
-                if (pageMissing != null || objectsMissing != null) {
-                    TextButton(onClick = onRemove) { Text("Remove link") }
-                }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
-        },
-    )
-}
-
-/**
- * Shown after picking a PDF: its first page twice, as it is and with colors
- * inverted for dark reading. Tapping one imports the PDF that way; it can still
- * be changed per page later from the page menu. In dark mode the inverted
- * version starts highlighted.
- */
-@Composable
-private fun PdfColorsDialog(
-    uri: android.net.Uri,
-    suggestInvert: Boolean,
-    onKeep: () -> Unit,
-    onInvert: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    val context = LocalContext.current
-    val preview by produceState<ImageBitmap?>(null, uri) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
-                    android.graphics.pdf.PdfRenderer(fd).use { renderer ->
-                        renderer.openPage(0).use { page ->
-                            val width = 480
-                            val bitmap = android.graphics.Bitmap.createBitmap(
-                                width,
-                                (width.toLong() * page.height / page.width).toInt().coerceAtLeast(1),
-                                android.graphics.Bitmap.Config.ARGB_8888,
-                            )
-                            bitmap.eraseColor(android.graphics.Color.WHITE)
-                            page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            bitmap.asImageBitmap()
-                        }
-                    }
-                }
-            }.getOrNull()
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Import PDF") },
-        text = {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                PdfChoice("Original", preview, inverted = false, highlighted = !suggestInvert, onClick = onKeep, Modifier.weight(1f))
-                PdfChoice("Inverted", preview, inverted = true, highlighted = suggestInvert, onClick = onInvert, Modifier.weight(1f))
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun PdfChoice(
-    label: String,
-    preview: ImageBitmap?,
-    inverted: Boolean,
-    highlighted: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val ring = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(4.dp),
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(preview?.let { it.width.toFloat() / it.height } ?: (210f / 297f))
-                .border(if (highlighted) 3.dp else 1.dp, ring, RoundedCornerShape(8.dp))
-                .padding(3.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (inverted) Color.Black else Color.White),
-        ) {
-            if (preview == null) {
-                CircularProgressIndicator(Modifier.size(32.dp))
-            } else {
-                Image(
-                    bitmap = preview,
-                    contentDescription = "$label colors",
-                    colorFilter = if (inverted) SmartInvert else null,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-        Text(label, style = MaterialTheme.typography.titleMedium)
-    }
-}
-
 /** Floats over the pages while the objects a link points to are being picked. */
 @Composable
 private fun PickObjectsBar(canFinish: Boolean, onCancel: () -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier) {
@@ -1722,7 +1574,6 @@ private const val MIN_ZOOM = 0.5f
 /** How small pages are while arranging them. */
 private const val ARRANGE_ZOOM = 0.28f
 private const val A4_ASPECT = 210f / 297f
-private val PAGE_FOOTER_HEIGHT = 28.dp
 private const val MAX_ZOOM = 3f
 private const val ZOOM_STEP = 1.25f
 
@@ -1788,710 +1639,8 @@ private fun SelectionBar(viewModel: NoteEditorViewModel, darkPaper: Boolean, onL
     }
 }
 
-/** Under each page: its number counted from 1, and the page's menu. */
-@Composable
-private fun PageFooter(
-    number: Int,
-    count: Int,
-    hasImage: Boolean,
-    inverted: Boolean,
-    onInvert: (Boolean) -> Unit,
-    onInvertAll: (Boolean) -> Unit,
-    onAdjustImage: () -> Unit,
-    onFitImage: () -> Unit,
-    onAddAfter: () -> Unit,
-    onClear: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    var open by remember { mutableStateOf(false) }
-    // Kept low so it takes little room between pages.
-    Box(Modifier.fillMaxWidth().height(PAGE_FOOTER_HEIGHT)) {
-        Text(
-            "$number / $count",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.Center),
-        )
-        Box(Modifier.align(Alignment.CenterEnd)) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.size(PAGE_FOOTER_HEIGHT).clip(CircleShape).clickable { open = true },
-            ) {
-                Icon(
-                    Icons.Filled.MoreHoriz,
-                    contentDescription = "Page $number options",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                if (hasImage) {
-                    DropdownMenuItem(
-                        text = { Text("Invert colors") },
-                        leadingIcon = { Icon(Icons.Filled.InvertColors, contentDescription = null) },
-                        trailingIcon = { Checkbox(checked = inverted, onCheckedChange = null) },
-                        onClick = { open = false; onInvert(!inverted) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (inverted) "Restore colors on all PDF pages" else "Invert all PDF pages") },
-                        leadingIcon = { Icon(Icons.Filled.InvertColors, contentDescription = null) },
-                        onClick = { open = false; onInvertAll(!inverted) },
-                    )
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text("Move / resize image") },
-                        leadingIcon = { Icon(Icons.Filled.OpenWith, contentDescription = null) },
-                        onClick = { open = false; onAdjustImage() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Fit image to page") },
-                        leadingIcon = { Icon(Icons.Filled.FitScreen, contentDescription = null) },
-                        onClick = { open = false; onFitImage() },
-                    )
-                    HorizontalDivider()
-                }
-                DropdownMenuItem(
-                    text = { Text("Add blank page after") },
-                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    onClick = { open = false; onAddAfter() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Clear ink on page") },
-                    leadingIcon = { Icon(Icons.Filled.DeleteSweep, contentDescription = null) },
-                    onClick = { open = false; onClear() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Delete page") },
-                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                    onClick = { open = false; onDelete() },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AddMenu(
-    onBlankPage: () -> Unit,
-    onBlankPageAtEnd: () -> Unit,
-    onImportPdf: () -> Unit,
-    onImportImages: () -> Unit,
-    onScan: () -> Unit,
-    onTable: () -> Unit,
-    onPhotoFromPhone: () -> Unit,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { open = true }) {
-            Icon(Icons.Filled.Add, contentDescription = "Add pages")
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text("Blank page after this one") },
-                leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) },
-                onClick = { open = false; onBlankPage() },
-            )
-            DropdownMenuItem(
-                text = { Text("Blank page at the end") },
-                leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) },
-                onClick = { open = false; onBlankPageAtEnd() },
-            )
-            DropdownMenuItem(
-                text = { Text("Import PDF") },
-                leadingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null) },
-                onClick = { open = false; onImportPdf() },
-            )
-            DropdownMenuItem(
-                text = { Text("Import images") },
-                leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) },
-                onClick = { open = false; onImportImages() },
-            )
-            DropdownMenuItem(
-                text = { Text("Scan document") },
-                leadingIcon = { Icon(Icons.Filled.DocumentScanner, contentDescription = null) },
-                onClick = { open = false; onScan() },
-            )
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Table…") },
-                leadingIcon = { Icon(Icons.Filled.TableChart, contentDescription = null) },
-                onClick = { open = false; onTable() },
-            )
-            DropdownMenuItem(
-                text = { Text("Photo from phone") },
-                leadingIcon = { Icon(Icons.Filled.AddAPhoto, contentDescription = null) },
-                onClick = { open = false; onPhotoFromPhone() },
-            )
-        }
-    }
-}
-
-/** Asks how many rows and columns a new table gets. */
-@Composable
-private fun TableDialog(onInsert: (rows: Int, columns: Int) -> Unit, onDismiss: () -> Unit) {
-    var rows by rememberSaveable { mutableIntStateOf(3) }
-    var columns by rememberSaveable { mutableIntStateOf(3) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Insert table") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Stepper("Rows", rows) { rows = it }
-                Stepper("Columns", columns) { columns = it }
-                Text(
-                    "The table is selected after inserting: drag to move it, pull the dots to resize it.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onInsert(rows, columns) }) { Text("Insert") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun Stepper(label: String, value: Int, onChange: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text(label, Modifier.weight(1f))
-        IconButton(onClick = { onChange((value - 1).coerceAtLeast(1)) }, enabled = value > 1) {
-            Icon(Icons.Filled.Remove, contentDescription = "Fewer $label")
-        }
-        Text("$value", style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(32.dp), textAlign = TextAlign.Center)
-        IconButton(onClick = { onChange((value + 1).coerceAtMost(MAX_TABLE_CELLS)) }, enabled = value < MAX_TABLE_CELLS) {
-            Icon(Icons.Filled.Add, contentDescription = "More $label")
-        }
-    }
-}
-
-private const val MAX_TABLE_CELLS = 20
-
-/** Ways to add pages, offered under the last page. */
-private class AddPageActions(
-    /** A blank page after the page on screen. */
-    val blank: () -> Unit,
-    val blankAtEnd: () -> Unit,
-    val pdf: () -> Unit,
-    val images: () -> Unit,
-    val scan: () -> Unit,
-)
-
-/** A small handle under the last page; tapping it slides up the ways to add pages. */
-@Composable
-private fun AddPagesHandle(actions: AddPageActions) {
-    var open by remember { mutableStateOf(false) }
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        AnimatedVisibility(
-            visible = open,
-            enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
-            exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
-        ) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
-                fun pick(action: () -> Unit) = { open = false; action() }
-                AssistChip(onClick = pick(actions.blank), label = { Text("Blank page") },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) })
-                AssistChip(onClick = pick(actions.blankAtEnd), label = { Text("Blank page at the end") },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null) })
-                AssistChip(onClick = pick(actions.pdf), label = { Text("PDF") },
-                    leadingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null) })
-                AssistChip(onClick = pick(actions.images), label = { Text("Images") },
-                    leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) })
-                AssistChip(onClick = pick(actions.scan), label = { Text("Scan") },
-                    leadingIcon = { Icon(Icons.Filled.DocumentScanner, contentDescription = null) })
-            }
-        }
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.size(width = 56.dp, height = 28.dp).clip(CircleShape).clickable { open = !open },
-        ) {
-            Icon(
-                if (open) Icons.Filled.KeyboardArrowDown else Icons.Filled.Add,
-                contentDescription = if (open) "Hide add page options" else "Add pages",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-    }
-}
-
 private val MAX_PAGE_WIDTH = 900.dp
 private const val DOUBLE_TAP_MS = 400L
-
-/** Pen button and multi-finger gestures, like the input settings of other note apps. */
-@Composable
-private fun PenSettingsDialog(viewModel: NoteEditorViewModel, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Pen & gestures") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "Hold a button while writing to use its tool for that stroke; click it while the pen hovers to " +
-                        "switch to that tool (click again to switch back). The pen's eraser end always erases.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                PenButtonChoice("Side button 1", viewModel.primaryButtonAction) { viewModel.primaryButtonAction = it }
-                PenButtonChoice("Side button 2", viewModel.secondaryButtonAction) { viewModel.secondaryButtonAction = it }
-                Text(
-                    "Last signal from the pen: ${viewModel.lastPenSignal ?: "none yet. Press a pen button over the page."}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    "Nothing shows up? On Xiaomi, turn off the button shortcuts in Settings → Additional settings → Xiaomi Smart Pen.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                SettingSwitch("Two-finger double-tap to undo", viewModel.twoFingerDoubleTapUndo) { viewModel.twoFingerDoubleTapUndo = it }
-                SettingSwitch("Three-finger double-tap to redo", viewModel.threeFingerDoubleTapRedo) { viewModel.threeFingerDoubleTapRedo = it }
-                SettingSwitch("Stylus only (fingers scroll, palm ignored)", viewModel.stylusOnly) { viewModel.stylusOnly = it }
-                SettingSwitch("Hold pen and finger on a picture to select it (any tool)", viewModel.penAndFingerSelect) {
-                    viewModel.penAndFingerSelect = it
-                }
-                Text(
-                    "Draw a line, circle, triangle or rectangle and hold the pen still to straighten it. " +
-                        "Draw a loop around something, then hold a finger inside it to select it.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                Text(
-                    "Hold two fingers still on a page, or tap the dial button, to open the quick dial.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-    )
-}
-
-@Composable
-private fun SettingSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onChange(!checked) }) {
-        Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-/** Top-bar menu listing the note's layers, top layer first. */
-@Composable
-private fun LayersMenu(viewModel: NoteEditorViewModel) {
-    var open by remember { mutableStateOf(false) }
-    // Layers ticked for duplicating, merging or deleting together.
-    var checked by remember { mutableStateOf(emptySet<String>()) }
-    Box {
-        IconButton(onClick = { open = true }) {
-            Icon(Icons.Filled.Layers, contentDescription = "Layers")
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false; checked = emptySet() }) {
-            Text(
-                "Layers · you draw on the selected one · tick to act on several",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            viewModel.layers.asReversed().forEach { layer ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clickable { viewModel.selectLayer(layer.id) }
-                        .padding(start = 4.dp, end = 4.dp),
-                ) {
-                    Checkbox(
-                        checked = layer.id in checked,
-                        onCheckedChange = { checked = if (it) checked + layer.id else checked - layer.id },
-                    )
-                    RadioButton(selected = layer.id == viewModel.activeLayerId, onClick = { viewModel.selectLayer(layer.id) })
-                    Text(layer.name, modifier = Modifier.width(120.dp))
-                    IconButton(onClick = { viewModel.setLayerVisible(layer.id, !layer.visible) }) {
-                        Icon(
-                            if (layer.visible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                            contentDescription = if (layer.visible) "Hide ${layer.name}" else "Show ${layer.name}",
-                        )
-                    }
-                    IconButton(onClick = { viewModel.deleteLayer(layer.id); checked = checked - layer.id }, enabled = viewModel.layers.size > 1) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete ${layer.name}")
-                    }
-                }
-            }
-            if (checked.isNotEmpty()) {
-                HorizontalDivider()
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
-                    Text("${checked.size} ticked", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
-                    TextButton(onClick = { viewModel.duplicateLayers(checked); checked = emptySet() }) { Text("Duplicate") }
-                    TextButton(onClick = { viewModel.mergeLayers(checked); checked = emptySet() }, enabled = checked.size > 1) { Text("Merge") }
-                    TextButton(onClick = { viewModel.deleteLayers(checked); checked = emptySet() }) { Text("Delete") }
-                }
-            }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Add layer") },
-                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                onClick = viewModel::addLayer,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ToolBar(
-    viewModel: NoteEditorViewModel,
-    darkPaper: Boolean,
-    onOpenDial: () -> Unit,
-    onAddColor: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // Floats over the pages in two rows: the tools, and under them the chosen tool's options.
-    // On narrow screens each row swipes sideways for the rest.
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    FloatingRow {
-            IconButton(onClick = onOpenDial) {
-                Icon(Icons.Filled.DonutLarge, contentDescription = "Quick dial")
-            }
-            ToolChip("Pen", Icons.Filled.Create, viewModel.tool == Tool.PEN) { viewModel.selectTool(Tool.PEN) }
-            ToolChip("Ink pen", Icons.Filled.HistoryEdu, viewModel.tool == Tool.INK_PEN) {
-                viewModel.selectTool(Tool.INK_PEN)
-            }
-            ToolChip("Calligraphy", Icons.Filled.FormatItalic, viewModel.tool == Tool.CALLIGRAPHY) {
-                viewModel.selectTool(Tool.CALLIGRAPHY)
-            }
-            ToolChip("Highlighter", Icons.Filled.BorderColor, viewModel.tool == Tool.HIGHLIGHTER) {
-                viewModel.selectTool(Tool.HIGHLIGHTER)
-            }
-            ToolChip("Eraser", Icons.Outlined.CleaningServices, viewModel.tool == Tool.ERASER) {
-                viewModel.selectTool(Tool.ERASER)
-            }
-            ToolChip("Select", Icons.Filled.HighlightAlt, viewModel.tool == Tool.LASSO) {
-                viewModel.selectTool(Tool.LASSO)
-            }
-            ToolChip("Text", Icons.Filled.Title, viewModel.tool == Tool.TEXT) {
-                viewModel.selectTool(Tool.TEXT)
-            }
-            ToolChip("Sticky", Icons.Filled.StickyNote2, viewModel.tool == Tool.STICKY) {
-                viewModel.selectTool(Tool.STICKY)
-            }
-    }
-    FloatingRow {
-            if (viewModel.tool == Tool.LASSO) {
-                SelectionOptions(viewModel)
-            } else if (viewModel.tool == Tool.TEXT) {
-                TextStyleBar(viewModel, darkPaper)
-            } else if (viewModel.tool == Tool.STICKY) {
-                StickyOptions(viewModel)
-            } else if (viewModel.tool != Tool.ERASER) {
-                if (viewModel.tool == Tool.CALLIGRAPHY) {
-                    // Pointed: bold going down, thin going up (like a dip pen). Flat: a broad nib, angle on the dial.
-                    FilterChip(selected = viewModel.pointedNib, onClick = { viewModel.pointedNib = true }, label = { Text("Pointed") })
-                    FilterChip(selected = !viewModel.pointedNib, onClick = { viewModel.pointedNib = false }, label = { Text("Flat") })
-                    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-                }
-                val highlighter = viewModel.tool == Tool.HIGHLIGHTER
-                val colors = if (highlighter) HighlighterColors else PenColors
-                val selectedColor = if (highlighter) viewModel.highlighterColor else viewModel.penColor
-                (colors + viewModel.customColors.filter { it !in colors }).forEach { c ->
-                    val custom = c in viewModel.customColors
-                    ColorSwatch(
-                        c,
-                        selected = c == selectedColor,
-                        darkPaper = darkPaper && !highlighter,
-                        // Long-press one of your own colors to remove it.
-                        onLongClick = if (custom) ({ viewModel.removeCustomColor(c) }) else null,
-                    ) {
-                        if (highlighter) viewModel.highlighterColor = c else viewModel.penColor = c
-                    }
-                }
-                IconButton(onClick = onAddColor) {
-                    Icon(Icons.Filled.Add, contentDescription = "Add a color")
-                }
-
-                VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-                val inkPen = viewModel.tool == Tool.INK_PEN
-                val calligraphy = viewModel.tool == Tool.CALLIGRAPHY
-                val widths = when {
-                    highlighter -> HighlighterWidths
-                    inkPen -> InkPenWidths
-                    calligraphy -> CalligraphyWidths
-                    else -> PenWidths
-                }
-                val selectedWidth = when {
-                    highlighter -> viewModel.highlighterWidth
-                    inkPen -> viewModel.inkPenWidth
-                    calligraphy -> viewModel.calligraphyWidth
-                    else -> viewModel.penWidth
-                }
-                widths.forEachIndexed { i, w ->
-                    WidthDot(
-                        dotSize = (6 + i * 6).dp,
-                        selected = w == selectedWidth,
-                        color = selectedColor,
-                    ) {
-                        when {
-                            highlighter -> viewModel.highlighterWidth = w
-                            inkPen -> viewModel.inkPenWidth = w
-                            calligraphy -> viewModel.calligraphyWidth = w
-                            else -> viewModel.penWidth = w
-                        }
-                    }
-                }
-
-                if (calligraphy) {
-                    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-                    // Flat: the nib's angle. Pointed: the slant of the thick down-strokes.
-                    Text(
-                        "${if (viewModel.pointedNib) "Slant" else "Nib angle"} ${viewModel.nibDegrees.roundToInt()}°",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Slider(
-                        value = viewModel.nibDegrees,
-                        onValueChange = { viewModel.nibDegrees = (it / 15f).roundToInt() * 15f },
-                        valueRange = 0f..90f,
-                        steps = 5,
-                        modifier = Modifier.width(150.dp),
-                    )
-                }
-                if (!highlighter) {
-                    FilterChip(
-                        selected = viewModel.scribbleToErase,
-                        onClick = { viewModel.scribbleToErase = !viewModel.scribbleToErase },
-                        label = { Text("Scribble or strike out to erase") },
-                    )
-                }
-                VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-                Text("Smoothing ${viewModel.smoothing}", style = MaterialTheme.typography.labelLarge)
-                Slider(
-                    value = viewModel.smoothing.toFloat(),
-                    onValueChange = { viewModel.smoothing = it.roundToInt() },
-                    valueRange = 0f..Smoothing.MAX_LEVEL.toFloat(),
-                    steps = Smoothing.MAX_LEVEL - 1,
-                    modifier = Modifier.width(180.dp),
-                )
-            } else {
-                FilterChip(
-                    selected = !viewModel.eraseWholeStrokes,
-                    onClick = { viewModel.eraseWholeStrokes = false },
-                    label = { Text("Erase part") },
-                )
-                FilterChip(
-                    selected = viewModel.eraseWholeStrokes,
-                    onClick = { viewModel.eraseWholeStrokes = true },
-                    label = { Text("Erase whole lines") },
-                )
-            }
-    }
-    }
-}
-
-/** One floating, rounded row of the tool bar; swipes sideways when it doesn't fit. */
-@Composable
-private fun FloatingRow(content: @Composable RowScope.() -> Unit) {
-    Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 4.dp, shadowElevation = 6.dp) {
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            content = content,
-        )
-    }
-}
-
-@Composable
-private fun SelectionOptions(viewModel: NoteEditorViewModel) {
-    Hint(
-        if (viewModel.selection.isEmpty()) {
-            "Draw a loop around writing to select it"
-        } else {
-            "Drag to move · dots stretch width, height or both"
-        },
-    )
-}
-
-@Composable
-private fun Hint(text: String) {
-    Spacer(Modifier.width(4.dp))
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-/** The sticky tool's options: the note's colour, and deleting the selected note. */
-@Composable
-private fun StickyOptions(viewModel: NoteEditorViewModel) {
-    StickyColors.forEach { color ->
-        val ring = if (color == viewModel.stickyColor) MaterialTheme.colorScheme.primary else Color.Transparent
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .border(3.dp, ring, CircleShape)
-                .clickable { viewModel.changeStickyColor(color) }
-                .padding(6.dp)
-                .clip(CircleShape)
-                .background(Color(color))
-                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape),
-        )
-    }
-    if (viewModel.selectedSticky != null) {
-        TextButton(onClick = viewModel::deleteSelectedSticky) {
-            Icon(Icons.Filled.Delete, contentDescription = null)
-            Spacer(Modifier.width(4.dp))
-            Text("Delete")
-        }
-    } else {
-        Hint("Tap a page to place a sticky note")
-    }
-}
-
-/** The text tool's options: looks, size, colour, and whether `$…$` becomes maths while typing. */
-@Composable
-private fun TextStyleBar(viewModel: NoteEditorViewModel, darkPaper: Boolean) {
-    val style = viewModel.textStyle
-    fun change(new: com.gerko.fourenote.data.ink.TextStyleSpec) = viewModel.changeTextStyle(new)
-    TextPreset.entries.forEach { preset ->
-        val chosen = style.size == preset.size && style.bold == preset.bold && style.font == preset.font
-        FilterChip(
-            selected = chosen,
-            onClick = { change(style.copy(size = preset.size, bold = preset.bold, font = preset.font)) },
-            label = { Text(preset.label) },
-        )
-    }
-    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-    com.gerko.fourenote.data.ink.TextFont.entries.forEach { font ->
-        FilterChip(
-            selected = style.font == font,
-            onClick = { change(style.copy(font = font)) },
-            label = { Text(font.name.lowercase().replaceFirstChar { it.uppercase() }) },
-        )
-    }
-    IconButton(onClick = { change(style.copy(size = (style.size - 2f).coerceAtLeast(8f))) }) {
-        Icon(Icons.Filled.Remove, contentDescription = "Smaller text")
-    }
-    Text("${style.size.roundToInt()}", style = MaterialTheme.typography.labelLarge)
-    IconButton(onClick = { change(style.copy(size = (style.size + 2f).coerceAtMost(96f))) }) {
-        Icon(Icons.Filled.Add, contentDescription = "Bigger text")
-    }
-    FilterChip(selected = style.bold, onClick = { change(style.copy(bold = !style.bold)) }, label = { Text("B", fontWeight = FontWeight.Bold) })
-    FilterChip(selected = style.italic, onClick = { change(style.copy(italic = !style.italic)) }, label = { Text("I", fontStyle = FontStyle.Italic) })
-    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-    viewModel.toolColors.forEach { c ->
-        ColorSwatch(c, selected = Color(style.color) == c, darkPaper = darkPaper) {
-            viewModel.penColor = c
-            change(style.copy(color = c.toArgb()))
-        }
-    }
-    VerticalDivider(Modifier.height(32.dp).padding(horizontal = 4.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Auto LaTeX", style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.width(8.dp))
-        Switch(checked = viewModel.autoLatex, onCheckedChange = viewModel::changeAutoLatex)
-    }
-    if (viewModel.editingText != null) {
-        TextButton(onClick = viewModel::finishTextEditing) { Text("Done") }
-    }
-}
-
-@Composable
-private fun ToolChip(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label) },
-        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
-    )
-}
-
-@Composable
-private fun ColorSwatch(
-    color: Color,
-    selected: Boolean,
-    darkPaper: Boolean = false,
-    onLongClick: (() -> Unit)? = null,
-    onClick: () -> Unit,
-) {
-    val ring = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .border(3.dp, ring, CircleShape)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(6.dp)
-            .clip(CircleShape)
-            .background(color)
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape),
-    )
-}
-
-@Composable
-private fun WidthDot(dotSize: androidx.compose.ui.unit.Dp, selected: Boolean, color: Color, onClick: () -> Unit) {
-    val ring = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .border(3.dp, ring, CircleShape)
-            .clickable(onClick = onClick),
-    ) {
-        Box(Modifier.size(dotSize).clip(CircleShape).background(color))
-    }
-}
-
-@Composable
-private fun PaperMenu(selected: PaperStyle, onSelect: (PaperStyle) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { open = true }) {
-            Icon(Icons.Filled.GridOn, contentDescription = "Paper style")
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            listOf(
-                Triple(PaperStyle.LINED, "Lined", Icons.AutoMirrored.Filled.Notes),
-                Triple(PaperStyle.GRID, "Grid", Icons.Filled.GridOn),
-                Triple(PaperStyle.DOTS, "Dots", Icons.Filled.Apps),
-                Triple(PaperStyle.BLANK, "Blank", Icons.AutoMirrored.Filled.InsertDriveFile),
-            ).forEach { (style, label, icon) ->
-                DropdownMenuItem(
-                    text = { Text(if (style == selected) "$label  ✓" else label) },
-                    leadingIcon = { Icon(icon, contentDescription = null) },
-                    onClick = {
-                        onSelect(style)
-                        open = false
-                    },
-                )
-            }
-        }
-    }
-}
-
-/** One pen button's action, as a dropdown. */
-@Composable
-private fun PenButtonChoice(label: String, action: PenButtonAction, onChange: (PenButtonAction) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text(label, Modifier.weight(1f))
-        Box {
-            TextButton(onClick = { open = true }) { Text(action.label) }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                PenButtonAction.entries.forEach { choice ->
-                    DropdownMenuItem(text = { Text(choice.label) }, onClick = { onChange(choice); open = false })
-                }
-            }
-        }
-    }
-}
-
-/** The floating tool bar's height plus its margins: the pages start below it. */
-private val TOOLBAR_SPACE = 136.dp
 
 // Two fingers held this long, and this still, beside the pages open the dial (as on a page).
 private const val DIAL_HOLD_MS = 450L
