@@ -70,6 +70,15 @@ class FormatCompatibilityTest {
         assertSameJson(Json.parseToJsonElement(fixture), encoded)
     }
 
+    @Test
+    fun penPointsAreWrittenShort() {
+        val stroke = InkStroke(color = 0, width = 2.5f, highlighter = false, points = floatArrayOf(412.34f, 87.66f, 0.1f, 3f), id = "s")
+        val text = InkSerializer.encode(InkDocument(listOf(InkPage(id = "p", strokes = listOf(stroke)))))
+        assertTrue(text, text.contains("\"p\":[412.3,87.7,0.1,3]"))
+        // And they read back as the very same floats.
+        assertEquals(listOf(412.3f, 87.7f, 0.1f, 3f), InkSerializer.decode(text).pages[0].strokes[0].points.toList())
+    }
+
     /** Key order doesn't matter; numbers are compared as doubles. */
     private fun assertSameJson(expected: JsonElement, actual: JsonElement, path: String = "") {
         when (expected) {

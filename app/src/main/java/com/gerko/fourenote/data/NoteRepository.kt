@@ -276,10 +276,9 @@ class NoteRepository(
         return dao.getAllForSync()
     }
 
-    override suspend fun withContent(note: Note): Note = note.copy(
-        inkData = InkSerializer.encode(loadDocument(note.id)),
-        syncedSnapshot = ink.readSnapshot(note.id).orEmpty(),
-    )
+    override suspend fun withContent(note: Note): Note = note.copy(inkData = InkSerializer.encode(loadDocument(note.id)))
+
+    override suspend fun syncedSnapshot(note: Note): String = ink.readSnapshot(note.id).orEmpty()
 
     override fun isOpen(noteId: String): Boolean = noteId in openNotes
 
@@ -300,9 +299,9 @@ class NoteRepository(
         attachments.saveDownloaded(noteId, name, content)
     }
 
-    override suspend fun insertFromCloud(note: Note) {
+    override suspend fun insertFromCloud(note: Note, snapshot: ByteArray) {
         ink.save(note.id, InkSerializer.decode(note.inkData))
-        if (note.syncedSnapshot.isNotEmpty()) ink.writeSnapshot(note.id, note.syncedSnapshot)
+        ink.writeCompressedSnapshot(note.id, snapshot)
         dao.upsert(note.copy(inkData = "", syncedSnapshot = ""))
     }
 
@@ -329,10 +328,10 @@ class NoteRepository(
         noteId: String,
         file: RemoteFile,
         pdfId: String?,
-        snapshot: String,
+        snapshot: ByteArray,
         expectedUpdatedAt: Long,
     ) {
-        ink.writeSnapshot(noteId, snapshot)
+        ink.writeCompressedSnapshot(noteId, snapshot)
         dao.markSynced(
             id = noteId,
             remoteId = file.id,

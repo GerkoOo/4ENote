@@ -100,8 +100,18 @@ class InkStore(val root: File) {
     suspend fun writeSnapshot(noteId: String, text: String) = locked(noteId) {
         dir(noteId).mkdirs()
         writeAtomically(snapshotFile(noteId)) { out ->
-            GZIPOutputStream(out).let { it.write(text.encodeToByteArray()); it.finish() }
+            // Written in pieces: a long note's text is never copied whole into bytes.
+            // Not closed: writeAtomically still syncs the file afterwards.
+            val gzip = GZIPOutputStream(out, 64 * 1024)
+            java.io.OutputStreamWriter(gzip, Charsets.UTF_8).let { it.write(text); it.flush() }
+            gzip.finish()
         }
+    }
+
+    /** Stores the snapshot as gzip-compressed text already (the cloud's note file); it is kept as it is. */
+    suspend fun writeCompressedSnapshot(noteId: String, compressed: ByteArray) = locked(noteId) {
+        dir(noteId).mkdirs()
+        writeAtomically(snapshotFile(noteId)) { it.write(compressed) }
     }
 
     suspend fun copy(fromNoteId: String, toNoteId: String) = locked(fromNoteId) {

@@ -15,8 +15,14 @@ interface SyncStore {
     /** Every note, including deletion tombstones, without its ink (see [withContent]). */
     suspend fun notesForSync(): List<Note>
 
-    /** [note] with its ink and last-synced snapshot filled in, for uploading or merging. */
+    /** [note] with its ink filled in, for uploading or merging. */
     suspend fun withContent(note: Note): Note = note
+
+    /**
+     * The note as of the last sync, the base for merging; empty if there is none. Read only when
+     * a merge needs it: for a long note it is as big as the note.
+     */
+    suspend fun syncedSnapshot(note: Note): String = note.syncedSnapshot
 
     /** The note's pictures and PDF pages on this device: file name to file. They never change once written. */
     fun attachments(noteId: String): Map<String, File> = emptyMap()
@@ -39,7 +45,8 @@ interface SyncStore {
     /** True while the note is open in the editor; sync leaves it alone until it closes. */
     fun isOpen(noteId: String): Boolean
 
-    suspend fun insertFromCloud(note: Note)
+    /** [snapshot] is the note file as it came, gzip-compressed (see [NoteFile.toCloud]): the base for merging. */
+    suspend fun insertFromCloud(note: Note, snapshot: ByteArray)
 
     /** Replaces content unless the user edited the note after [expectedUpdatedAt]. */
     suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean
@@ -48,7 +55,8 @@ interface SyncStore {
         noteId: String,
         file: RemoteFile,
         pdfId: String?,
-        snapshot: String,
+        /** The note file as uploaded or downloaded, gzip-compressed: the base for the next merge. */
+        snapshot: ByteArray,
         expectedUpdatedAt: Long,
     )
 
@@ -177,24 +185,33 @@ class SyncEngine(
         keys.uploaded(upload)
     }
 
+    /** A note from the cloud, and its file compressed, kept as the base for the next merge. */
+    private class CloudNote(val note: Note, val snapshot: ByteArray)
+
     /**
-     * The plain note file of [cloud], or null when it is encrypted with a key this device lacks
-     * (the note is then left alone and counted in [needKey]).
+     * The note in [cloud], or null when it is encrypted with a key this device lacks (the note is
+     * then left alone and counted in [needKey]). The note's text lives only in here: a long note's
+     * text is as big as its ink, and keeping both after decoding could run out of memory.
      */
-    private suspend fun readNote(cloud: RemoteFile, noteId: String): String? {
-        val text = provider.download(cloud.id).decodeToString()
-        if (!LockedNoteFile.isLocked(text)) return text
-        val key = keys?.key()?.takeIf { it.id == LockedNoteFile.keyId(text) }
-        if (key == null) {
-            needKey += noteId
-            unsettled += noteId
-            return null
+    private suspend fun readNote(cloud: RemoteFile, noteId: String): CloudNote? {
+        var compressed = provider.download(cloud.id)
+        var text = NoteFile.fromCloud(compressed)
+        if (LockedNoteFile.isLocked(text)) {
+            val key = keys?.key()?.takeIf { it.id == LockedNoteFile.keyId(text) }
+            if (key == null) {
+                needKey += noteId
+                unsettled += noteId
+                return null
+            }
+            compressed = LockedNoteFile.decrypt(text, key)
+            text = NoteFile.fromCloud(compressed)
+            keys.encryptedVersion(noteId, cloud.version)
         }
-        val plain = LockedNoteFile.decode(text, key)
-        // The id inside is the one the file was encrypted for; a file copied over another note's name is refused.
-        require(NoteFile.decode(plain).id == noteId) { "Note file under the wrong name" }
-        keys.encryptedVersion(noteId, cloud.version)
-        return plain
+        val note = NoteFile.decode(text)
+        // The id inside is the one the file was written (or encrypted) for; a file copied over another note's name is refused.
+        require(note.id == noteId) { "Note file under the wrong name" }
+        // Files from older versions aren't compressed yet.
+        return CloudNote(note, if (NoteFile.isGzip(compressed)) compressed else NoteFile.toCloud(text))
     }
 
     /**
@@ -325,7 +342,7 @@ class SyncEngine(
 
     // The photo frames in the cloud copy of a note that have been filled.
     private suspend fun filledFrames(cloud: RemoteFile, noteId: String): List<PageImage> {
-        val note = NoteFile.decode(readNote(cloud, noteId) ?: return emptyList())
+        val note = readNote(cloud, noteId)?.note ?: return emptyList()
         return InkSerializer.decode(note.inkData).pages.flatMap { page -> page.images.filter { it.requested && it.file.isNotEmpty() } }
     }
 
@@ -355,19 +372,19 @@ class SyncEngine(
             }
 
             !note.dirty -> {
-                val text = readNote(cloud, note.id) ?: return
+                val read = readNote(cloud, note.id) ?: return
                 // The trash is local: keep it, so a sync never brings a trashed note back.
-                val fromCloud = NoteFile.decode(text).copy(trashedAt = note.trashedAt)
+                val fromCloud = read.note.copy(trashedAt = note.trashedAt)
                 if (store.replaceIfUnchanged(fromCloud, note.updatedAt, dirty = false)) {
-                    store.markSynced(note.id, cloud, fromCloud.remotePdfId, text, fromCloud.updatedAt)
+                    store.markSynced(note.id, cloud, fromCloud.remotePdfId, read.snapshot, fromCloud.updatedAt)
                     downloaded++
                 }
             }
 
             else -> {
-                val fromCloud = NoteFile.decode(readNote(cloud, note.id) ?: return)
+                val fromCloud = readNote(cloud, note.id)?.note ?: return
                 val note = store.withContent(note)
-                val base = note.syncedSnapshot.takeIf { it.isNotEmpty() }?.let(NoteFile::decode)
+                val base = store.syncedSnapshot(note).takeIf { it.isNotEmpty() }?.let(NoteFile::decode)
                 val result = NoteMerger.merge(base, note, fromCloud)
                     .copy(remotePdfId = note.remotePdfId ?: fromCloud.remotePdfId, trashedAt = note.trashedAt)
                 if (store.replaceIfUnchanged(result, note.updatedAt, dirty = true)) {
@@ -409,30 +426,34 @@ class SyncEngine(
                 }
             } ?: note.remotePdfId
         }
-        val text = NoteFile.encode(note, pdfId)
         val key = (sealing as? Sealing.With)?.key
-        val content = if (key != null) LockedNoteFile.encode(note.id, text, key) else text
-        val file = provider.upload(NoteFile.fileName(note.id), NoteFile.MIME_TYPE, UploadContent.of(content.encodeToByteArray()), remoteId)
+        // Written straight into the compressed file: the whole text never exists at once.
+        val compressed = NoteFile.toCloud(note, pdfId)
+        val file = if (key != null) {
+            val sealed = LockedNoteFile.encode(note.id, compressed, key)
+            provider.upload(NoteFile.fileName(note.id), NoteFile.MIME_TYPE, UploadContent.of(sealed.encodeToByteArray()), remoteId)
+        } else {
+            provider.upload(NoteFile.fileName(note.id), NoteFile.CLOUD_MIME_TYPE, UploadContent.of(compressed), remoteId)
+        }
         if (key != null) keys?.encryptedVersion(note.id, file.version)
-        // The snapshot kept here (the base for merging) is the plain note file.
-        store.markSynced(note.id, file, pdfId, text, expectedUpdatedAt = note.updatedAt)
+        // The snapshot kept here (the base for merging) is the plain note file, compressed.
+        store.markSynced(note.id, file, pdfId, compressed, expectedUpdatedAt = note.updatedAt)
         return true
     }
 
     private suspend fun downloadNew(file: RemoteFile) {
         val noteId = NoteFile.noteIdOf(file.name) ?: return
-        val text = readNote(file, noteId) ?: return
-        val note = NoteFile.decode(text)
+        val read = readNote(file, noteId) ?: return
         store.insertFromCloud(
-            note.copy(
+            read.note.copy(
                 remoteId = file.id,
                 remoteVersion = file.version,
-                syncedSnapshot = text,
                 lastSyncedAt = clock(),
                 dirty = false,
                 // A note that was trashed here and deleted in the cloud comes back untrashed.
                 trashedAt = null,
             ),
+            read.snapshot,
         )
         downloaded++
     }

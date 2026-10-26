@@ -64,8 +64,8 @@ class SyncEngineTest {
 
         override suspend fun notesForSync() = notes.values.toList()
         override fun isOpen(noteId: String) = noteId in open
-        override suspend fun insertFromCloud(note: Note) {
-            notes[note.id] = note
+        override suspend fun insertFromCloud(note: Note, snapshot: ByteArray) {
+            notes[note.id] = note.copy(syncedSnapshot = NoteFile.fromCloud(snapshot))
         }
 
         override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean {
@@ -78,11 +78,11 @@ class SyncEngineTest {
             return true
         }
 
-        override suspend fun markSynced(noteId: String, file: RemoteFile, pdfId: String?, snapshot: String, expectedUpdatedAt: Long) {
+        override suspend fun markSynced(noteId: String, file: RemoteFile, pdfId: String?, snapshot: ByteArray, expectedUpdatedAt: Long) {
             val current = notes[noteId] ?: return
             notes[noteId] = current.copy(
                 remoteId = file.id, remotePdfId = pdfId, remoteVersion = file.version,
-                syncedSnapshot = snapshot, lastSyncedAt = clock(),
+                syncedSnapshot = NoteFile.fromCloud(snapshot), lastSyncedAt = clock(),
                 dirty = current.updatedAt != expectedUpdatedAt,
             )
         }
@@ -478,7 +478,7 @@ class SyncEngineTest {
 
     private val password = "Blue-Kettle-42!".toCharArray()
 
-    private fun cloudText(name: String) = java.io.File(cloudDir, name).readText()
+    private fun cloudText(name: String) = NoteFile.fromCloud(java.io.File(cloudDir, name).readBytes())
 
     @Test
     fun lockedNoteIsEncryptedInTheCloudAndOpensOnADeviceWithThePassword() {

@@ -29,4 +29,19 @@ class NoteFileTest {
         val text = """{"format":"4enote","v":1,"id":"n1","title":"Old","createdAt":1,"updatedAt":2,"ink":""}"""
         assertFalse(NoteFile.decode(text).locked)
     }
+
+    @Test
+    fun cloudCopyIsCompressedAndOldUncompressedFilesStillRead() {
+        val note = Note(id = "n1", title = "Maths \"1\"", inkData = "{\"pages\":[]}".repeat(500), createdAt = 1, updatedAt = 2)
+        val text = NoteFile.encode(note, pdfId = null)
+        val cloud = NoteFile.toCloud(text)
+        org.junit.Assert.assertTrue(NoteFile.isGzip(cloud))
+        org.junit.Assert.assertTrue(cloud.size * 10 < text.length)
+        org.junit.Assert.assertEquals(text, NoteFile.fromCloud(cloud))
+        // Written by an older version: plain text.
+        org.junit.Assert.assertEquals(text, NoteFile.fromCloud(text.encodeToByteArray()))
+        val back = NoteFile.decode(NoteFile.fromCloud(cloud))
+        org.junit.Assert.assertEquals(note.title, back.title)
+        org.junit.Assert.assertEquals(note.inkData, back.inkData)
+    }
 }

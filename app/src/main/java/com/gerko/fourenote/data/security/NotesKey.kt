@@ -142,22 +142,25 @@ object LockedNoteFile {
 
     fun isLocked(text: String) = text.contains("\"$FORMAT\"") && runCatching { JSONObject(text).optString("format") == FORMAT }.getOrDefault(false)
 
-    fun encode(noteId: String, plain: String, key: NotesKey): String =
+    /** [compressed] is the note file as [com.gerko.fourenote.data.sync.NoteFile.toCloud] gives it. */
+    fun encode(noteId: String, compressed: ByteArray, key: NotesKey): String =
         JSONObject()
             .put("format", FORMAT)
             .put("v", VERSION)
             .put("id", noteId)
             .put("key", key.id)
-            .put("data", Base64.getEncoder().encodeToString(key.encrypt(plain.encodeToByteArray(), noteId)))
+            .put("data", Base64.getEncoder().encodeToString(key.encrypt(compressed, noteId)))
             .toString()
 
     /** Which notes key encrypted [text]. */
     fun keyId(text: String): String = JSONObject(text).optString("key")
 
     /** The plain note file; throws when the key is wrong or the file was changed. */
-    fun decode(text: String, key: NotesKey): String {
+    fun decode(text: String, key: NotesKey): String = com.gerko.fourenote.data.sync.NoteFile.fromCloud(decrypt(text, key))
+
+    /** The note file still compressed, as [encode] was given it. */
+    fun decrypt(text: String, key: NotesKey): ByteArray {
         val json = JSONObject(text)
-        val id = json.getString("id")
-        return key.decrypt(Base64.getDecoder().decode(json.getString("data")), id).decodeToString()
+        return key.decrypt(Base64.getDecoder().decode(json.getString("data")), json.getString("id"))
     }
 }

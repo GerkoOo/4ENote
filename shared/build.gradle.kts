@@ -15,7 +15,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             // Only the JsonElement/JsonObject/buildJsonObject API is used, no compiler plugin (Apache 2.0).
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+            // api: JsonReader hands out its JsonElement types to the app.
+            api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
         }
         jvmTest.dependencies {
             implementation("junit:junit:4.13.2")

@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.ink
 
+import com.gerko.fourenote.data.JsonReader
 import com.gerko.fourenote.data.SafeName
 import com.gerko.fourenote.data.newId
 import kotlinx.serialization.json.Json
@@ -306,141 +307,269 @@ data class InkDocument(
 object InkSerializer {
     private const val VERSION = 3
 
-    fun encode(doc: InkDocument): String {
-        val pages = buildJsonArray {
-            for (page in doc.pages) {
-                add(
-                    buildJsonObject {
-                        put("id", page.id)
-                        put("w", number(page.width))
-                        put("h", number(page.height))
-                        put("strokes", encodeStrokes(page.strokes))
-                        if (page.images.isNotEmpty()) {
-                            put("images", buildJsonArray {
-                                for (img in page.images) {
-                                    add(
-                                        buildJsonObject {
-                                            put("id", img.id)
-                                            put("file", img.file)
-                                            put("x", number(img.x))
-                                            put("y", number(img.y))
-                                            put("w", number(img.width))
-                                            put("h", number(img.height))
-                                            put("r", number(img.rotation))
-                                            put("o", number(img.opacity))
-                                            if (img.inverted) put("invert", true)
-                                            if (img.negative) put("neg", true)
-                                            if (img.cropped) {
-                                                put("crop", buildJsonArray {
-                                                    add(number(img.cropLeft))
-                                                    add(number(img.cropTop))
-                                                    add(number(img.cropRight))
-                                                    add(number(img.cropBottom))
-                                                })
-                                            }
-                                            if (img.requested) put("req", true)
-                                            if (img.label.isNotEmpty()) put("lbl", img.label)
-                                            if (img.locked) put("lock", true)
-                                        },
-                                    )
-                                }
-                            })
-                        }
-                        if (page.texts.isNotEmpty()) {
-                            put("texts", buildJsonArray {
-                                for (t in page.texts) {
-                                    val st = t.style
-                                    add(
-                                        buildJsonObject {
-                                            put("id", t.id)
-                                            put("x", number(t.x))
-                                            put("y", number(t.y))
-                                            put("w", number(t.width))
-                                            put("t", t.text)
-                                            put("m", t.autoMath)
-                                            put("s", number(st.size))
-                                            put("c", st.color)
-                                            put("f", st.font.name)
-                                            if (st.bold) put("b", true)
-                                            if (st.italic) put("i", true)
-                                        },
-                                    )
-                                }
-                            })
-                        }
-                        val bg = page.background
-                        if (bg != null) {
-                            put("bg", buildJsonObject {
-                                when (bg) {
-                                    is PageBackground.Image -> {
-                                        put("type", "image")
-                                        put("file", bg.file)
-                                    }
-                                    is PageBackground.PdfPage -> {
-                                        put("type", "pdf")
-                                        put("file", bg.file)
-                                        put("page", bg.pageIndex)
-                                    }
-                                }
-                                if (page.invertBackground) put("invert", true)
-                                val p = page.placement
-                                if (p != BackgroundPlacement()) {
-                                    put("x", number(p.x))
-                                    put("y", number(p.y))
-                                    put("scale", number(p.scale))
-                                }
-                            })
-                        }
-                    },
-                )
+    fun encode(doc: InkDocument): String = StringBuilder().also { encodeTo(doc, it) }.toString()
+
+    /**
+     * Writes the note as text straight into [out], without building it up as a tree first
+     * (an object per number would take several hundred MB for a long note).
+     */
+    fun encodeTo(doc: InkDocument, out: Appendable) {
+        val w = Writer(out)
+        w.obj {
+            w.key("v").raw(VERSION.toString())
+            w.key("paper").str(doc.paper.name)
+            w.key("layers").arr(doc.layers) { layer ->
+                w.obj {
+                    w.key("id").str(layer.id)
+                    w.key("name").str(layer.name)
+                    w.key("visible").bool(layer.visible)
+                }
+            }
+            w.key("pages").arr(doc.pages) { page -> writePage(w, page) }
+        }
+    }
+
+    private fun writePage(w: Writer, page: InkPage) = w.obj {
+        w.key("id").str(page.id)
+        w.key("w").num(page.width)
+        w.key("h").num(page.height)
+        w.key("strokes").arr(page.strokes) { stroke ->
+            w.obj {
+                w.key("id").str(stroke.id)
+                w.key("c").raw(stroke.color.toString())
+                w.key("w").num(stroke.width)
+                w.key("h").bool(stroke.highlighter)
+                // One decimal place of a page unit is far below what the eye can see.
+                w.key("p").nums(stroke.points) { (it * 10).roundToInt() / 10f }
+                w.key("l").str(stroke.layerId)
+                stroke.nibAngle?.let { w.key("nib").num(it) }
+                if (stroke.squareEnds) w.key("sq").bool(true)
+                stroke.widths?.let { widths -> w.key("pw").nums(widths) { (it * 100).roundToInt() / 100f } }
             }
         }
-        val layers = buildJsonArray {
-            for (layer in doc.layers) {
-                add(
-                    buildJsonObject {
-                        put("id", layer.id)
-                        put("name", layer.name)
-                        put("visible", layer.visible)
-                    },
-                )
+        if (page.images.isNotEmpty()) {
+            w.key("images").arr(page.images) { img ->
+                w.obj {
+                    w.key("id").str(img.id)
+                    w.key("file").str(img.file)
+                    w.key("x").num(img.x)
+                    w.key("y").num(img.y)
+                    w.key("w").num(img.width)
+                    w.key("h").num(img.height)
+                    w.key("r").num(img.rotation)
+                    w.key("o").num(img.opacity)
+                    if (img.inverted) w.key("invert").bool(true)
+                    if (img.negative) w.key("neg").bool(true)
+                    if (img.cropped) {
+                        w.key("crop").nums(floatArrayOf(img.cropLeft, img.cropTop, img.cropRight, img.cropBottom)) { it }
+                    }
+                    if (img.requested) w.key("req").bool(true)
+                    if (img.label.isNotEmpty()) w.key("lbl").str(img.label)
+                    if (img.locked) w.key("lock").bool(true)
+                }
             }
         }
-        return buildJsonObject {
-            put("v", VERSION)
-            put("paper", doc.paper.name)
-            put("layers", layers)
-            put("pages", pages)
-        }.toString()
+        if (page.texts.isNotEmpty()) {
+            w.key("texts").arr(page.texts) { t ->
+                val st = t.style
+                w.obj {
+                    w.key("id").str(t.id)
+                    w.key("x").num(t.x)
+                    w.key("y").num(t.y)
+                    w.key("w").num(t.width)
+                    w.key("t").str(t.text)
+                    w.key("m").bool(t.autoMath)
+                    w.key("s").num(st.size)
+                    w.key("c").raw(st.color.toString())
+                    w.key("f").str(st.font.name)
+                    if (st.bold) w.key("b").bool(true)
+                    if (st.italic) w.key("i").bool(true)
+                }
+            }
+        }
+        val bg = page.background
+        if (bg != null) {
+            w.key("bg").obj {
+                when (bg) {
+                    is PageBackground.Image -> {
+                        w.key("type").str("image")
+                        w.key("file").str(bg.file)
+                    }
+                    is PageBackground.PdfPage -> {
+                        w.key("type").str("pdf")
+                        w.key("file").str(bg.file)
+                        w.key("page").raw(bg.pageIndex.toString())
+                    }
+                }
+                if (page.invertBackground) w.key("invert").bool(true)
+                val p = page.placement
+                if (p != BackgroundPlacement()) {
+                    w.key("x").num(p.x)
+                    w.key("y").num(p.y)
+                    w.key("scale").num(p.scale)
+                }
+            }
+        }
+    }
+
+    /** Writes JSON by hand, keeping track of the commas. */
+    private class Writer(private val out: Appendable) {
+        private var first = true
+
+        fun key(name: String): Writer {
+            if (!first) out.append(',')
+            first = false
+            JsonReader.quote(name, out)
+            out.append(':')
+            return this
+        }
+
+        fun obj(body: () -> Unit) {
+            out.append('{')
+            first = true
+            body()
+            out.append('}')
+            first = false
+        }
+
+        fun <T> arr(items: List<T>, item: (T) -> Unit) {
+            out.append('[')
+            items.forEachIndexed { i, it ->
+                if (i > 0) out.append(',')
+                first = true
+                item(it)
+            }
+            out.append(']')
+            first = false
+        }
+
+        fun nums(values: FloatArray, round: (Float) -> Float) {
+            out.append('[')
+            for (i in values.indices) {
+                if (i > 0) out.append(',')
+                out.append(numberText(round(values[i])))
+            }
+            out.append(']')
+            first = false
+        }
+
+        fun str(value: String) {
+            JsonReader.quote(value, out)
+            first = false
+        }
+
+        fun num(value: Float) = raw(numberText(value))
+
+        fun bool(value: Boolean) = raw(value.toString())
+
+        fun raw(text: String) {
+            out.append(text)
+            first = false
+        }
     }
 
     fun decode(data: String): InkDocument {
         if (data.isBlank()) return InkDocument()
         return try {
-            val json = Json.parseToJsonElement(data).jsonObject
-            val paper = runCatching { PaperStyle.valueOf(json.string("paper")) }
-                .getOrDefault(PaperStyle.LINED)
-            val pagesJson = json.array("pages")
-            val pages = if (pagesJson != null) {
-                pagesJson.map { decodePage(it.jsonObject) }
-            } else {
-                // Versions 1-2: one unbounded canvas. It becomes a single page big enough for its ink.
-                val strokes = decodeStrokes(json.array("strokes") ?: JsonArray(emptyList()))
-                listOf(InkPage(id = "page-1", strokes = strokes).grownToFit())
-            }
-            val layersJson = json.array("layers")
-            val layers = if (layersJson == null) {
-                listOf(InkLayer.BASE)
-            } else {
-                layersJson.map { element ->
-                    val l = element.jsonObject
-                    InkLayer(l.string("id"), l.string("name"), l.boolean("visible", true))
+            val reader = JsonReader(data)
+            var paper = PaperStyle.LINED
+            var pages: List<InkPage>? = null
+            var legacyStrokes: List<InkStroke> = emptyList()
+            var layers: List<InkLayer>? = null
+            reader.obj { key ->
+                when (key) {
+                    "paper" -> paper = (reader.element() as? JsonPrimitive)?.contentOrNull
+                        ?.let { runCatching { PaperStyle.valueOf(it) }.getOrNull() } ?: PaperStyle.LINED
+                    "pages" -> if (reader.peek() == '[') {
+                        val list = ArrayList<InkPage>()
+                        reader.arr { list += readPage(reader) }
+                        pages = list
+                    } else {
+                        reader.skip()
+                    }
+                    // Versions 1-2: one unbounded canvas.
+                    "strokes" -> legacyStrokes = readStrokes(reader)
+                    "layers" -> layers = (reader.element() as? JsonArray)?.map { element ->
+                        val l = element.jsonObject
+                        InkLayer(l.string("id"), l.string("name"), l.boolean("visible", true))
+                    }
+                    else -> reader.skip()
                 }
             }
-            InkDocument(pages.ifEmpty { listOf(InkPage()) }, paper, layers.ifEmpty { listOf(InkLayer.BASE) })
+            // An old note becomes a single page big enough for its ink.
+            val allPages = pages ?: listOf(InkPage(id = "page-1", strokes = legacyStrokes).grownToFit())
+            InkDocument(allPages.ifEmpty { listOf(InkPage()) }, paper, layers.orEmpty().ifEmpty { listOf(InkLayer.BASE) })
         } catch (e: Exception) {
             InkDocument()
         }
+    }
+
+    // A page: its strokes read straight into arrays, the rest (small) as a JsonObject.
+    private fun readPage(reader: JsonReader): InkPage {
+        if (reader.peek() != '{') {
+            reader.skip()
+            return InkPage()
+        }
+        val rest = LinkedHashMap<String, JsonElement>()
+        var strokes: List<InkStroke> = emptyList()
+        reader.obj { key ->
+            if (key == "strokes") strokes = readStrokes(reader) else rest[key] = reader.element()
+        }
+        return decodePage(JsonObject(rest)).copy(strokes = strokes)
+    }
+
+    private fun readStrokes(reader: JsonReader): List<InkStroke> {
+        if (reader.peek() != '[') {
+            reader.skip()
+            return emptyList()
+        }
+        val strokes = ArrayList<InkStroke>()
+        reader.arr {
+            if (reader.peek() != '{') {
+                reader.skip()
+                return@arr
+            }
+            var id = ""
+            var color = 0
+            var width = 0f
+            var highlighter = false
+            var points: FloatArray? = null
+            var widths: FloatArray? = null
+            var layer = ""
+            var nib: Float? = null
+            var square = false
+            reader.obj { key ->
+                when (key) {
+                    "p" -> points = reader.floats()
+                    "pw" -> widths = reader.floats()
+                    else -> {
+                        val v = reader.element() as? JsonPrimitive
+                        when (key) {
+                            "id" -> id = v?.contentOrNull.orEmpty()
+                            "c" -> color = v?.intOrNull ?: 0
+                            "w" -> width = v?.doubleOrNull?.toFloat() ?: 0f
+                            "h" -> highlighter = v?.booleanOrNull ?: false
+                            "l" -> layer = v?.contentOrNull.orEmpty()
+                            "nib" -> nib = v?.doubleOrNull?.toFloat() ?: 0f
+                            "sq" -> square = v?.booleanOrNull ?: false
+                        }
+                    }
+                }
+            }
+            strokes += InkStroke(
+                color = color,
+                width = width,
+                highlighter = highlighter,
+                points = points ?: FloatArray(0),
+                widths = widths,
+                layerId = layer.ifEmpty { InkLayer.BASE_ID },
+                nibAngle = nib,
+                squareEnds = square,
+                // Version 1 notes predate stroke ids.
+                id = id.ifEmpty { newStrokeId() },
+            )
+        }
+        return strokes
     }
 
     private fun decodePage(json: JsonObject): InkPage {
@@ -514,59 +643,21 @@ object InkSerializer {
             width = json.double("w", InkPage.PAGE_WIDTH.toDouble()).toFloat(),
             height = json.double("h", InkPage.PAGE_HEIGHT.toDouble()).toFloat(),
             background = bg,
-            strokes = decodeStrokes(json.array("strokes") ?: JsonArray(emptyList())),
-        )
-    }
-
-    private fun encodeStrokes(strokes: List<InkStroke>): JsonArray = buildJsonArray {
-        for (stroke in strokes) {
-            add(
-                buildJsonObject {
-                    put("id", stroke.id)
-                    put("c", stroke.color)
-                    put("w", number(stroke.width))
-                    put("h", stroke.highlighter)
-                    put("p", buildJsonArray {
-                        // One decimal place of a page unit is far below what the eye can see.
-                        for (v in stroke.points) add(number((v * 10).roundToInt() / 10f))
-                    })
-                    put("l", stroke.layerId)
-                    stroke.nibAngle?.let { put("nib", number(it)) }
-                    if (stroke.squareEnds) put("sq", true)
-                    stroke.widths?.let { w ->
-                        put("pw", buildJsonArray {
-                            w.forEach { add(number((it * 100).roundToInt() / 100f)) }
-                        })
-                    }
-                },
-            )
-        }
-    }
-
-    private fun decodeStrokes(array: JsonArray): List<InkStroke> = array.map { element ->
-        val s = element.jsonObject
-        val p = s.array("p") ?: JsonArray(emptyList())
-        InkStroke(
-            color = s.int("c"),
-            width = s.double("w").toFloat(),
-            highlighter = s.boolean("h"),
-            points = FloatArray(p.size) { j -> (p[j] as? JsonPrimitive)?.doubleOrNull?.toFloat() ?: 0f },
-            widths = s.array("pw")?.let { w -> FloatArray(w.size) { j -> (w[j] as? JsonPrimitive)?.doubleOrNull?.toFloat() ?: 0f } },
-            layerId = s.string("l").ifEmpty { InkLayer.BASE_ID },
-            nibAngle = if (s.containsKey("nib")) s.double("nib").toFloat() else null,
-            squareEnds = s.boolean("sq"),
-            // Version 1 notes predate stroke ids.
-            id = s.string("id").ifEmpty { newStrokeId() },
         )
     }
 
     /**
-     * A number as org.json wrote it: whole numbers as integers (3, not 3.0), the rest as they are.
-     * Old app versions and the fixture compare the text, so this must not change.
+     * A number as short as it can be written and still read back as exactly the same float:
+     * whole numbers as integers (3, not 3.0), others like 412.3. Going through Double directly
+     * would write 412.29998779296875, almost three times the text for every pen point.
      */
-    private fun number(value: Float): JsonPrimitive {
-        val rounded = value.toDouble()
-        return if (rounded == rounded.toLong().toDouble()) JsonPrimitive(rounded.toLong()) else JsonPrimitive(rounded)
+    private fun numberText(value: Float): String {
+        if (value.isNaN() || value.isInfinite()) return "0"
+        val whole = value.toDouble()
+        if (whole == whole.toLong().toDouble()) return whole.toLong().toString()
+        // Float's own text is the shortest that reads back as this float; a Double prints the same
+        // way (412.3), and Kotlin on iOS writes 1.0E-5 style exponents the same as the JVM.
+        return value.toString().toDouble().toString()
     }
 
     private fun JsonObject.string(key: String): String =

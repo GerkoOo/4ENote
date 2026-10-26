@@ -54,7 +54,7 @@ class NotesKeyringTest {
     @Test
     fun lockedNoteFileHidesTheContent() {
         val key = NotesKey.generate()
-        val text = LockedNoteFile.encode("n1", """{"title":"Diary"}""", key)
+        val text = LockedNoteFile.encode("n1", com.gerko.fourenote.data.sync.NoteFile.toCloud("""{"title":"Diary"}"""), key)
         assertTrue(LockedNoteFile.isLocked(text))
         assertFalse(text.contains("Diary"))
         assertEquals("""{"title":"Diary"}""", LockedNoteFile.decode(text, key))
