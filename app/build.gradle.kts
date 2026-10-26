@@ -104,6 +104,9 @@ dependencies {
     // Draws LaTeX as a typeset formula, offline (JLaTeXMath, GPL-2.0-or-later).
     implementation("ru.noties:jlatexmath-android:0.2.0")
 
+    // The note model shared with the future iOS app.
+    implementation(project(":shared"))
+
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")

@@ -258,7 +258,7 @@ object PdfExporter {
             stroke.widths != null -> {
                 cs.setNonStrokingColor(r, g, b)
                 polygon(cs, stroke.outline())
-                val factors = stroke.widths
+                val factors = checkNotNull(stroke.widths)
                 for (i in listOf(0, stroke.points.size / 2 - 1)) {
                     if (i < 0 || stroke.squareEnds) continue
                     circle(cs, stroke.points[2 * i], stroke.points[2 * i + 1], stroke.width * factors[i] / 2)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="InkSerializerTest[jvm]" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-26T00:08:15.050Z" hostname="gerko" time="0.003">
+  <properties/>
+  <testcase name="textBoxesRoundTrip[jvm]" classname="com.gerko.fourenote.data.ink.InkSerializerTest" time="0.001"/>
+  <testcase name="pointedPenStrokesKeepTheirSquareEnds[jvm]" classname="com.gerko.fourenote.data.ink.InkSerializerTest" time="0.001"/>
+  <testcase name="pagesWithBackgroundsRoundTrip[jvm]" classname="com.gerko.fourenote.data.ink.InkSerializerTest" time="0.001"/>
+  <testcase name="oldSinglePageNotesBecomeOnePageThatFitsTheirInk[jvm]" classname="com.gerko.fourenote.data.ink.InkSerializerTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

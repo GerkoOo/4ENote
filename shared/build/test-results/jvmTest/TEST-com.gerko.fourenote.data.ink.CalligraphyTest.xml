@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="CalligraphyTest[jvm]" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-26T00:08:14.991Z" hostname="gerko" time="0.016">
+  <properties/>
+  <testcase name="flatNibMakesUprightStrokesThickAndSidewaysStrokesThin[jvm]" classname="com.gerko.fourenote.data.ink.CalligraphyTest" time="0.013"/>
+  <testcase name="pressureLengthensTheNib[jvm]" classname="com.gerko.fourenote.data.ink.CalligraphyTest" time="0.001"/>
+  <testcase name="nibShapesAreSharpCornerPolygons[jvm]" classname="com.gerko.fourenote.data.ink.CalligraphyTest" time="0.0"/>
+  <testcase name="diagonalStrokesAreInBetween[jvm]" classname="com.gerko.fourenote.data.ink.CalligraphyTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
