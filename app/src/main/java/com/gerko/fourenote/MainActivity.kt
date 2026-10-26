@@ -66,6 +66,8 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    // Lint wrongly flags super.dispatchKeyEvent of ComponentActivity as library-only (a known false report).
+    @android.annotation.SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // While locked, pen buttons must not reach the editor underneath.
         if (appLockLocked()) return super.dispatchKeyEvent(event)
