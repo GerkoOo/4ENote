@@ -44,6 +44,8 @@ fun TrashScreen(viewModel: TrashViewModel, onBack: () -> Unit) {
     val selecting = viewModel.selected.isNotEmpty()
     // What "Delete now" or "Empty" is about to delete for good, if anything.
     var confirming by remember { mutableStateOf<Confirm?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var error by remember { mutableStateOf<String?>(null) }
     BackHandler(enabled = selecting) { viewModel.clearSelection() }
 
     Scaffold(
@@ -105,6 +107,15 @@ fun TrashScreen(viewModel: TrashViewModel, onBack: () -> Unit) {
         }
     }
 
+    error?.let { message ->
+        AlertDialog(
+            onDismissRequest = { error = null },
+            title = { Text("Not deleted") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { error = null }) { Text("OK") } },
+        )
+    }
+
     confirming?.let { confirm ->
         val count = when (confirm) {
             is Confirm.Selected -> confirm.count
@@ -116,11 +127,27 @@ fun TrashScreen(viewModel: TrashViewModel, onBack: () -> Unit) {
             text = { Text("This can't be undone.") },
             confirmButton = {
                 TextButton(onClick = {
-                    when (confirm) {
-                        is Confirm.Selected -> viewModel.deleteSelected()
-                        Confirm.All -> viewModel.emptyTrash()
+                    val delete = {
+                        when (confirm) {
+                            is Confirm.Selected -> viewModel.deleteSelected()
+                            Confirm.All -> viewModel.emptyTrash()
+                        }
                     }
                     confirming = null
+                    // A locked note only goes with the same proof as opening it.
+                    val affected = notes.orEmpty().filter { confirm == Confirm.All || it.id in viewModel.selected }
+                    val activity = context as? androidx.fragment.app.FragmentActivity
+                    if (affected.none { it.locked } || !com.gerko.fourenote.data.security.Unlock.canUnlock(context)) {
+                        delete()
+                    } else if (activity != null) {
+                        error = null
+                        com.gerko.fourenote.data.security.Unlock.authenticate(
+                            activity = activity,
+                            title = "Delete a locked note for good",
+                            onSuccess = { delete() },
+                            onFail = { error = it },
+                        )
+                    }
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },

@@ -188,15 +188,32 @@ fun NoteListScreen(
                             Icon(Icons.Filled.ContentCopy, contentDescription = "Duplicate")
                         }
                         IconButton(onClick = {
-                            viewModel.deleteSelected { ids ->
-                                scope.launch {
-                                    val result = snackbar.showSnackbar(
-                                        message = if (ids.size == 1) "Moved to Deleted notes" else "${ids.size} notes moved to Deleted notes",
-                                        actionLabel = "Undo",
-                                        withDismissAction = false,
-                                    )
-                                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) viewModel.undoTrash(ids)
+                            val delete = {
+                                viewModel.deleteSelected { ids ->
+                                    scope.launch {
+                                        val result = snackbar.showSnackbar(
+                                            message = if (ids.size == 1) "Moved to Deleted notes" else "${ids.size} notes moved to Deleted notes",
+                                            actionLabel = "Undo",
+                                            withDismissAction = false,
+                                        )
+                                        if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) viewModel.undoTrash(ids)
+                                    }
                                 }
+                            }
+                            // A locked note only goes with the same proof as opening it.
+                            val anyLocked = notes.orEmpty().any { it.id in viewModel.selected && it.locked }
+                            val activity = context as? androidx.fragment.app.FragmentActivity
+                            if (!anyLocked || !Unlock.canUnlock(context)) {
+                                delete()
+                            } else if (activity != null) {
+                                Unlock.authenticate(
+                                    activity = activity,
+                                    title = "Delete a locked note",
+                                    onSuccess = { delete() },
+                                    onFail = { message ->
+                                        if (message != null) scope.launch { snackbar.showSnackbar(message) }
+                                    },
+                                )
                             }
                         }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Delete")
