@@ -3,8 +3,11 @@ plugins {
 }
 
 kotlin {
-    // The Android app consumes this module as a plain JVM library.
-    jvm()
+    // The Android app consumes this module as a plain JVM library, so its bytecode targets Java 17
+    // like the app's (CI runs the tests on JDK 17; Java 21 class files fail there).
+    jvm {
+        compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+    }
     // The iOS app (Compose Multiplatform) will use the same code. These targets can't be built on
     // a Linux host; Gradle skips them there.
     iosArm64()
@@ -26,3 +29,5 @@ kotlin {
 }
 
 // Every moved file is platform-independent; nothing had to stay in the app.
+
+tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
