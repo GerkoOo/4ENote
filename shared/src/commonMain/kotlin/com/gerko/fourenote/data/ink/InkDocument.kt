@@ -23,7 +23,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-enum class Tool { PEN, INK_PEN, CALLIGRAPHY, HIGHLIGHTER, ERASER, LASSO, TEXT }
+enum class Tool { PEN, INK_PEN, CALLIGRAPHY, HIGHLIGHTER, ERASER, LASSO, TEXT, STICKY }
 
 enum class PaperStyle { BLANK, LINED, GRID, DOTS }
 

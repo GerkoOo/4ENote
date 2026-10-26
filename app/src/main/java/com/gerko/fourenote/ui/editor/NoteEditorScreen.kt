@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.AddAPhoto
 import com.gerko.fourenote.ui.scan.ScanDialog
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.Title
 import kotlin.math.abs
 import androidx.compose.foundation.layout.heightIn
@@ -1209,7 +1210,9 @@ private fun PageList(
                             penAndFingerSelect = viewModel.penAndFingerSelect,
                             onImageSelect = { viewModel.selectImage(page.id, it) },
                             onImageChange = { viewModel.updateImage(page.id, it) },
-                            onTextTap = { x, y -> viewModel.tapWithText(page.id, x, y) },
+                            onTextTap = { x, y ->
+                                if (viewModel.tool == Tool.STICKY) viewModel.placeSticky(page.id, x, y) else viewModel.tapWithText(page.id, x, y)
+                            },
                             pointedNib = viewModel.pointedNib,
                             modifier = Modifier.matchParentSize(),
                         )
@@ -1222,6 +1225,18 @@ private fun PageList(
                             onEdit = { viewModel.editText(page.id, it) },
                             onChange = { viewModel.updateText(page.id, it) },
                             onDelete = viewModel::deleteEditingText,
+                        )
+                        StickyLayer(
+                            stickies = page.stickies,
+                            pageWidth = page.width,
+                            pageHeight = page.height,
+                            pxPerUnit = itemWidthPx / page.width,
+                            selectedId = viewModel.selectedSticky?.takeIf { it.first == page.id }?.second,
+                            interactive = viewModel.tool == Tool.STICKY || viewModel.tool == Tool.LASSO,
+                            onSelect = { viewModel.selectSticky(page.id, it) },
+                            onChange = { viewModel.updateSticky(page.id, it) },
+                            onToggleFold = { viewModel.toggleFold(page.id, it) },
+                            onDelete = viewModel::deleteSelectedSticky,
                         )
                         // Badges are in the way while arranging pages, which is only for moving them.
                         if (!arrange) {
@@ -2155,12 +2170,17 @@ private fun ToolBar(
             ToolChip("Text", Icons.Filled.Title, viewModel.tool == Tool.TEXT) {
                 viewModel.selectTool(Tool.TEXT)
             }
+            ToolChip("Sticky", Icons.Filled.StickyNote2, viewModel.tool == Tool.STICKY) {
+                viewModel.selectTool(Tool.STICKY)
+            }
     }
     FloatingRow {
             if (viewModel.tool == Tool.LASSO) {
                 SelectionOptions(viewModel)
             } else if (viewModel.tool == Tool.TEXT) {
                 TextStyleBar(viewModel, darkPaper)
+            } else if (viewModel.tool == Tool.STICKY) {
+                StickyOptions(viewModel)
             } else if (viewModel.tool != Tool.ERASER) {
                 if (viewModel.tool == Tool.CALLIGRAPHY) {
                     // Pointed: bold going down, thin going up (like a dip pen). Flat: a broad nib, angle on the dial.
@@ -2296,6 +2316,34 @@ private fun Hint(text: String) {
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/** The sticky tool's options: the note's colour, and deleting the selected note. */
+@Composable
+private fun StickyOptions(viewModel: NoteEditorViewModel) {
+    StickyColors.forEach { color ->
+        val ring = if (color == viewModel.stickyColor) MaterialTheme.colorScheme.primary else Color.Transparent
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .border(3.dp, ring, CircleShape)
+                .clickable { viewModel.changeStickyColor(color) }
+                .padding(6.dp)
+                .clip(CircleShape)
+                .background(Color(color))
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape),
+        )
+    }
+    if (viewModel.selectedSticky != null) {
+        TextButton(onClick = viewModel::deleteSelectedSticky) {
+            Icon(Icons.Filled.Delete, contentDescription = null)
+            Spacer(Modifier.width(4.dp))
+            Text("Delete")
+        }
+    } else {
+        Hint("Tap a page to place a sticky note")
+    }
 }
 
 /** The text tool's options: looks, size, colour, and whether `$…$` becomes maths while typing. */

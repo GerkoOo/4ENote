@@ -32,6 +32,7 @@ import com.gerko.fourenote.data.ink.Scribble
 import com.gerko.fourenote.data.ink.StrikeOut
 import com.gerko.fourenote.data.ink.Shapes
 import com.gerko.fourenote.data.ink.Smoothing
+import com.gerko.fourenote.data.ink.StickyNote
 import com.gerko.fourenote.data.ink.Tool
 import com.gerko.fourenote.data.ink.isInsideLasso
 import com.gerko.fourenote.data.ink.transformed
@@ -71,6 +72,12 @@ private const val TABLE_ROW_HEIGHT = 44f
 
 val InkPenWidths = listOf(2.5f, 4.5f, 8f)
 val CalligraphyWidths = listOf(6f, 10f, 16f)
+
+/** The colours a sticky note can have. */
+val StickyColors = listOf(
+    0xFFFFF59D.toInt(), 0xFFFFCC80.toInt(), 0xFFF8BBD0.toInt(),
+    0xFFD1C4E9.toInt(), 0xFFB3E5FC.toInt(), 0xFFC5E1A5.toInt(),
+)
 
 /** Where a link leads, once checked against the notes on this device. */
 sealed interface LinkResolution {
@@ -118,6 +125,7 @@ class PageState(
     invertBackground: Boolean,
     texts: List<PageText>,
     links: List<PageLink>,
+    stickies: List<StickyNote>,
 ) {
     val strokes = mutableStateListOf<InkStroke>().apply { addAll(strokes) }
     var placement by mutableStateOf(placement)
@@ -125,10 +133,12 @@ class PageState(
     var invertBackground by mutableStateOf(invertBackground)
     val texts = mutableStateListOf<PageText>().apply { addAll(texts) }
     val links = mutableStateListOf<PageLink>().apply { addAll(links) }
+    val stickies = mutableStateListOf<StickyNote>().apply { addAll(stickies) }
 
     fun toPage() = InkPage(
         id, width, height, background, strokes.toList(), placement, images.toList(), invertBackground, texts.toList(),
         links = links.toList(),
+        stickies = stickies.toList(),
     )
 
     /**
@@ -147,7 +157,7 @@ class PageState(
     companion object {
         fun of(page: InkPage) = PageState(
             page.id, page.width, page.height, page.background, page.strokes, page.placement, page.images,
-            page.invertBackground, page.texts, page.links,
+            page.invertBackground, page.texts, page.links, page.stickies,
         )
     }
 }
@@ -283,6 +293,14 @@ class NoteEditorViewModel(
 
     /** The picture selected with the Select tool, as (page id, image id). */
     var selectedImage by mutableStateOf<Pair<String, String>?>(null)
+        private set
+
+    /** The sticky note selected with the Sticky tool, as (page id, sticky id). */
+    var selectedSticky by mutableStateOf<Pair<String, String>?>(null)
+        private set
+
+    /** The colour new sticky notes get, and the one the selected sticky is changed to. */
+    var stickyColor by mutableStateOf(StickyColors.first())
         private set
 
     private var opacityUndoRecorded = false
@@ -551,6 +569,76 @@ class NoteEditorViewModel(
         return page(pageId)?.texts?.firstOrNull { it.id == textId }?.let { pageId to it }
     }
 
+    /**
+     * A tap on a page with the Sticky tool: lets go of the selected sticky note, or else puts a new
+     * one with its top-left corner at ([x], [y]), kept inside the page, and selects it.
+     */
+    fun placeSticky(pageId: String, x: Float, y: Float) {
+        if (selectedSticky != null) {
+            selectedSticky = null
+            return
+        }
+        val page = page(pageId) ?: return
+        recordUndo()
+        val sticky = StickyNote(
+            x = x.coerceIn(0f, (page.width - STICKY_SIZE).coerceAtLeast(0f)),
+            y = y.coerceIn(0f, (page.height - STICKY_SIZE).coerceAtLeast(0f)),
+            width = STICKY_SIZE,
+            height = STICKY_SIZE,
+            color = stickyColor,
+        )
+        page.stickies.add(sticky)
+        selectedSticky = pageId to sticky.id
+        persist()
+    }
+
+    fun selectSticky(pageId: String, stickyId: String?) {
+        selectedSticky = stickyId?.let { pageId to it }
+    }
+
+    /** Saves a finished move or resize of a sticky note. One undo step per call. */
+    fun updateSticky(pageId: String, sticky: StickyNote) {
+        val page = page(pageId) ?: return
+        val index = page.stickies.indexOfFirst { it.id == sticky.id }
+        if (index < 0 || page.stickies[index] == sticky) return
+        recordUndo()
+        page.stickies[index] = sticky
+        persist()
+    }
+
+    fun deleteSelectedSticky() {
+        val (pageId, stickyId) = selectedSticky ?: return
+        val page = page(pageId) ?: return
+        if (page.stickies.none { it.id == stickyId }) return
+        recordUndo()
+        page.stickies.removeAll { it.id == stickyId }
+        selectedSticky = null
+        persist()
+    }
+
+    /** Folds a sticky note into a small icon, or unfolds it. */
+    fun toggleFold(pageId: String, stickyId: String) {
+        val page = page(pageId) ?: return
+        val index = page.stickies.indexOfFirst { it.id == stickyId }
+        if (index < 0) return
+        recordUndo()
+        page.stickies[index] = page.stickies[index].let { it.copy(folded = !it.folded) }
+        if (page.stickies[index].folded && selectedSticky == pageId to stickyId) selectedSticky = null
+        persist()
+    }
+
+    /** Sets the colour of new sticky notes, and of the selected one if there is one. */
+    fun changeStickyColor(color: Int) {
+        stickyColor = color
+        val (pageId, stickyId) = selectedSticky ?: return
+        val page = page(pageId) ?: return
+        val index = page.stickies.indexOfFirst { it.id == stickyId }
+        if (index < 0 || page.stickies[index].color == color) return
+        recordUndo()
+        page.stickies[index] = page.stickies[index].copy(color = color)
+        persist()
+    }
+
     fun selectTool(newTool: Tool) {
         if (newTool != Tool.TEXT) finishTextEditing()
         if (newTool != tool) previousTool = tool
@@ -558,6 +646,7 @@ class NoteEditorViewModel(
         toolBeforeLoop = null
         clearSelection()
         selectedImage = null
+        selectedSticky = null
     }
 
     fun selectWithLasso(pageId: String, polygon: FloatArray) {
@@ -1451,6 +1540,7 @@ class NoteEditorViewModel(
     fun undo() {
         recentLoop = null
         editingText = null
+        selectedSticky = null
         val previous = undoStack.removeLastOrNull() ?: return
         redoStack.addLast(snapshot())
         restore(previous)
@@ -1459,6 +1549,7 @@ class NoteEditorViewModel(
     fun redo() {
         recentLoop = null
         editingText = null
+        selectedSticky = null
         val next = redoStack.removeLastOrNull() ?: return
         undoStack.addLast(snapshot())
         restore(next)
@@ -1479,6 +1570,7 @@ class NoteEditorViewModel(
     private fun restore(snapshot: Snapshot) {
         clearSelection()
         selectedImage = null
+        selectedSticky = null
         pages.clear()
         pages.addAll(snapshot.pages.map(PageState::of))
         layers.clear()
@@ -1566,5 +1658,6 @@ class NoteEditorViewModel(
         const val SAVE_DELAY_MS = 400L
         const val TAG = "NoteEditor"
         const val DUPLICATE_OFFSET = 24f
+        const val STICKY_SIZE = 200f
     }
 }

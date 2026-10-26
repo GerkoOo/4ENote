@@ -87,8 +87,8 @@ class ToolPreferences(context: Context) {
 
     fun save(settings: ToolSettings) {
         prefs.edit()
-            // The eraser, lasso and text tool aren't remembered: a note should always open ready to write.
-            .apply { if (settings.tool !in setOf(Tool.ERASER, Tool.LASSO, Tool.TEXT)) putString("tool", settings.tool.name) }
+            // The eraser, lasso, text and sticky tools aren't remembered: a note should always open ready to write.
+            .apply { if (settings.tool !in setOf(Tool.ERASER, Tool.LASSO, Tool.TEXT, Tool.STICKY)) putString("tool", settings.tool.name) }
             .putInt("penColor", settings.penColor.toArgb())
             .putInt("highlighterColor", settings.highlighterColor.toArgb())
             .putFloat("penWidth", settings.penWidth)

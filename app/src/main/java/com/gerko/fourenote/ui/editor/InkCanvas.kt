@@ -570,9 +570,10 @@ fun InkCanvas(
                     // Moved: carry on as an ordinary touch.
                 }
 
-                // The text tool: a tap places or finishes a text box. Drags are left to the page list,
-                // so a finger or pen still scrolls; two fingers scroll and zoom as usual.
-                if (gestureTool == Tool.TEXT && down.type != PointerType.Eraser) {
+                // The text and sticky tools: a tap places or finishes a text box, or places a sticky
+                // note. Drags are left to the page list, so a finger or pen still scrolls; two fingers
+                // scroll and zoom as usual.
+                if ((gestureTool == Tool.TEXT || gestureTool == Tool.STICKY) && down.type != PointerType.Eraser) {
                     var moved = 0f
                     while (true) {
                         val event = awaitPointerEvent()
