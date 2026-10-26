@@ -54,7 +54,8 @@ class BackupRoundTripTest {
     private inner class Device(name: String) {
         val inkRoot = File(work, "$name/ink")
         val attachmentsRoot = File(work, "$name/attachments")
-        val ink = InkStore(inkRoot, DeviceKey(Memory(), Unwrapped))
+        val deviceKey = DeviceKey(Memory(), Unwrapped)
+        val ink = InkStore(inkRoot, deviceKey)
         val notes = linkedMapOf<String, Note>()
         var folders = listOf<Folder>()
         var now = 1_000L
@@ -94,7 +95,7 @@ class BackupRoundTripTest {
             val dir = File(inkRoot, noteId)
             return dir.walkTopDown()
                 .filter { it.isFile && it.name != "sealed" && !it.name.endsWith(".tmp") }
-                .associate { it.relativeTo(dir).invariantSeparatorsPath to ink.plainBytes(noteId, it) }
+                .associate { it.relativeTo(dir).invariantSeparatorsPath to runBlocking { ink.plainBytes(noteId, it) } }
         }
 
         fun attachmentFiles(noteId: String): Map<String, ByteArray> =
@@ -103,12 +104,10 @@ class BackupRoundTripTest {
                 .associate { it.name to it.readBytes() }
 
         fun strokeIds(noteId: String): List<List<String>> =
-            runBlocking { InkStore(inkRoot, ink.sealingForTest()).load(noteId) }
+            // A fresh store with this device's key: nothing kept in memory, read from the files.
+            runBlocking { InkStore(inkRoot, deviceKey).load(noteId) }
                 .let { doc -> doc!!.pages.map { page -> page.strokes.map { it.id } } }
     }
-
-    // The store's own sealing, so a fresh store reads the same files (see SealedInkStoreTest).
-    private fun InkStore.sealingForTest(): DeviceKey = DeviceKey(Memory(), Unwrapped)
 
     private fun stroke(random: Random, id: String) = InkStroke(
         color = random.nextInt(),
