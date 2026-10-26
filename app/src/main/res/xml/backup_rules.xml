@@ -11,6 +11,7 @@
     <exclude domain="file" path="attachments" />
     <exclude domain="file" path="inbox" />
     <exclude domain="file" path="test-cloud" />
+    <exclude domain="file" path="crash-log.txt" />
     <exclude domain="database" path="4enote.db" />
     <exclude domain="database" path="4enote.db-wal" />
     <exclude domain="database" path="4enote.db-shm" />

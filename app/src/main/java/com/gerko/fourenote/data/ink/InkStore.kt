@@ -1,6 +1,7 @@
 package com.gerko.fourenote.data.ink
 
 import com.gerko.fourenote.data.SafeName
+import com.gerko.fourenote.data.writeAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -9,8 +10,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
@@ -224,15 +223,6 @@ class InkStore(val root: File, private val sealing: FileSealing? = null) {
         val file = pageFile(noteId, pageId)
         if (!file.isFile) return emptyList()
         return openNoteFile(noteId, file).use(InkPageCodec::read)
-    }
-
-    private fun writeAtomically(target: File, write: (java.io.OutputStream) -> Unit) {
-        val temp = File(target.parentFile, target.name + ".tmp")
-        temp.outputStream().use { out ->
-            out.buffered().let { write(it); it.flush() }
-            out.fd.sync()
-        }
-        Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
 
     private companion object {

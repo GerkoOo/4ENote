@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The document scanner's in-app camera. -->
@@ -39,7 +40,8 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="com.gerko.fourenote" android:path="/oauth2redirect" />
+                <!-- The Google sign-in redirect (com.gerko.fourenote:/oauth2redirect) has no host by design. -->
+                <data android:scheme="com.gerko.fourenote" android:path="/oauth2redirect" tools:ignore="AppLinkUrlError" />
             </intent-filter>
         </activity>
             <provider

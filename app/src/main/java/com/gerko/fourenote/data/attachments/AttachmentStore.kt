@@ -1,6 +1,7 @@
 package com.gerko.fourenote.data.attachments
 
 import com.gerko.fourenote.data.SafeName
+import com.gerko.fourenote.data.writeAtomically
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -77,7 +78,7 @@ class AttachmentStore(val context: Context) {
                 ?: throw IllegalArgumentException("This image can't be read")
             val png = keepTransparency && bitmap.hasAlpha()
             val name = "image-${UUID.randomUUID()}.${if (png) "png" else "jpg"}"
-            file(noteId, name).outputStream().use {
+            writeAtomically(file(noteId, name)) {
                 bitmap.compress(if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, JPEG_QUALITY, it)
             }
             StoredImage(name, bitmap.width, bitmap.height).also { bitmap.recycle() }
@@ -141,9 +142,7 @@ class AttachmentStore(val context: Context) {
         require(SafeName.isSafeFromCloud(name)) { "Unsafe attachment name" }
         val target = file(noteId, name)
         target.parentFile?.mkdirs()
-        val temp = File(target.parentFile, ".$name.part")
-        temp.writeBytes(content)
-        temp.renameTo(target)
+        writeAtomically(target) { it.write(content) }
     }
 
     fun deleteAll(noteId: String) {
@@ -153,7 +152,7 @@ class AttachmentStore(val context: Context) {
     private fun copy(noteId: String, name: String, source: InputStream): File {
         val target = file(noteId, name)
         target.parentFile?.mkdirs()
-        source.use { input -> target.outputStream().use { input.copyTo(it) } }
+        source.use { input -> writeAtomically(target) { input.copyTo(it) } }
         return target
     }
 }

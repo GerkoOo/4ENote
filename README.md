@@ -18,7 +18,9 @@ Website: [gerkooo.github.io/4ENote](https://gerkooo.github.io/4ENote/)
 
 - Pen, ink pen, calligraphy (pointed or flat nib) and highlighter; eraser, lasso and layers
 - Hold a drawn line, circle, triangle or rectangle to straighten it; tables; text boxes with LaTeX
-- Handwriting to editable text, and handwritten maths to LaTeX (offline, open-source models)
+- Handwriting to editable text (English only for now: the open TrOCR model reads English
+  handwriting; German and other languages are not recognised yet), and handwritten maths to
+  LaTeX (offline, open-source models)
 - Pinch to zoom, twist to turn a page, full-screen writing; Arrange pages to reorder them
 - Import PDFs and images (with dark-mode colour inversion), scan documents
   (page edges, straightening, filters including inverted), export and share as PDF
