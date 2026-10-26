@@ -4,7 +4,7 @@ What is **trusted** has tests that run on every push (unit tests, plus device te
 release) and has been used on a real tablet. What is **beta** works, but is new or tested only
 on the emulator. Report problems at https://github.com/GerkoOo/4ENote/issues.
 
-## 0.4.0 (not released yet)
+## 0.4.0 (2026-10-26)
 
 Signed with the new release key (fingerprint in the README) plus a signed hand-over from the old
 development key, so on Android 9+ it updates 0.3.0 in place and keeps the notes. On Android 8,

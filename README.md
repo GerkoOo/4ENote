@@ -24,8 +24,9 @@ a signed hand-over from the old key (APK key rotation), so on Android 9 and newe
 older 4ENote in place, notes and all. On Android 8 the old version has to be uninstalled first,
 which deletes its notes: make a 4ENote backup before and restore it after.
 
-The fingerprint shows who signed an APK, not that it was built from this exact code: release
-APKs are built on the author's computer, and the build isn't reproducible yet.
+Release APKs are built and signed by GitHub Actions from the tagged commit, with a build
+attestation: `gh attestation verify 4ENote.apk --repo GerkoOo/4ENote` confirms an APK came from
+this repository's release workflow. The build isn't byte-for-byte reproducible yet.
 
 Website: [gerkooo.github.io/4ENote](https://gerkooo.github.io/4ENote/)
 
