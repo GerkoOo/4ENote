@@ -5,6 +5,7 @@ import com.gerko.fourenote.data.AppDatabase
 import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.attachments.BackgroundLoader
+import com.gerko.fourenote.data.diagnostics.CrashLog
 import com.gerko.fourenote.data.ink.InkStore
 import com.gerko.fourenote.data.scan.ScanInbox
 import com.gerko.fourenote.data.sync.SyncManager
@@ -66,6 +67,11 @@ class FourENoteApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // First, so a crash during the rest of the start-up is logged too.
+        CrashLog.install(
+            file = java.io.File(filesDir, "crash-log.txt"),
+            appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+        )
         // Notes that have been in Deleted notes for long enough go for good, even if the app
         // is never opened on the trash screen.
         appScope.launch { runCatching { repository.purgeExpiredTrash() } }

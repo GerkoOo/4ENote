@@ -2,6 +2,7 @@ package com.gerko.fourenote.data
 
 import android.util.Log
 import com.gerko.fourenote.data.attachments.AttachmentStore
+import com.gerko.fourenote.data.diagnostics.CrashLog
 import com.gerko.fourenote.data.ink.InkDocument
 import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.InkStore
@@ -77,6 +78,7 @@ class NoteRepository(
         } catch (e: Exception) {
             // Left as it is; the next start tries again.
             Log.w(TAG, "Couldn't ${if (locked) "encrypt" else "decrypt"} note $noteId", e)
+            CrashLog.record("Couldn't ${if (locked) "encrypt" else "decrypt"} note $noteId", e)
         }
     }
 
@@ -400,6 +402,7 @@ class NoteRepository(
             } catch (e: Exception) {
                 // Left in the database; loadDocument still reads it from there.
                 Log.w(TAG, "Couldn't move note $id to files", e)
+                CrashLog.record("Couldn't move note $id to files", e)
             }
         }
     }
