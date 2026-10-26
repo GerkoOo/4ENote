@@ -101,7 +101,7 @@ import com.gerko.fourenote.data.attachments.BackgroundLoader
 import com.gerko.fourenote.data.ink.PageBackground
 import com.gerko.fourenote.data.sync.CloudChoice
 import com.gerko.fourenote.data.sync.SyncManager
-import com.gerko.fourenote.data.security.Biometric
+import com.gerko.fourenote.data.security.Unlock
 import com.gerko.fourenote.data.sync.SyncStatus
 import com.gerko.fourenote.ui.editor.SmartInvert
 import com.gerko.fourenote.ui.editor.drawInkStroke
@@ -190,12 +190,12 @@ fun NoteListScreen(
                         // Locking and unlocking both need the user to prove who they are.
                         val allLocked = notes.orEmpty().filter { it.id in viewModel.selected }.all { it.locked }
                         IconButton(onClick = {
-                            if (!Biometric.canAuthenticate(context)) {
+                            if (!Unlock.canUnlock(context)) {
                                 scope.launch { snackbar.showSnackbar("Set up a screen lock in Android settings first") }
                                 return@IconButton
                             }
                             val activity = context as? androidx.fragment.app.FragmentActivity ?: return@IconButton
-                            Biometric.authenticate(
+                            Unlock.authenticate(
                                 activity = activity,
                                 title = if (allLocked) "Remove the lock" else "Lock the notes",
                                 onSuccess = { viewModel.setLocked(!allLocked) },

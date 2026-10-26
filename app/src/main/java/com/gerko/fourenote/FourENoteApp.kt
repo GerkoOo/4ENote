@@ -33,6 +33,10 @@ class FourENoteApp : Application() {
     val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }
 
     /** The optional fingerprint/face/PIN lock in front of the whole app. */
+    val appPassword: com.gerko.fourenote.data.security.AppPassword by lazy {
+        com.gerko.fourenote.data.security.AppPassword(this)
+    }
+
     val appLock: com.gerko.fourenote.data.security.AppLock by lazy {
         com.gerko.fourenote.data.security.AppLock(this)
     }

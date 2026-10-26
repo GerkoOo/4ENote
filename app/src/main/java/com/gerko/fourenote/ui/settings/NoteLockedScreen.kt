@@ -28,7 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
-import com.gerko.fourenote.data.security.Biometric
+import com.gerko.fourenote.data.security.Unlock
 
 /**
  * Stands in for the editor while a locked note hasn't been unlocked in this session. It looks
@@ -44,7 +44,7 @@ fun NoteLockedScreen(title: String, onUnlocked: () -> Unit, onBack: () -> Unit) 
         if (activity == null || prompting) return
         prompting = true
         error = null
-        Biometric.authenticate(
+        Unlock.authenticate(
             activity = activity,
             title = "Unlock note",
             onSuccess = {

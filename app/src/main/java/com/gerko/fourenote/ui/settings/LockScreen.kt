@@ -27,7 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.gerko.fourenote.data.security.AppLock
-import com.gerko.fourenote.data.security.Biometric
+import com.gerko.fourenote.data.security.Unlock
 
 /**
  * Covers the whole app while [AppLock.locked] is true. It is opaque and swallows every touch,
@@ -44,7 +44,7 @@ fun LockScreen(appLock: AppLock, onBack: () -> Unit) {
         if (activity == null || prompting) return
         prompting = true
         error = null
-        Biometric.authenticate(
+        Unlock.authenticate(
             activity = activity,
             title = "Unlock 4ENote",
             onSuccess = {

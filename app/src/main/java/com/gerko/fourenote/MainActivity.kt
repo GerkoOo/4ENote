@@ -58,6 +58,8 @@ class MainActivity : FragmentActivity() {
                                 onBack = { moveTaskToBack(true) },
                             )
                         }
+                        // Over everything, the lock screen too: the 4ENote password when it's asked for.
+                        com.gerko.fourenote.ui.settings.PasswordPrompt(app.appPassword)
                     }
                 }
             }

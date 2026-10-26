@@ -36,6 +36,51 @@ object Biometric {
         return false
     }
 
+    /** True when a fingerprint or face is set up (not just a screen lock). */
+    fun canUseBiometrics(context: Context): Boolean =
+        BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) ==
+            BiometricManager.BIOMETRIC_SUCCESS
+
+    /**
+     * Fingerprint or face only, with a button for the 4ENote password instead of the screen lock:
+     * [onUsePassword] runs when it is tapped, or when too many tries locked the sensor.
+     */
+    fun authenticateBiometric(
+        activity: FragmentActivity,
+        title: String,
+        onSuccess: () -> Unit,
+        onFail: (String?) -> Unit,
+        onUsePassword: () -> Unit,
+    ) {
+        val prompt = BiometricPrompt(
+            activity,
+            ContextCompat.getMainExecutor(activity),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    prompting = false
+                    onSuccess()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    prompting = false
+                    when (errorCode) {
+                        BiometricPrompt.ERROR_NEGATIVE_BUTTON, BiometricPrompt.ERROR_LOCKOUT,
+                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT, BiometricPrompt.ERROR_NO_BIOMETRICS -> onUsePassword()
+                        BiometricPrompt.ERROR_USER_CANCELED, BiometricPrompt.ERROR_CANCELED -> onFail(null)
+                        else -> onFail(errString.toString())
+                    }
+                }
+            },
+        )
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(title)
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+            .setNegativeButtonText("Use 4ENote password")
+            .build()
+        prompting = true
+        prompt.authenticate(info)
+    }
+
     /**
      * Shows the prompt. [onSuccess] runs when the user gets through; [onFail] gets a message,
      * or null when the user simply cancelled (that isn't an error).
