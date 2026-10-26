@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -37,7 +38,7 @@ fun App() {
                 modifier = Modifier.width(280.dp).fillMaxHeight(),
                 tonalElevation = 2.dp,
             ) {
-                LazyColumn {
+                LazyColumn(Modifier.safeDrawingPadding()) {
                     itemsIndexed(SampleNotes.all) { index, note ->
                         val isSelected = index == selected
                         Text(
