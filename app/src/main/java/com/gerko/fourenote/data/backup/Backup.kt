@@ -1,6 +1,7 @@
 package com.gerko.fourenote.data.backup
 
 import com.gerko.fourenote.data.SafeName
+import com.gerko.fourenote.data.writeAtomically
 import com.gerko.fourenote.data.Folder
 import com.gerko.fourenote.data.FolderFile
 import com.gerko.fourenote.data.Note
@@ -136,12 +137,8 @@ class Backup(
                         File(inkRoot, noteId).deleteRecursively()
                     }
                     file.parentFile?.mkdirs()
-                    val temp = File(file.parentFile, ".${file.name}.part")
-                    temp.outputStream().use { zip.copyTo(it) }
-                    if (!temp.renameTo(file)) {
-                        file.delete()
-                        temp.renameTo(file)
-                    }
+                    // Not closed: the zip stream carries the rest of the backup.
+                    writeAtomically(file) { zip.copyTo(it) }
                 }
             }
         }
