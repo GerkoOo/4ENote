@@ -19,3 +19,6 @@ app/release/
 google-services.json
 /drive-credentials*
 /.claude/
+composeApp/build/
+iosApp/iosApp.xcodeproj/
+iosApp/build/

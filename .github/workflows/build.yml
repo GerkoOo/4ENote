@@ -31,3 +31,13 @@ jobs:
 
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest :shared:jvmTest --console=plain
+
+      - name: Run desktop UI tests
+        run: ./gradlew :composeApp:desktopTest --console=plain
+
+      - name: Upload desktop screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-screenshot
+          path: composeApp/build/screenshots/app.png
