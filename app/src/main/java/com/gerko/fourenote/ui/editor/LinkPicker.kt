@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,7 +53,12 @@ import com.gerko.fourenote.data.ink.LinkTarget
  * listed first, since linking within a note is the common case.
  */
 @Composable
-fun LinkPickerDialog(viewModel: NoteEditorViewModel, onPick: (LinkTarget) -> Unit, onDismiss: () -> Unit) {
+fun LinkPickerDialog(
+    viewModel: NoteEditorViewModel,
+    onPick: (LinkTarget) -> Unit,
+    onPickObjects: (Note) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val notes by produceState<List<Note>?>(null) { value = viewModel.linkableNotes() }
     var query by remember { mutableStateOf("") }
     // The note whose pages are being chosen; null shows the list of notes.
@@ -135,7 +141,19 @@ fun LinkPickerDialog(viewModel: NoteEditorViewModel, onPick: (LinkTarget) -> Uni
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(8.dp),
                         )
-                        else -> LazyVerticalGrid(
+                        else -> Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPickObjects(note) }
+                                .padding(horizontal = 8.dp, vertical = 12.dp),
+                        ) {
+                            Icon(Icons.Filled.SelectAll, contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Select objects…", style = MaterialTheme.typography.bodyLarge)
+                        }
+                        LazyVerticalGrid(
                             columns = GridCells.Adaptive(88.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -155,6 +173,7 @@ fun LinkPickerDialog(viewModel: NoteEditorViewModel, onPick: (LinkTarget) -> Uni
                                     Text("Page $number", style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
                                 }
                             }
+                        }
                         }
                     }
                 }

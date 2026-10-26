@@ -17,6 +17,9 @@ data class TrailStop(
     val linkId: String,
 )
 
+/** A page to open, and the objects on it to show, after following a link into another note. */
+data class OpenTarget(val noteId: String, val pageId: String, val objectIds: List<String> = emptyList())
+
 /**
  * The way back along followed links, shared by every editor screen: following a link pushes a
  * stop, and Back pops one. It lives outside the view models because a jump can cross notes, and
@@ -28,8 +31,8 @@ object LinkTrail {
     /** A stop to go back to, set before leaving a note; the editor of that note applies it once loaded and clears it. */
     var restore by mutableStateOf<TrailStop?>(null)
 
-    /** (noteId, pageId) to scroll to once that note opens, after following a link to another note's page. */
-    var openPage by mutableStateOf<Pair<String, String>?>(null)
+    /** Where to go once that note opens, after following a link to another note's page. */
+    var openPage by mutableStateOf<OpenTarget?>(null)
 
     fun clear() {
         stops.clear()

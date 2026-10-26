@@ -330,16 +330,39 @@ fun List<PageLink>.withStrokesReplaced(replacements: Map<String, List<String>>):
 }
 
 /**
- * The box around a link's anchors that still exist on the page, as left, top, right and bottom in
- * page units, or null if none of them do. Pictures are taken unrotated: the box only has to be
- * near enough to show where the link starts.
+ * Carries links over to strokes that were given new ids on the page they point at: a link in this
+ * note whose target is [pageId] of [noteId] has its target's object ids replaced the same way as
+ * its anchors (see [withStrokesReplaced]). Links to other notes and pages are returned as they are.
  */
-fun linkAnchorBounds(
-    link: PageLink,
+fun List<PageLink>.withTargetStrokesReplaced(
+    noteId: String,
+    pageId: String,
+    replacements: Map<String, List<String>>,
+): List<PageLink> {
+    if (replacements.isEmpty()) return this
+    return map { link ->
+        val target = link.target
+        if (target.noteId != noteId || target.pageId != pageId || target.objectIds.none { it in replacements }) {
+            link
+        } else {
+            link.copy(target = target.copy(objectIds = target.objectIds.flatMap { replacements[it] ?: listOf(it) }))
+        }
+    }
+}
+
+/**
+ * The box around the objects with the given ids that exist on the page, as left, top, right and
+ * bottom in page units, or null if none of them do. Pictures are taken unrotated: the box only
+ * has to be near enough to show where they are.
+ */
+fun objectBounds(
+    ids: Collection<String>,
     strokes: List<InkStroke>,
     texts: List<PageText>,
     images: List<PageImage>,
 ): FloatArray? {
+    if (ids.isEmpty()) return null
+    val wanted = ids.toHashSet()
     var left = Float.MAX_VALUE
     var top = Float.MAX_VALUE
     var right = -Float.MAX_VALUE
@@ -352,27 +375,35 @@ fun linkAnchorBounds(
         bottom = maxOf(bottom, b)
         found = true
     }
-    val strokeIds = link.strokeIds.toHashSet()
     for (stroke in strokes) {
-        if (stroke.id !in strokeIds) continue
+        if (stroke.id !in wanted) continue
         for (i in stroke.points.indices step 2) {
             val x = stroke.points[i]
             val y = stroke.points[i + 1]
             include(x, y, x, y)
         }
     }
-    val textIds = link.textIds.toHashSet()
     for (text in texts) {
-        if (text.id in textIds) include(text.x, text.y, text.x + text.width, text.y + text.style.size * 1.4f)
+        if (text.id in wanted) include(text.x, text.y, text.x + text.width, text.y + text.style.size * 1.4f)
     }
-    val imageIds = link.imageIds.toHashSet()
     for (image in images) {
-        if (image.id in imageIds) {
+        if (image.id in wanted) {
             include(image.x - image.width / 2, image.y - image.height / 2, image.x + image.width / 2, image.y + image.height / 2)
         }
     }
     return if (found) floatArrayOf(left, top, right, bottom) else null
 }
+
+/**
+ * The box around a link's anchors that still exist on the page, as left, top, right and bottom in
+ * page units, or null if none of them do.
+ */
+fun linkAnchorBounds(
+    link: PageLink,
+    strokes: List<InkStroke>,
+    texts: List<PageText>,
+    images: List<PageImage>,
+): FloatArray? = objectBounds(link.strokeIds + link.textIds + link.imageIds, strokes, texts, images)
 
 /**
  * A layer of ink shared by all pages of a note, like layers in a drawing app.

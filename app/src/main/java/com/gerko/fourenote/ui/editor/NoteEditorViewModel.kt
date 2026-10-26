@@ -37,6 +37,7 @@ import com.gerko.fourenote.data.ink.isInsideLasso
 import com.gerko.fourenote.data.ink.transformed
 import com.gerko.fourenote.data.ink.withColor
 import com.gerko.fourenote.data.ink.withStrokesReplaced
+import com.gerko.fourenote.data.ink.withTargetStrokesReplaced
 import com.gerko.fourenote.data.ink.withoutDeadLinks
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.toArgb
@@ -73,17 +74,26 @@ val CalligraphyWidths = listOf(6f, 10f, 16f)
 
 /** Where a link leads, once checked against the notes on this device. */
 sealed interface LinkResolution {
-    /** A page of this note, by index; -1 means the note's current page, so stay where you are. */
-    data class SameNote(val pageIndex: Int) : LinkResolution
+    /**
+     * A page of this note, by index; -1 means the note's current page, so stay where you are.
+     * [objectIds] are the objects the link points to that are still on the page.
+     */
+    data class SameNote(val pageIndex: Int, val objectIds: List<String> = emptyList()) : LinkResolution
 
-    /** A page of another note; a null [pageId] opens that note at its first page. */
-    data class OtherNote(val noteId: String, val pageId: String?) : LinkResolution
+    /**
+     * A page of another note; a null [pageId] opens that note at its first page. [objectIds] are
+     * the objects the link points to that are still on the page.
+     */
+    data class OtherNote(val noteId: String, val pageId: String?, val objectIds: List<String> = emptyList()) : LinkResolution
 
     /** The note the link points to is gone (deleted, in the trash, or never synced here). */
     data object NoteNotFound : LinkResolution
 
     /** The note is here but the page is not, e.g. it was deleted on another device. */
     data class PageNotFound(val noteId: String) : LinkResolution
+
+    /** The page is here but none of the objects the link points to are, e.g. they were erased. */
+    data class ObjectsNotFound(val noteId: String, val pageId: String) : LinkResolution
 }
 
 sealed interface RecognitionState {
@@ -616,8 +626,24 @@ class NoteEditorViewModel(
             }
         }
         page.replaceLinkStrokes(newIds)
+        remapTargetObjects(page.id, newIds)
         selection = replaced
         persist()
+    }
+
+    /**
+     * Links in this note that point at objects on [pageId] follow them to their new ids, the same
+     * way a link's own anchors do.
+     */
+    private fun remapTargetObjects(pageId: String, replacements: Map<String, List<String>>) {
+        if (replacements.isEmpty()) return
+        for (p in pages) {
+            if (p.links.isEmpty()) continue
+            val remapped = p.links.withTargetStrokesReplaced(noteId, pageId, replacements)
+            if (remapped == p.links.toList()) continue
+            p.links.clear()
+            p.links.addAll(remapped)
+        }
     }
 
     /** Adds a drawn stroke, or erases with it: a scrub, or a line held still through words ([held]). */
@@ -773,6 +799,7 @@ class NoteEditorViewModel(
             }
         }
         page.replaceLinkStrokes(newIds)
+        remapTargetObjects(page.id, newIds)
     }
 
     fun endErase() {
@@ -1314,20 +1341,44 @@ class NoteEditorViewModel(
     }
 
     /**
-     * Links what is selected to [target]: the lasso selection's strokes, or else the selected
-     * picture. Nothing selected does nothing.
+     * What a new link would hang on: the page, the lasso selection's stroke ids, or else the
+     * selected picture's id. Null if nothing is selected.
      */
-    fun linkSelection(target: LinkTarget) {
-        val pageId = selectionPageId ?: selectedImage?.first ?: return
-        val page = page(pageId) ?: return
+    fun selectionAnchors(): Triple<String, List<String>, List<String>>? {
+        val pageId = selectionPageId ?: selectedImage?.first ?: return null
         val strokeIds = if (selection.isNotEmpty()) selection.map { it.id } else emptyList()
         val imageIds = if (strokeIds.isEmpty()) listOfNotNull(selectedImage?.takeIf { it.first == pageId }?.second) else emptyList()
+        if (strokeIds.isEmpty() && imageIds.isEmpty()) return null
+        return Triple(pageId, strokeIds, imageIds)
+    }
+
+    /** Adds a link from the given objects on [pageId] to [target]. One undo step. */
+    fun addLink(pageId: String, strokeIds: List<String>, imageIds: List<String>, target: LinkTarget) {
+        val page = page(pageId) ?: return
         if (strokeIds.isEmpty() && imageIds.isEmpty()) return
         recordUndo()
         page.links.add(PageLink(strokeIds = strokeIds, imageIds = imageIds, target = target))
         persist()
         message = "Link added"
+    }
+
+    /**
+     * Links what is selected to [target]: the lasso selection's strokes, or else the selected
+     * picture. Nothing selected does nothing.
+     */
+    fun linkSelection(target: LinkTarget) {
+        val (pageId, strokeIds, imageIds) = selectionAnchors() ?: return
+        addLink(pageId, strokeIds, imageIds, target)
         clearSelection()
+    }
+
+    /**
+     * What the current selection would make a link point to: the lasso selection's strokes, or
+     * else the selected picture, on the page they are on. Null if nothing is selected.
+     */
+    fun pickedTarget(): LinkTarget? {
+        val (pageId, strokeIds, imageIds) = selectionAnchors() ?: return null
+        return LinkTarget(noteId, pageId, objectIds = strokeIds + imageIds)
     }
 
     /** Removes a link from a page; its anchors stay. */
@@ -1362,13 +1413,25 @@ class NoteEditorViewModel(
         if (target.noteId == noteId) {
             val pageId = target.pageId ?: return LinkResolution.SameNote(-1)
             val index = pages.indexOfFirst { it.id == pageId }
-            return if (index >= 0) LinkResolution.SameNote(index) else LinkResolution.PageNotFound(noteId)
+            if (index < 0) return LinkResolution.PageNotFound(noteId)
+            if (target.objectIds.isEmpty()) return LinkResolution.SameNote(index)
+            val page = pages[index]
+            val alive = target.objectIds.filter { id ->
+                page.strokes.any { it.id == id } || page.texts.any { it.id == id } || page.images.any { it.id == id }
+            }
+            return if (alive.isEmpty()) LinkResolution.ObjectsNotFound(noteId, pageId) else LinkResolution.SameNote(index, alive)
         }
         val note = repository.getById(target.noteId)
         if (note == null || note.deleted || note.trashedAt != null) return LinkResolution.NoteNotFound
         val pageId = target.pageId ?: return LinkResolution.OtherNote(target.noteId, null)
-        val exists = repository.loadDocument(target.noteId).pages.any { it.id == pageId }
-        return if (exists) LinkResolution.OtherNote(target.noteId, pageId) else LinkResolution.PageNotFound(target.noteId)
+        // Loaded once: the page and the objects the link points to are both checked against it.
+        val page = repository.loadDocument(target.noteId).pages.firstOrNull { it.id == pageId }
+            ?: return LinkResolution.PageNotFound(target.noteId)
+        if (target.objectIds.isEmpty()) return LinkResolution.OtherNote(target.noteId, pageId)
+        val alive = target.objectIds.filter { id ->
+            page.strokes.any { it.id == id } || page.texts.any { it.id == id } || page.images.any { it.id == id }
+        }
+        return if (alive.isEmpty()) LinkResolution.ObjectsNotFound(target.noteId, pageId) else LinkResolution.OtherNote(target.noteId, pageId, alive)
     }
 
     private fun online(): Boolean {
