@@ -20,7 +20,9 @@ import com.gerko.fourenote.data.ink.Calligraphy
 import com.gerko.fourenote.data.ink.InkDocument
 import com.gerko.fourenote.data.ink.InkLayer
 import com.gerko.fourenote.data.ink.InkPage
+import com.gerko.fourenote.data.ink.LinkTarget
 import com.gerko.fourenote.data.ink.PageBackground
+import com.gerko.fourenote.data.ink.PageLink
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.ink.PageText
 import com.gerko.fourenote.data.ink.TextStyleSpec
@@ -34,6 +36,8 @@ import com.gerko.fourenote.data.ink.Tool
 import com.gerko.fourenote.data.ink.isInsideLasso
 import com.gerko.fourenote.data.ink.transformed
 import com.gerko.fourenote.data.ink.withColor
+import com.gerko.fourenote.data.ink.withStrokesReplaced
+import com.gerko.fourenote.data.ink.withoutDeadLinks
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +46,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -66,6 +71,21 @@ private const val TABLE_ROW_HEIGHT = 44f
 val InkPenWidths = listOf(2.5f, 4.5f, 8f)
 val CalligraphyWidths = listOf(6f, 10f, 16f)
 
+/** Where a link leads, once checked against the notes on this device. */
+sealed interface LinkResolution {
+    /** A page of this note, by index; -1 means the note's current page, so stay where you are. */
+    data class SameNote(val pageIndex: Int) : LinkResolution
+
+    /** A page of another note; a null [pageId] opens that note at its first page. */
+    data class OtherNote(val noteId: String, val pageId: String?) : LinkResolution
+
+    /** The note the link points to is gone (deleted, in the trash, or never synced here). */
+    data object NoteNotFound : LinkResolution
+
+    /** The note is here but the page is not, e.g. it was deleted on another device. */
+    data class PageNotFound(val noteId: String) : LinkResolution
+}
+
 sealed interface RecognitionState {
     /** [downloading] is true while the model is fetched for the first time; [progress] is 0..1 when known. */
     data class Working(val downloading: Boolean, val progress: Float? = null) : RecognitionState
@@ -87,19 +107,37 @@ class PageState(
     images: List<PageImage>,
     invertBackground: Boolean,
     texts: List<PageText>,
+    links: List<PageLink>,
 ) {
     val strokes = mutableStateListOf<InkStroke>().apply { addAll(strokes) }
     var placement by mutableStateOf(placement)
     val images = mutableStateListOf<PageImage>().apply { addAll(images) }
     var invertBackground by mutableStateOf(invertBackground)
     val texts = mutableStateListOf<PageText>().apply { addAll(texts) }
+    val links = mutableStateListOf<PageLink>().apply { addAll(links) }
 
-    fun toPage() = InkPage(id, width, height, background, strokes.toList(), placement, images.toList(), invertBackground, texts.toList())
+    fun toPage() = InkPage(
+        id, width, height, background, strokes.toList(), placement, images.toList(), invertBackground, texts.toList(),
+        links = links.toList(),
+    )
+
+    /**
+     * Carries the page's links over to strokes that were given new ids (see
+     * [withStrokesReplaced]). Links whose anchors are all gone stay here, so undo can bring them
+     * back; they are only dropped when the page is saved.
+     */
+    fun replaceLinkStrokes(replacements: Map<String, List<String>>) {
+        if (replacements.isEmpty() || links.isEmpty()) return
+        val replaced = links.withStrokesReplaced(replacements)
+        if (replaced == links.toList()) return
+        links.clear()
+        links.addAll(replaced)
+    }
 
     companion object {
         fun of(page: InkPage) = PageState(
             page.id, page.width, page.height, page.background, page.strokes, page.placement, page.images,
-            page.invertBackground, page.texts,
+            page.invertBackground, page.texts, page.links,
         )
     }
 }
@@ -563,15 +601,21 @@ class NoteEditorViewModel(
     }
 
     private fun replaceSelection(transform: (InkStroke) -> InkStroke) {
-        val strokes = selectionPageId?.let(::page)?.strokes ?: return
+        val page = selectionPageId?.let(::page) ?: return
+        val strokes = page.strokes
         if (selection.isEmpty()) return
         recordUndo()
         val replaced = mutableSetOf<InkStroke>()
+        // Links hang on stroke ids, which a move or recolor changes; carry them over.
+        val newIds = HashMap<String, List<String>>()
         for (i in strokes.indices) {
             if (strokes[i] in selection) {
-                strokes[i] = transform(strokes[i]).also { replaced.add(it) }
+                val old = strokes[i]
+                strokes[i] = transform(old).also { replaced.add(it) }
+                newIds[old.id] = listOf(strokes[i].id)
             }
         }
+        page.replaceLinkStrokes(newIds)
         selection = replaced
         persist()
     }
@@ -708,22 +752,27 @@ class NoteEditorViewModel(
     }
 
     fun eraseAt(pageId: String, x: Float, y: Float) {
-        val strokes = page(pageId)?.strokes ?: return
+        val page = page(pageId) ?: return
+        val strokes = page.strokes
         if (eraseWholeStrokes) {
             strokes.removeAll { it.layerId == activeLayerId && it.isHitBy(x, y, ERASER_RADIUS_DP) }
             return
         }
+        // A stroke rubbed through becomes pieces with new ids; links on it move to the pieces.
+        val newIds = HashMap<String, List<String>>()
         var i = 0
         while (i < strokes.size) {
             val pieces = if (strokes[i].layerId == activeLayerId) strokes[i].erasedAround(x, y, ERASER_RADIUS_DP) else null
             if (pieces == null) {
                 i++
             } else {
+                newIds[strokes[i].id] = pieces.map { it.id }
                 strokes.removeAt(i)
                 strokes.addAll(i, pieces)
                 i += pieces.size
             }
         }
+        page.replaceLinkStrokes(newIds)
     }
 
     fun endErase() {
@@ -1264,6 +1313,64 @@ class NoteEditorViewModel(
         recognition = null
     }
 
+    /**
+     * Links what is selected to [target]: the lasso selection's strokes, or else the selected
+     * picture. Nothing selected does nothing.
+     */
+    fun linkSelection(target: LinkTarget) {
+        val pageId = selectionPageId ?: selectedImage?.first ?: return
+        val page = page(pageId) ?: return
+        val strokeIds = if (selection.isNotEmpty()) selection.map { it.id } else emptyList()
+        val imageIds = if (strokeIds.isEmpty()) listOfNotNull(selectedImage?.takeIf { it.first == pageId }?.second) else emptyList()
+        if (strokeIds.isEmpty() && imageIds.isEmpty()) return
+        recordUndo()
+        page.links.add(PageLink(strokeIds = strokeIds, imageIds = imageIds, target = target))
+        persist()
+        message = "Link added"
+        clearSelection()
+    }
+
+    /** Removes a link from a page; its anchors stay. */
+    fun removeLink(pageId: String, linkId: String) {
+        val page = page(pageId) ?: return
+        if (page.links.none { it.id == linkId }) return
+        recordUndo()
+        page.links.removeAll { it.id == linkId }
+        persist()
+    }
+
+    /** The notes a link can point to, this one included. */
+    suspend fun linkableNotes(): List<Note> = repository.observeAll().first()
+
+    /**
+     * The pages a link can point to in [noteId]: this note's pages as they are on screen, or
+     * another note's as saved. Null if that note is gone or locked.
+     */
+    suspend fun linkablePages(noteId: String): List<InkPage>? {
+        if (noteId == this.noteId) return pages.map { it.toPage() }
+        val note = repository.getById(noteId) ?: return null
+        if (note.locked) return null
+        return repository.loadDocument(noteId).pages
+    }
+
+    /**
+     * Checks where [link] leads now. A link to this note's current page (no page id) resolves to
+     * [LinkResolution.SameNote] with index -1: the reader is already there.
+     */
+    suspend fun resolve(link: PageLink): LinkResolution {
+        val target = link.target
+        if (target.noteId == noteId) {
+            val pageId = target.pageId ?: return LinkResolution.SameNote(-1)
+            val index = pages.indexOfFirst { it.id == pageId }
+            return if (index >= 0) LinkResolution.SameNote(index) else LinkResolution.PageNotFound(noteId)
+        }
+        val note = repository.getById(target.noteId)
+        if (note == null || note.deleted || note.trashedAt != null) return LinkResolution.NoteNotFound
+        val pageId = target.pageId ?: return LinkResolution.OtherNote(target.noteId, null)
+        val exists = repository.loadDocument(target.noteId).pages.any { it.id == pageId }
+        return if (exists) LinkResolution.OtherNote(target.noteId, pageId) else LinkResolution.PageNotFound(target.noteId)
+    }
+
     private fun online(): Boolean {
         val connectivity = attachments.context.getSystemService(android.net.ConnectivityManager::class.java)
         val caps = connectivity?.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
@@ -1344,7 +1451,8 @@ class NoteEditorViewModel(
      */
     private fun persist() {
         if (note == null) return
-        pendingSave = PendingSave(title, InkDocument(pages.map { it.toPage() }, paper, layers.toList()))
+        // Links whose anchors are gone are kept in memory (undo may bring them back) but not saved.
+        pendingSave = PendingSave(title, InkDocument(pages.map { it.toPage().withoutDeadLinks() }, paper, layers.toList()))
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(SAVE_DELAY_MS)

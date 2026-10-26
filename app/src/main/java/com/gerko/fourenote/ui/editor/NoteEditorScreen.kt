@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddAPhoto
 import com.gerko.fourenote.ui.scan.ScanDialog
 import androidx.compose.ui.text.font.FontStyle
@@ -207,11 +209,14 @@ fun NoteEditorScreen(
     viewModel: NoteEditorViewModel,
     backgrounds: BackgroundLoader,
     onBack: () -> Unit,
+    onOpenNote: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
     val snackbar = remember { SnackbarHostState() }
+    // The link picker, opened from a selection or a picture.
+    var linking by remember { mutableStateOf(false) }
     fun scrollToPage(index: Int) {
         scope.launch { gridState.animateScrollToItem(index) }
     }
@@ -432,6 +437,9 @@ fun NoteEditorScreen(
                     fullScreen = fullScreen,
                     arranging = arranging,
                     onArranged = { arranging = false },
+                    onOpenNote = onOpenNote,
+                    onBack = onBack,
+                    onLink = { linking = true },
                 )
             } else {
                 Box(Modifier.fillMaxSize())
@@ -521,6 +529,16 @@ fun NoteEditorScreen(
         )
     }
     RecognitionDialog(viewModel)
+    if (linking) {
+        LinkPickerDialog(
+            viewModel,
+            onPick = {
+                viewModel.linkSelection(it)
+                linking = false
+            },
+            onDismiss = { linking = false },
+        )
+    }
     }
 }
 
@@ -543,6 +561,10 @@ private fun PageList(
     /** Arrange pages: a grid of small pages to drag into order; a tap opens one ([onArranged]). */
     arranging: Boolean = false,
     onArranged: () -> Unit = {},
+    onOpenNote: (String) -> Unit = {},
+    onBack: () -> Unit = {},
+    /** Opens the link picker for the selection or the selected picture. */
+    onLink: () -> Unit = {},
 ) {
     val drawingColor = if (viewModel.tool == Tool.HIGHLIGHTER) viewModel.highlighterColor else viewModel.penColor
     val drawingWidth = when (viewModel.tool) {
@@ -682,6 +704,92 @@ private fun PageList(
         panX = clampPan(panX)
         zoomedToPage = null
     }
+
+    // Links: the badge just followed pulses, and a page jumped to is ringed, both for a moment.
+    var flashLinkId by remember { mutableStateOf<String?>(null) }
+    var flashPageId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(flashLinkId) {
+        if (flashLinkId == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(1600)
+        flashLinkId = null
+    }
+    LaunchedEffect(flashPageId) {
+        if (flashPageId == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(1600)
+        flashPageId = null
+    }
+    // A link that leads nowhere, with the page it is on, to offer removing it.
+    var broken by remember { mutableStateOf<BrokenLink?>(null) }
+    // Where the reader is now, to come back to after following a link.
+    fun here(linkId: String) = TrailStop(
+        viewModel.noteId,
+        viewModel.title.ifBlank { "Untitled" },
+        gridState.firstVisibleItemIndex,
+        gridState.firstVisibleItemScrollOffset,
+        zoom,
+        panX,
+        panY,
+        linkId,
+    )
+    fun follow(pageId: String, link: com.gerko.fourenote.data.ink.PageLink) {
+        scope.launch {
+            when (val r = viewModel.resolve(link)) {
+                is LinkResolution.SameNote -> if (r.pageIndex >= 0) {
+                    LinkTrail.stops.add(here(link.id))
+                    gridState.animateScrollToItem(r.pageIndex)
+                    flashPageId = viewModel.pages[r.pageIndex].id
+                }
+                is LinkResolution.OtherNote -> {
+                    LinkTrail.stops.add(here(link.id))
+                    LinkTrail.openPage = r.pageId?.let { r.noteId to it }
+                    onOpenNote(r.noteId)
+                }
+                else -> broken = BrokenLink(pageId, link, r)
+            }
+        }
+    }
+    // Puts the reader back where they were: page, scroll, zoom, and the badge they tapped pulses.
+    suspend fun applyStop(stop: TrailStop) {
+        zoom = stop.zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        gridState.scrollToItem(stop.pageIndex, stop.scrollOffset)
+        panY = stop.panY
+        withFrameNanos { }
+        panX = clampPan(stop.panX)
+        flashLinkId = stop.linkId
+    }
+    fun goBack() {
+        val stop = LinkTrail.stops.removeLastOrNull() ?: return
+        if (stop.noteId == viewModel.noteId) {
+            scope.launch { applyStop(stop) }
+        } else {
+            // The note left behind is closed on the way; its editor puts the reader back.
+            LinkTrail.restore = stop
+            onBack()
+        }
+    }
+    // Coming back to this note from another: the pages must be laid out before the spot is restored.
+    LaunchedEffect(viewModel.loaded, LinkTrail.restore) {
+        val stop = LinkTrail.restore
+        if (viewModel.loaded && stop != null && stop.noteId == viewModel.noteId) {
+            withFrameNanos { }
+            applyStop(stop)
+            // Cleared only now: clearing it restarts this effect, which would cancel the restore.
+            LinkTrail.restore = null
+        }
+    }
+    // A link followed into this note's page: scroll there once the pages are there.
+    LaunchedEffect(viewModel.loaded) {
+        val (id, pageId) = LinkTrail.openPage ?: return@LaunchedEffect
+        if (!viewModel.loaded || id != viewModel.noteId) return@LaunchedEffect
+        LinkTrail.openPage = null
+        val index = viewModel.pages.indexOfFirst { it.id == pageId }
+        if (index >= 0) {
+            withFrameNanos { }
+            gridState.scrollToItem(index)
+            flashPageId = pageId
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = LinkTrail.stops.isNotEmpty()) { goBack() }
 
     // Bars for a selection sit just under the floating tool bar.
     val barsTop = if (fullScreen) 12.dp else TOOLBAR_SPACE
@@ -910,7 +1018,8 @@ private fun PageList(
                                 .aspectRatio(page.width / page.height)
                                 // Input inside follows the turn, so writing on a turned page lands where the pen is.
                                 .graphicsLayer { rotationZ = if (arrange) 0f else pageRotations[page.id] ?: 0f }
-                                .then(if (fullScreen) Modifier else Modifier.shadow(2.dp)),
+                                .then(if (fullScreen) Modifier else Modifier.shadow(2.dp))
+                                .then(if (flashPageId == page.id) Modifier.border(3.dp, MaterialTheme.colorScheme.primary) else Modifier),
                         ) {
                         InkCanvas(
                             strokes = visibleStrokes,
@@ -983,6 +1092,17 @@ private fun PageList(
                             onChange = { viewModel.updateText(page.id, it) },
                             onDelete = viewModel::deleteEditingText,
                         )
+                        // Badges are in the way while arranging pages, which is only for moving them.
+                        if (!arrange) {
+                            LinkBadges(
+                                page = page,
+                                pxPerUnit = itemWidthPx / page.width,
+                                flashLinkId = flashLinkId,
+                                onFollow = { follow(page.id, it) },
+                                onRemove = { viewModel.removeLink(page.id, it.id) },
+                                modifier = Modifier.matchParentSize(),
+                            )
+                        }
                         }
                         if (!fullScreen) PageFooter(
                             number = index + 1,
@@ -1069,12 +1189,100 @@ private fun PageList(
             )
         }
         if (viewModel.selection.isNotEmpty()) {
-            SelectionBar(viewModel, darkPaper, Modifier.align(Alignment.TopCenter).padding(top = barsTop))
+            SelectionBar(viewModel, darkPaper, onLink = onLink, modifier = Modifier.align(Alignment.TopCenter).padding(top = barsTop))
         }
         viewModel.selectedImageObject?.let { image ->
-            ImageBar(viewModel, image, Modifier.align(Alignment.TopCenter).padding(top = barsTop))
+            ImageBar(viewModel, image, onLink = onLink, modifier = Modifier.align(Alignment.TopCenter).padding(top = barsTop))
+        }
+        // The way back along followed links, while there is one.
+        if (LinkTrail.stops.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 6.dp,
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = ::goBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Back to ${LinkTrail.stops.last().title}")
+                    }
+                    IconButton(onClick = { LinkTrail.clear() }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+            }
+        }
+        broken?.let { b ->
+            BrokenLinkDialog(
+                broken = b,
+                onOpenNote = {
+                    broken = null
+                    val noteId = (b.resolution as? LinkResolution.PageNotFound)?.noteId
+                    if (noteId != null && noteId != viewModel.noteId) {
+                        LinkTrail.stops.add(here(b.link.id))
+                        LinkTrail.openPage = null
+                        onOpenNote(noteId)
+                    }
+                },
+                onRemove = {
+                    broken = null
+                    viewModel.removeLink(b.pageId, b.link.id)
+                },
+                onDismiss = { broken = null },
+            )
         }
     }
+}
+
+/** A link that leads nowhere, with the page it is on, so it can be removed. */
+private data class BrokenLink(
+    val pageId: String,
+    val link: com.gerko.fourenote.data.ink.PageLink,
+    val resolution: LinkResolution,
+)
+
+/** Explains why a link didn't open, and offers to remove it or open the note it names. */
+@Composable
+private fun BrokenLinkDialog(
+    broken: BrokenLink,
+    onOpenNote: () -> Unit,
+    onRemove: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val pageMissing = broken.resolution as? LinkResolution.PageNotFound
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (pageMissing != null) "Linked page not found" else "Note not found") },
+        text = {
+            Text(
+                if (pageMissing != null) {
+                    "The page was deleted. You can open the note instead."
+                } else {
+                    "The note this link points to was deleted or isn't on this device."
+                },
+            )
+        },
+        confirmButton = {
+            if (pageMissing != null) {
+                TextButton(onClick = onOpenNote) { Text("Open note") }
+            } else {
+                TextButton(onClick = onRemove) { Text("Remove link") }
+            }
+        },
+        dismissButton = {
+            Row {
+                if (pageMissing != null) {
+                    TextButton(onClick = onRemove) { Text("Remove link") }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 /**
@@ -1172,7 +1380,7 @@ private fun PdfChoice(
 
 /** Floats over the pages while a picture is selected. */
 @Composable
-private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, modifier: Modifier = Modifier) {
+private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, onLink: () -> Unit, modifier: Modifier = Modifier) {
     var cropping by remember { mutableStateOf(false) }
     if (cropping) {
         CropDialog(
@@ -1196,6 +1404,11 @@ private fun ImageBar(viewModel: NoteEditorViewModel, image: PageImage, modifier:
                 Icon(if (image.locked) Icons.Filled.LockOpen else Icons.Filled.Lock, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text(if (image.locked) "Unlock" else "Lock")
+            }
+            TextButton(onClick = onLink) {
+                Icon(Icons.Filled.Link, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("Link to…")
             }
             if (!image.locked) {
             TextButton(onClick = viewModel::deleteSelectedImage) {
@@ -1293,7 +1506,7 @@ private fun AdjustImageBar(onFit: () -> Unit, onDone: () -> Unit, modifier: Modi
 
 /** Floats over the pages while something is lasso-selected, so its actions are always in reach. */
 @Composable
-private fun SelectionBar(viewModel: NoteEditorViewModel, darkPaper: Boolean, modifier: Modifier = Modifier) {
+private fun SelectionBar(viewModel: NoteEditorViewModel, darkPaper: Boolean, onLink: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         shape = RoundedCornerShape(28.dp),
         tonalElevation = 6.dp,
@@ -1326,6 +1539,11 @@ private fun SelectionBar(viewModel: NoteEditorViewModel, darkPaper: Boolean, mod
                 Icon(Icons.Filled.ContentCopy, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text("Duplicate")
+            }
+            TextButton(onClick = onLink) {
+                Icon(Icons.Filled.Link, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("Link to…")
             }
             PenColors.forEach { c ->
                 ColorSwatch(c, selected = false, darkPaper = darkPaper) { viewModel.recolorSelection(c) }

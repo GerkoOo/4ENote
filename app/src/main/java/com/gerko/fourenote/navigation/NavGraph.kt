@@ -42,6 +42,8 @@ fun FourENoteNavGraph(
 ) {
     NavHost(navController = navController, startDestination = Routes.NOTE_LIST) {
         composable(Routes.NOTE_LIST) {
+            // Back at the list, the way back along followed links is over.
+            androidx.compose.runtime.LaunchedEffect(Unit) { com.gerko.fourenote.ui.editor.LinkTrail.clear() }
             val viewModel: NoteListViewModel = viewModel(
                 factory = NoteListViewModel.Factory(
                     repository,
@@ -116,12 +118,47 @@ fun FourENoteNavGraph(
                             noteId, repository, attachments, toolPreferences, syncManager::requestSync, syncManager::requestSync,
                         ),
                     )
-                    NoteEditorScreen(viewModel = viewModel, backgrounds = backgrounds, onBack = { navController.popBackStack() })
+                    NoteEditorScreen(
+                        viewModel = viewModel,
+                        backgrounds = backgrounds,
+                        onBack = {
+                            // Leaving with the tool bar's arrow: forget jumps within this note, and go
+                            // back to the exact spot in the note before it (unless that is already set).
+                            val trail = com.gerko.fourenote.ui.editor.LinkTrail
+                            if (trail.restore == null) {
+                                while (trail.stops.lastOrNull()?.noteId == noteId) trail.stops.removeAt(trail.stops.lastIndex)
+                                trail.stops.removeLastOrNull()?.let { trail.restore = it }
+                            }
+                            navController.popBackStack()
+                        },
+                        onOpenNote = { id ->
+                            val trail = com.gerko.fourenote.ui.editor.LinkTrail
+                            val earlier = trail.stops.indexOfFirst { it.noteId == id }
+                            if (earlier < 0) {
+                                navController.navigate(Routes.noteEditor(id))
+                            } else {
+                                // That note is open further back: go back to it rather than open it twice,
+                                // since two editors of one note would overwrite each other's ink.
+                                while (trail.stops.size > earlier) trail.stops.removeAt(trail.stops.lastIndex)
+                                while (navController.currentBackStackEntry?.arguments?.getString("noteId") != id &&
+                                    navController.previousBackStackEntry != null
+                                ) {
+                                    navController.popBackStack()
+                                }
+                            }
+                        },
+                    )
                 }
                 else -> com.gerko.fourenote.ui.settings.NoteLockedScreen(
                     title = note?.title.orEmpty(),
                     onUnlocked = { noteLock.unlocked(noteId) },
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        // A link led to a locked note: leaving it still goes back to where the reader was.
+                        if (com.gerko.fourenote.ui.editor.LinkTrail.stops.isNotEmpty()) {
+                            com.gerko.fourenote.ui.editor.LinkTrail.stops.removeLastOrNull()?.let { com.gerko.fourenote.ui.editor.LinkTrail.restore = it }
+                        }
+                        navController.popBackStack()
+                    },
                 )
             }
         }

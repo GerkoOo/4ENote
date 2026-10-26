@@ -314,6 +314,67 @@ fun InkPage.withoutDeadLinks(): InkPage {
 }
 
 /**
+ * Carries links over to strokes that were given new ids (moved, recolored, partly erased): each
+ * anchor id that is a key in [replacements] becomes the ids in its value, in place, and an empty
+ * value drops it. Links that use none of the replaced ids are returned as they are.
+ */
+fun List<PageLink>.withStrokesReplaced(replacements: Map<String, List<String>>): List<PageLink> {
+    if (replacements.isEmpty()) return this
+    return map { link ->
+        if (link.strokeIds.none { it in replacements }) {
+            link
+        } else {
+            link.copy(strokeIds = link.strokeIds.flatMap { replacements[it] ?: listOf(it) })
+        }
+    }
+}
+
+/**
+ * The box around a link's anchors that still exist on the page, as left, top, right and bottom in
+ * page units, or null if none of them do. Pictures are taken unrotated: the box only has to be
+ * near enough to show where the link starts.
+ */
+fun linkAnchorBounds(
+    link: PageLink,
+    strokes: List<InkStroke>,
+    texts: List<PageText>,
+    images: List<PageImage>,
+): FloatArray? {
+    var left = Float.MAX_VALUE
+    var top = Float.MAX_VALUE
+    var right = -Float.MAX_VALUE
+    var bottom = -Float.MAX_VALUE
+    var found = false
+    fun include(l: Float, t: Float, r: Float, b: Float) {
+        left = minOf(left, l)
+        top = minOf(top, t)
+        right = maxOf(right, r)
+        bottom = maxOf(bottom, b)
+        found = true
+    }
+    val strokeIds = link.strokeIds.toHashSet()
+    for (stroke in strokes) {
+        if (stroke.id !in strokeIds) continue
+        for (i in stroke.points.indices step 2) {
+            val x = stroke.points[i]
+            val y = stroke.points[i + 1]
+            include(x, y, x, y)
+        }
+    }
+    val textIds = link.textIds.toHashSet()
+    for (text in texts) {
+        if (text.id in textIds) include(text.x, text.y, text.x + text.width, text.y + text.style.size * 1.4f)
+    }
+    val imageIds = link.imageIds.toHashSet()
+    for (image in images) {
+        if (image.id in imageIds) {
+            include(image.x - image.width / 2, image.y - image.height / 2, image.x + image.width / 2, image.y + image.height / 2)
+        }
+    }
+    return if (found) floatArrayOf(left, top, right, bottom) else null
+}
+
+/**
  * A layer of ink shared by all pages of a note, like layers in a drawing app.
  * Layers are listed bottom to top; hidden layers are neither shown nor exported.
  */

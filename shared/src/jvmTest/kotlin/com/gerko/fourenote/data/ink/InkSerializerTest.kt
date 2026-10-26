@@ -2,6 +2,7 @@ package com.gerko.fourenote.data.ink
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class InkSerializerTest {
@@ -156,6 +157,38 @@ class PageLinkTest {
             """]}]}"""
         val links = InkSerializer.decode(json).pages[0].links
         assertEquals(listOf("ok"), links.map { it.id })
+    }
+
+    @Test
+    fun linksFollowStrokesToTheirNewIds() {
+        val links = listOf(
+            PageLink(id = "l1", strokeIds = listOf("a", "b"), target = LinkTarget(noteId = "n")),
+            PageLink(id = "l2", strokeIds = listOf("c"), target = LinkTarget(noteId = "n")),
+        )
+        // "a" was split in two, "b" was erased, "c" was not touched.
+        val replaced = links.withStrokesReplaced(mapOf("a" to listOf("a1", "a2"), "b" to emptyList()))
+        assertEquals(listOf("a1", "a2"), replaced[0].strokeIds)
+        assertEquals(listOf("c"), replaced[1].strokeIds)
+        // A link that uses none of the replaced ids is not copied.
+        assertSame(links[1], replaced[1])
+    }
+
+    @Test
+    fun anchorBoundsCoverStrokesTextsAndPictures() {
+        val stroke = InkStroke(1, 3f, false, floatArrayOf(10f, 20f, 50f, 60f), id = "s")
+        val text = PageText(id = "t", x = 100f, y = 200f, width = 80f, style = TextStyleSpec(size = 10f))
+        val image = PageImage(id = "i", file = "a.png", x = 300f, y = 300f, width = 40f, height = 20f)
+        val strokesOnly = linkAnchorBounds(PageLink(strokeIds = listOf("s"), target = LinkTarget("n")), listOf(stroke), listOf(text), listOf(image))
+        assertEquals(listOf(10f, 20f, 50f, 60f), strokesOnly!!.toList())
+        val mixed = linkAnchorBounds(
+            PageLink(strokeIds = listOf("s"), imageIds = listOf("i"), target = LinkTarget("n")),
+            listOf(stroke), listOf(text), listOf(image),
+        )
+        assertEquals(listOf(10f, 20f, 320f, 310f), mixed!!.toList())
+        val textOnly = linkAnchorBounds(PageLink(textIds = listOf("t"), target = LinkTarget("n")), listOf(stroke), listOf(text), listOf(image))
+        assertEquals(listOf(100f, 200f, 180f, 214f), textOnly!!.toList())
+        // Anchors that are no longer on the page give no box at all.
+        assertEquals(null, linkAnchorBounds(PageLink(strokeIds = listOf("gone"), target = LinkTarget("n")), listOf(stroke), listOf(text), listOf(image)))
     }
 
     @Test
