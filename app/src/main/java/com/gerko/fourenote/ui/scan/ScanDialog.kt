@@ -81,7 +81,6 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -237,7 +236,7 @@ private fun CameraStage(
     onCancel: () -> Unit,
 ) {
     val context = LocalContext.current
-    val lifecycle = LocalLifecycleOwner.current
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var allowed by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }

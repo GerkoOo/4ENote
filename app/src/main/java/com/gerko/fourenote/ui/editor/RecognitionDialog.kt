@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ui.editor
 
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
@@ -38,7 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
@@ -47,7 +49,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun RecognitionDialog(viewModel: NoteEditorViewModel) {
     val state = viewModel.recognition ?: return
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipboardScope = androidx.compose.runtime.rememberCoroutineScope()
     val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     LaunchedEffect(state) {
@@ -117,7 +120,9 @@ fun RecognitionDialog(viewModel: NoteEditorViewModel) {
                         context.startActivity(Intent.createChooser(share, null))
                     }) { Text("Share") }
                     TextButton(onClick = {
-                        clipboard.setText(AnnotatedString(text))
+                        clipboardScope.launch {
+                            clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("4ENote", text)))
+                        }
                         viewModel.showMessage("Copied")
                         viewModel.closeRecognition()
                     }) { Text("Copy") }

@@ -391,7 +391,7 @@ internal class InkBitmapCache(private val budget: InkCacheBudget) {
         val sameSize = picture != null && picture.width == width && picture.height == height
         if (!sameSize) picture = ImageBitmap(width, height)
         val grown = sameSize && key == baseKey && drawn.size <= strokes.size && drawn.indices.all { drawn[it] === strokes[it] }
-        val canvas = androidx.compose.ui.graphics.Canvas(picture!!)
+        val canvas = androidx.compose.ui.graphics.Canvas(picture)
         canvas.save()
         canvas.scale(width / scope.size.width, height / scope.size.height)
         painter.draw(scope, scope.layoutDirection, canvas, scope.size) {

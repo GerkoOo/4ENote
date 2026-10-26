@@ -100,6 +100,7 @@ class NoteListViewModel(
     }
 
     /** How many notes are in Deleted notes, for the menu entry. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val trashedCount: StateFlow<Int> = repository.observeTrashed()
         .mapLatest { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)

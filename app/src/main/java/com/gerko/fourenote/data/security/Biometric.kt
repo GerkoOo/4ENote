@@ -116,6 +116,8 @@ object Biometric {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     setAllowedAuthenticators(ALLOWED)
                 } else {
+                    // The only way to allow the PIN before Android 11; its replacement needs Android 11.
+                    @Suppress("DEPRECATION")
                     setDeviceCredentialAllowed(true)
                 }
             }

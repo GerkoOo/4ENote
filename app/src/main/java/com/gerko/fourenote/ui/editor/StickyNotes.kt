@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.automirrored.filled.StickyNote2
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -96,7 +96,7 @@ private fun FoldedSticky(sticky: StickyNote, pxPerUnit: Float, onToggleFold: () 
             .clickable(onClick = onToggleFold),
     ) {
         Icon(
-            Icons.Filled.StickyNote2,
+            Icons.AutoMirrored.Filled.StickyNote2,
             contentDescription = "Unfold sticky note",
             tint = Color.Black.copy(alpha = 0.55f),
             modifier = Modifier.size(side * 0.6f),
@@ -175,7 +175,7 @@ private fun OpenSticky(
                 .clickable(onClick = onToggleFold),
         ) {
             Icon(
-                Icons.Filled.StickyNote2,
+                Icons.AutoMirrored.Filled.StickyNote2,
                 contentDescription = "Fold sticky note",
                 tint = Color.Black.copy(alpha = 0.45f),
                 modifier = Modifier.size(16.dp),

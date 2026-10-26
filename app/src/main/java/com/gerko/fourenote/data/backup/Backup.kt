@@ -121,7 +121,7 @@ class Backup(
                             locked = o.optBoolean("locked", false),
                         )
                     }.associateBy { it.id }
-                    for ((id, note) in backed!!) {
+                    for ((id, note) in backed) {
                         val local = here[id]
                         // The id names the note's folders; a backup is a file from anywhere, so check it.
                         if (!SafeName.isSafeFromCloud(id)) continue
@@ -149,7 +149,7 @@ class Backup(
         var added = 0
         var updated = 0
         for (id in taking) {
-            val note = backed!!.getValue(id)
+            val note = backed.getValue(id)
             val local = here[id]
             // Kept as an edit (dirty, newer than before) so sync takes it, keeping this device's
             // link to the cloud copy so it is updated rather than duplicated.
@@ -171,11 +171,11 @@ class Backup(
         // Folders: the newer of each; any a restored note is in comes back if it was deleted here.
         val localFolders = folders()
         var merged = FolderFile.merge(localFolders, backedFolders)
-        val needed = taking.mapNotNull { backed!![it]?.folderId }.toSet()
+        val needed = taking.mapNotNull { backed[it]?.folderId }.toSet()
         merged = merged.map { if (it.deleted && it.id in needed) it.copy(deleted = false, updatedAt = now) else it }
         val newFolders = merged.count { f -> localFolders.none { it.id == f.id && !it.deleted } && !f.deleted }
         if (merged != localFolders.sortedBy { it.id }) saveFolders(merged)
-        Restored(added, updated, backed!!.size - added - updated, newFolders)
+        Restored(added, updated, backed.size - added - updated, newFolders)
     }
 
     // Where a file entry goes, or null for anything unexpected (never outside the note folders).

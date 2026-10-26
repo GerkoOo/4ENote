@@ -18,7 +18,8 @@ class OAuthRedirectActivity : Activity() {
         val app = application as FourENoteApp
         val answer = intent?.data
         CoroutineScope(Dispatchers.Main).launch {
-            val error = answer?.let { app.googleAuth.handleRedirect(it) } ?: "No answer from Google"
+            // handleRedirect gives null on success, so it must not fall through to "no answer".
+            val error = if (answer == null) "No answer from Google" else app.googleAuth.handleRedirect(answer)
             if (error != null) {
                 Toast.makeText(app, error, Toast.LENGTH_LONG).show()
             } else {

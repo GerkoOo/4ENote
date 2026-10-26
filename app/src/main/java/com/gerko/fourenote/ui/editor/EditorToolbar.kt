@@ -30,7 +30,7 @@ import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.HighlightAlt
 import androidx.compose.material.icons.filled.HistoryEdu
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.automirrored.filled.StickyNote2
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material3.DropdownMenu
@@ -96,7 +96,7 @@ internal fun ToolBar(
             ToolChip("Text", Icons.Filled.Title, viewModel.tool == Tool.TEXT) {
                 viewModel.selectTool(Tool.TEXT)
             }
-            ToolChip("Sticky", Icons.Filled.StickyNote2, viewModel.tool == Tool.STICKY) {
+            ToolChip("Sticky", Icons.AutoMirrored.Filled.StickyNote2, viewModel.tool == Tool.STICKY) {
                 viewModel.selectTool(Tool.STICKY)
             }
     }
