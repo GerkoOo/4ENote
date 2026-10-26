@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="FormatCompatibilityTest[jvm]" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-10-26T00:08:15.009Z" hostname="gerko" time="0.025">
-  <properties/>
-  <testcase name="theOldFixtureDecodesToTheSameValues[jvm]" classname="com.gerko.fourenote.data.ink.FormatCompatibilityTest" time="0.006"/>
-  <testcase name="encodingTheDecodedFixtureGivesTheSameJson[jvm]" classname="com.gerko.fourenote.data.ink.FormatCompatibilityTest" time="0.019"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

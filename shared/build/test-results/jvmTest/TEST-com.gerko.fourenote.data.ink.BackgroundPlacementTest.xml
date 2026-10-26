@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="BackgroundPlacementTest[jvm]" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-10-26T00:08:14.963Z" hostname="gerko" time="0.025">
-  <properties/>
-  <testcase name="movedAndResizedImageIsSaved[jvm]" classname="com.gerko.fourenote.data.ink.BackgroundPlacementTest" time="0.024"/>
-  <testcase name="imagesFromBeforeFillTheirPage[jvm]" classname="com.gerko.fourenote.data.ink.BackgroundPlacementTest" time="0.001"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

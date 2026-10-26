@@ -9,6 +9,8 @@
 .cxx
 local.properties
 app/build/
+shared/build/
+.kotlin/
 app/release/
 *.apk
 *.aab

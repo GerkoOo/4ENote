@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="SafeNameTest[jvm]" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-10-26T00:08:14.918Z" hostname="gerko" time="0.043">
-  <properties/>
-  <testcase name="plainNamesAreSafe[jvm]" classname="com.gerko.fourenote.data.SafeNameTest" time="0.006"/>
-  <testcase name="aHostilePageIdGetsANewOne[jvm]" classname="com.gerko.fourenote.data.SafeNameTest" time="0.036"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>
