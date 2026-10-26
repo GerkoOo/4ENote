@@ -20,7 +20,11 @@ import com.gerko.fourenote.data.ink.withoutDeadLinks
  * both changed them the more recent edit wins.
  */
 object NoteMerger {
-    fun merge(base: Note?, local: Note, remote: Note): Note {
+    /**
+     * [remoteFirst] breaks ties in ordering (see [mergeById]): devices merging each other's files
+     * pass opposite values, so they agree.
+     */
+    fun merge(base: Note?, local: Note, remote: Note, remoteFirst: Boolean = false): Note {
         val baseDoc = base?.let { InkSerializer.decode(it.inkData) }
         val localDoc = InkSerializer.decode(local.inkData)
         val remoteDoc = InkSerializer.decode(remote.inkData)
@@ -29,7 +33,7 @@ object NoteMerger {
         val localPages = localDoc.pages.associateBy { it.id }
         val remotePages = remoteDoc.pages.associateBy { it.id }
 
-        val pages = mergeById(baseDoc?.pages.orEmpty(), localDoc.pages, remoteDoc.pages) { it.id }
+        val pages = mergeById(remoteFirst, baseDoc?.pages.orEmpty(), localDoc.pages, remoteDoc.pages) { it.id }
             .map { page ->
                 val inBoth = localPages[page.id] != null && remotePages[page.id] != null
                 if (!inBoth) {
@@ -40,9 +44,9 @@ object NoteMerger {
                     val remotePage = remotePages.getValue(page.id)
                     val localIsNewer = local.updatedAt >= remote.updatedAt
                     page.copy(
-                        strokes = mergeById(basePage?.strokes.orEmpty(), localPage.strokes, remotePage.strokes, InkStroke::id),
+                        strokes = mergeById(remoteFirst, basePage?.strokes.orEmpty(), localPage.strokes, remotePage.strokes, InkStroke::id),
                         // Pictures can be moved/resized in place, so for one edited on both sides pick per picture.
-                        images = mergeById(basePage?.images.orEmpty(), localPage.images, remotePage.images) { it.id }
+                        images = mergeById(remoteFirst, basePage?.images.orEmpty(), localPage.images, remotePage.images) { it.id }
                             .map { image ->
                                 val local = localPage.images.firstOrNull { it.id == image.id } ?: image
                                 val remote = remotePage.images.firstOrNull { it.id == image.id } ?: image
@@ -54,7 +58,7 @@ object NoteMerger {
                                 }
                             },
                         // Text boxes are edited in place too: per box, the newer side's version.
-                        texts = mergeById(basePage?.texts.orEmpty(), localPage.texts, remotePage.texts) { it.id }
+                        texts = mergeById(remoteFirst, basePage?.texts.orEmpty(), localPage.texts, remotePage.texts) { it.id }
                             .map { text ->
                                 pick(
                                     basePage?.texts?.firstOrNull { it.id == text.id },
@@ -65,7 +69,7 @@ object NoteMerger {
                             },
                         placement = pick(basePage?.placement, localPage.placement, remotePage.placement, localIsNewer),
                         // Links are edited in place too: per link, the newer side's version.
-                        links = mergeById(basePage?.links.orEmpty(), localPage.links, remotePage.links) { it.id }
+                        links = mergeById(remoteFirst, basePage?.links.orEmpty(), localPage.links, remotePage.links) { it.id }
                             .map { link ->
                                 pick(
                                     basePage?.links?.firstOrNull { it.id == link.id },
@@ -74,13 +78,14 @@ object NoteMerger {
                                     localIsNewer,
                                 )
                             },
-                        stickies = mergeById(basePage?.stickies.orEmpty(), localPage.stickies, remotePage.stickies) { it.id }
+                        stickies = mergeById(remoteFirst, basePage?.stickies.orEmpty(), localPage.stickies, remotePage.stickies) { it.id }
                             .map { sticky ->
                                 mergeSticky(
                                     basePage?.stickies?.firstOrNull { it.id == sticky.id },
                                     localPage.stickies.firstOrNull { it.id == sticky.id } ?: sticky,
                                     remotePage.stickies.firstOrNull { it.id == sticky.id } ?: sticky,
                                     localIsNewer,
+                                    remoteFirst,
                                 )
                             },
                     ).withoutDeadLinks()
@@ -88,7 +93,7 @@ object NoteMerger {
             }
 
         // Layers merge as a set too; a layer hidden/renamed on one side keeps that side's version.
-        val layers = mergeById(baseDoc?.layers.orEmpty(), localDoc.layers, remoteDoc.layers) { it.id }
+        val layers = mergeById(remoteFirst, baseDoc?.layers.orEmpty(), localDoc.layers, remoteDoc.layers) { it.id }
             .map { layer ->
                 val base = baseDoc?.layers?.firstOrNull { it.id == layer.id }
                 val l = localDoc.layers.firstOrNull { it.id == layer.id } ?: layer
@@ -119,11 +124,11 @@ object NoteMerger {
      * like the title, while its ink and text merge as sets, so writing in the same sticky on two
      * devices keeps both.
      */
-    private fun mergeSticky(base: StickyNote?, local: StickyNote, remote: StickyNote, localIsNewer: Boolean): StickyNote {
+    private fun mergeSticky(base: StickyNote?, local: StickyNote, remote: StickyNote, localIsNewer: Boolean, remoteFirst: Boolean): StickyNote {
         val frame = pick(base?.withoutContent(), local.withoutContent(), remote.withoutContent(), localIsNewer)
         return frame.copy(
-            strokes = mergeById(base?.strokes.orEmpty(), local.strokes, remote.strokes, InkStroke::id),
-            texts = mergeById(base?.texts.orEmpty(), local.texts, remote.texts) { it.id }
+            strokes = mergeById(remoteFirst, base?.strokes.orEmpty(), local.strokes, remote.strokes, InkStroke::id),
+            texts = mergeById(remoteFirst, base?.texts.orEmpty(), local.texts, remote.texts) { it.id }
                 .map { text ->
                     pick(
                         base?.texts?.firstOrNull { it.id == text.id },
@@ -137,14 +142,61 @@ object NoteMerger {
 
     private fun StickyNote.withoutContent() = copy(strokes = emptyList(), texts = emptyList())
 
-    /** Local order first, then items only the other side added, in its order. */
-    private fun <T> mergeById(base: List<T>, local: List<T>, remote: List<T>, id: (T) -> String): List<T> {
+    /**
+     * The items kept on both sides, in the order of the side that rearranged them (or, if neither
+     * or both did, of the side [remoteFirst] picks), with the other side's additions placed after
+     * the item they followed there. Every device merging the same files so ends up with the same
+     * order.
+     */
+    private fun <T> mergeById(remoteFirst: Boolean, base: List<T>, local: List<T>, remote: List<T>, id: (T) -> String): List<T> {
         val baseIds = base.mapTo(HashSet(), id)
         val localIds = local.mapTo(HashSet(), id)
         val remoteIds = remote.mapTo(HashSet(), id)
-        return local.filter { id(it) !in baseIds || id(it) in remoteIds } +
-            remote.filter { id(it) !in localIds && id(it) !in baseIds }
+        val keptLocal = local.filter { id(it) !in baseIds || id(it) in remoteIds }
+        val keptRemote = remote.filter { id(it) !in baseIds || id(it) in localIds }
+        // Whether a side changed the order of the items all three share.
+        val shared = baseIds.filterTo(HashSet()) { it in localIds && it in remoteIds }
+        val baseOrder = base.map(id).filter { it in shared }
+        val localMoved = local.map(id).filter { it in shared } != baseOrder
+        val remoteMoved = remote.map(id).filter { it in shared } != baseOrder
+        val remoteLeads = if (localMoved != remoteMoved) remoteMoved else remoteFirst
+        val (lead, other) = if (remoteLeads) keptRemote to keptLocal else keptLocal to keptRemote
+
+        // One pass (a page can hold tens of thousands of strokes): each of the other side's own
+        // items is filed under the nearest item before it that both have (or the start), and goes
+        // in after the leading side's own items there.
+        val leadIds = lead.mapTo(HashSet(), id)
+        val otherIds = other.mapTo(HashSet(), id)
+        val head = mutableListOf<T>()
+        val following = HashMap<String, MutableList<T>>()
+        var anchor: String? = null
+        for (item in other) {
+            val itemId = id(item)
+            if (itemId in leadIds) anchor = itemId
+            else (anchor?.let { following.getOrPut(it) { mutableListOf() } } ?: head) += item
+        }
+        if (head.isEmpty() && following.isEmpty()) return lead
+        val result = ArrayList<T>(lead.size + other.size)
+        var pending: List<T> = head
+        for (item in lead) {
+            val itemId = id(item)
+            if (itemId in otherIds) {
+                result += pending
+                pending = following[itemId].orEmpty()
+            }
+            result += item
+        }
+        result += pending
+        return result
     }
+
+    /**
+     * Everything in either note; where both hold the same item, [first]'s version. The base for
+     * merging a file from a device that had merged several files this device has too.
+     */
+    fun union(first: Note, second: Note): Note =
+        // With no base, every single value goes to the newer side: [first] is made the newer.
+        merge(null, first.copy(updatedAt = Long.MAX_VALUE), second).copy(updatedAt = maxOf(first.updatedAt, second.updatedAt))
 
     private fun <T> pick(base: T?, local: T, remote: T, localIsNewer: Boolean): T = when {
         local == remote -> local

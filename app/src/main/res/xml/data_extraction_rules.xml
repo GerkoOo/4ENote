@@ -8,6 +8,7 @@
         <exclude domain="sharedpref" path="app-password.xml" />
         <exclude domain="sharedpref" path="notes-key.xml" />
         <exclude domain="sharedpref" path="device-key.xml" />
+        <exclude domain="sharedpref" path="device-id.xml" />
         <exclude domain="file" path="ink" />
         <exclude domain="file" path="attachments" />
         <exclude domain="file" path="inbox" />
@@ -23,6 +24,7 @@
         <exclude domain="sharedpref" path="app-password.xml" />
         <exclude domain="sharedpref" path="notes-key.xml" />
         <exclude domain="sharedpref" path="device-key.xml" />
+        <exclude domain="sharedpref" path="device-id.xml" />
         <exclude domain="file" path="ink" />
         <exclude domain="file" path="attachments" />
         <exclude domain="file" path="inbox" />

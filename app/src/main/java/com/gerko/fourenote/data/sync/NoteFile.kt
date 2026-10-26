@@ -4,15 +4,17 @@ import com.gerko.fourenote.data.SafeName
 import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.JsonReader
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
 
 /**
- * The `.4enote` file each note is stored as in the cloud: the note's metadata
- * plus its ink. Named after the note id so renaming a note never creates a
- * second copy.
+ * The `.4enote` files a note is stored as in the cloud: the note's metadata plus its ink. Each
+ * device writes only its own file of a note, "noteId.deviceId.4enote", so two devices syncing at
+ * the same moment can never overwrite each other's work; the others merge it in. Named after the
+ * note id, so renaming a note never creates a second copy.
  */
 object NoteFile {
     const val EXTENSION = ".4enote"
@@ -20,7 +22,13 @@ object NoteFile {
     private const val FORMAT = "4enote"
     private const val VERSION = 1
 
-    fun fileName(noteId: String) = "$noteId$EXTENSION"
+    fun fileName(noteId: String, deviceId: String) = "$noteId.$deviceId$EXTENSION"
+
+    /**
+     * Stands for the one shared file per note ("noteId.4enote") that versions before per-device
+     * files wrote. It is read like any other device's file and never written.
+     */
+    const val LEGACY_DEVICE = "legacy"
 
     /** A note's picture or PDF page in the cloud: "noteId~fileName". */
     fun attachmentName(noteId: String, file: String) = "$noteId$ATTACHMENT_SEPARATOR$file"
@@ -39,8 +47,16 @@ object NoteFile {
     private const val ATTACHMENT_SEPARATOR = '~'
 
     /** The note id for a cloud file name, or null if it is not a note file. */
-    fun noteIdOf(fileName: String): String? =
-        fileName.takeIf { it.endsWith(EXTENSION) }?.removeSuffix(EXTENSION)?.takeIf(SafeName::isSafeFromCloud)
+    fun noteIdOf(fileName: String): String? = noteFileOf(fileName)?.first
+
+    /** The note id and the device that wrote it ([LEGACY_DEVICE] for the old shared file), or null if it is not a note file. */
+    fun noteFileOf(fileName: String): Pair<String, String>? {
+        val stem = fileName.takeIf { it.endsWith(EXTENSION) }?.removeSuffix(EXTENSION) ?: return null
+        val dot = stem.lastIndexOf('.')
+        val device = stem.substring(dot + 1)
+        val (noteId, deviceId) = if (dot > 0 && DeviceIdentity.isValid(device)) stem.substring(0, dot) to device else stem to LEGACY_DEVICE
+        return (noteId to deviceId).takeIf { SafeName.isSafeFromCloud(noteId) }
+    }
 
     /** [pdfId] is the note's PDF copy, recorded so every device updates the same PDF. */
     fun encode(note: Note, pdfId: String?): String = StringBuilder().also { encodeTo(note, pdfId, it) }.toString()
@@ -49,7 +65,7 @@ object NoteFile {
      * Writes the note file into [out] as it goes. Written by hand: the ink alone can be tens of
      * millions of characters, and a JSONObject would hold it twice more (escaped, then as text).
      */
-    fun encodeTo(note: Note, pdfId: String?, out: Appendable) {
+    fun encodeTo(note: Note, pdfId: String?, out: Appendable, seen: Map<String, String> = emptyMap()) {
         var first = true
         fun key(name: String) {
             if (!first) out.append(',')
@@ -70,17 +86,39 @@ object NoteFile {
         key("folder"); if (note.folderId == null) out.append("null") else JsonReader.quote(note.folderId, out)
         // Left out when false, so files of unlocked notes stay as they were.
         if (note.locked) { key("locked"); out.append("true") }
+        // The other devices' files (device id to version) merged into this one: lets a device
+        // reading it for the first time find the state both started from (see SyncEngine).
+        if (seen.isNotEmpty()) {
+            key("seen")
+            out.append('{')
+            seen.entries.forEachIndexed { i, (device, version) ->
+                if (i > 0) out.append(',')
+                JsonReader.quote(device, out)
+                out.append(':')
+                JsonReader.quote(version, out)
+            }
+            out.append('}')
+        }
         out.append('}')
     }
 
-    /** Content fields and [Note.remotePdfId]; other sync bookkeeping is left for the caller. */
-    fun decode(text: String): Note {
+    /**
+     * Content fields and [Note.remotePdfId]; other sync bookkeeping is left for the caller. The
+     * file's record of other devices' files merged into it goes into [seen], when given.
+     */
+    fun decode(text: String, seen: MutableMap<String, String>? = null): Note {
         val reader = JsonReader(text)
         val fields = HashMap<String, JsonPrimitive?>()
         var ink = ""
         reader.obj { key ->
-            if (key == "ink" && reader.peek() == '"') ink = reader.string()
-            else fields[key] = reader.element() as? JsonPrimitive
+            when {
+                key == "ink" && reader.peek() == '"' -> ink = reader.string()
+                key == "seen" -> (reader.element() as? JsonObject)?.forEach { (device, version) ->
+                    val v = (version as? JsonPrimitive)?.takeIf { it.isString }?.content
+                    if (v != null && (DeviceIdentity.isValid(device) || device == LEGACY_DEVICE)) seen?.put(device, v)
+                }
+                else -> fields[key] = reader.element() as? JsonPrimitive
+            }
         }
         fun string(key: String) = fields[key]?.takeUnless { it is JsonNull }?.content
         fun long(key: String) = fields[key]?.longOrNull ?: fields[key]?.doubleOrNull?.toLong() ?: 0L
@@ -107,7 +145,8 @@ object NoteFile {
     fun toCloud(text: String): ByteArray = compressed { it.write(text) }
 
     /** The note file, written straight into its compressed cloud form. */
-    fun toCloud(note: Note, pdfId: String?): ByteArray = compressed { encodeTo(note, pdfId, it) }
+    fun toCloud(note: Note, pdfId: String?, seen: Map<String, String> = emptyMap()): ByteArray =
+        compressed { encodeTo(note, pdfId, it, seen) }
 
     private fun compressed(write: (java.io.Writer) -> Unit): ByteArray {
         val bytes = java.io.ByteArrayOutputStream(64 * 1024)

@@ -116,6 +116,7 @@ fun FourENoteNavGraph(
                         key = noteId,
                         factory = NoteEditorViewModel.Factory(
                             noteId, repository, attachments, toolPreferences, syncManager::requestSync, syncManager::requestSync,
+                            deviceLayer = deviceLayer(androidx.compose.ui.platform.LocalContext.current),
                         ),
                     )
                     NoteEditorScreen(
@@ -164,3 +165,9 @@ fun FourENoteNavGraph(
         }
     }
 }
+
+/** The layer this device writes on in every note, named after the device (see DeviceIdentity). */
+private fun deviceLayer(context: android.content.Context) = com.gerko.fourenote.data.ink.InkLayer(
+    id = com.gerko.fourenote.data.sync.DeviceIdentity.layerId(com.gerko.fourenote.data.sync.DeviceIdentity.id(context)),
+    name = com.gerko.fourenote.data.sync.DeviceIdentity.name(),
+)

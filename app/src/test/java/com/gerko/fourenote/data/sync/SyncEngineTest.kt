@@ -32,7 +32,7 @@ class SyncEngineTest {
     private lateinit var b: Device
 
     /** Mirrors the Room-backed repository: saving marks a note dirty with a fresh timestamp. */
-    private inner class Device : SyncStore {
+    private inner class Device(val id: String) : SyncStore {
         val inbox = com.gerko.fourenote.data.scan.ScanInbox(tmp.newFolder())
         var folders = listOf<com.gerko.fourenote.data.Folder>()
         override suspend fun foldersForSync() = folders
@@ -45,11 +45,21 @@ class SyncEngineTest {
             com.gerko.fourenote.data.security.NotesKeyringTest.MemoryStore(),
             com.gerko.fourenote.data.security.NotesKeyringTest.PlainSealer,
         )
+        /** Runs once, just before this device's next upload: another device can act in between. */
+        var beforeUpload: (() -> Unit)? = null
+        private val folder = LocalFolderCloudProvider(cloudDir)
+        val provider = object : CloudProvider by folder {
+            override suspend fun upload(name: String, mimeType: String, content: UploadContent, remoteId: String?): RemoteFile {
+                beforeUpload?.also { beforeUpload = null }?.invoke()
+                return folder.upload(name, mimeType, content, remoteId)
+            }
+        }
         val engine = SyncEngine(
             this,
-            LocalFolderCloudProvider(cloudDir),
+            provider,
             pdfExporter = { note -> tmp.newFile().apply { writeText("PDF ${note.title}") } },
             clock = clock,
+            deviceId = id,
             inbox = inbox,
             keys = keys,
         )
@@ -70,8 +80,19 @@ class SyncEngineTest {
 
         override suspend fun notesForSync() = notes.values.toList()
         override fun isOpen(noteId: String) = noteId in open
-        override suspend fun insertFromCloud(note: Note, snapshot: ByteArray) {
-            notes[note.id] = note.copy(syncedSnapshot = NoteFile.fromCloud(snapshot))
+        override suspend fun insertFromCloud(note: Note) {
+            notes[note.id] = note.copy(syncedSnapshot = "")
+        }
+
+        /** Other devices' files as last merged: note id to device id to (version, text). */
+        val peers = mutableMapOf<String, MutableMap<String, Pair<String, String>>>()
+        override suspend fun peerVersions(noteId: String) = peers[noteId].orEmpty().mapValues { it.value.first }
+        override suspend fun peerSnapshot(noteId: String, deviceId: String) = peers[noteId]?.get(deviceId)?.second
+        override suspend fun savePeer(noteId: String, deviceId: String, version: String, compressed: ByteArray) {
+            peers.getOrPut(noteId) { mutableMapOf() }[deviceId] = version to NoteFile.fromCloud(compressed)
+        }
+        override suspend fun forgetPeer(noteId: String, deviceId: String) {
+            peers[noteId]?.remove(deviceId)
         }
 
         override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean {
@@ -95,6 +116,7 @@ class SyncEngineTest {
 
         override suspend fun purge(noteId: String) {
             notes.remove(noteId)
+            peers.remove(noteId)
             files.remove(noteId)
         }
 
@@ -150,8 +172,8 @@ class SyncEngineTest {
     @Before
     fun setUp() {
         cloudDir = tmp.newFolder("cloud")
-        a = Device()
-        b = Device()
+        a = Device("aaaaaaaa")
+        b = Device("bbbbbbbb")
     }
 
     @Test
@@ -160,7 +182,7 @@ class SyncEngineTest {
         assertEquals("Biology", b.notes.getValue("n1").title)
         assertEquals(setOf("s1", "s2"), b.strokeIds("n1"))
         assertEquals(false, b.notes.getValue("n1").dirty)
-        assertEquals(listOf("Biology (n1).pdf", "n1.4enote"), cloudFiles())
+        assertEquals(listOf("Biology (n1).pdf", "n1.aaaaaaaa.4enote"), cloudFiles())
         assertEquals("PDF Biology", java.io.File(cloudDir, "Biology (n1).pdf").readText())
     }
 
@@ -238,7 +260,7 @@ class SyncEngineTest {
         sharedNote()
         b.save(b.notes.getValue("n1").copy(title = "Chemistry"))
         b.sync()
-        assertEquals(listOf("Chemistry (n1).pdf", "n1.4enote"), cloudFiles())
+        assertEquals(listOf("Chemistry (n1).pdf", "n1.aaaaaaaa.4enote", "n1.bbbbbbbb.4enote"), cloudFiles())
     }
 
     private fun Device.addPage(noteId: String, pageId: String) {
@@ -292,24 +314,24 @@ class SyncEngineTest {
             com.gerko.fourenote.data.security.NotesKeyringTest.MemoryStore(),
             com.gerko.fourenote.data.security.NotesKeyringTest.PlainSealer,
         )
-        val engine = SyncEngine(a, LocalFolderCloudProvider(cloudDir), pdfExporter = { null }, clock = clock)
+        val engine = SyncEngine(a, LocalFolderCloudProvider(cloudDir), pdfExporter = { null }, clock = clock, deviceId = a.id)
         a.save(Note(id = "big", title = "Lecture", inkData = ink("s1")))
         runBlocking { engine.sync() }
         b.sync()
         assertEquals(setOf("s1"), b.strokeIds("big"))
-        assertEquals(listOf("big.4enote"), cloudFiles())
+        assertEquals(listOf("big.aaaaaaaa.4enote"), cloudFiles())
     }
 
     @Test
     fun missingPdfCopyIsAddedOnALaterSync() {
         // First synced by a version that skipped the PDF copy...
-        val withoutPdf = SyncEngine(a, LocalFolderCloudProvider(cloudDir), pdfExporter = { null }, clock = clock)
+        val withoutPdf = SyncEngine(a, LocalFolderCloudProvider(cloudDir), pdfExporter = { null }, clock = clock, deviceId = a.id)
         a.save(Note(id = "big", title = "Lecture", inkData = ink("s1")))
         runBlocking { withoutPdf.sync() }
-        assertEquals(listOf("big.4enote"), cloudFiles())
+        assertEquals(listOf("big.aaaaaaaa.4enote"), cloudFiles())
         // ...then the next sync, with a working exporter, adds it without any edit.
         assertEquals(1, a.sync().uploaded)
-        assertEquals(listOf("Lecture (big).pdf", "big.4enote"), cloudFiles())
+        assertEquals(listOf("Lecture (big).pdf", "big.aaaaaaaa.4enote"), cloudFiles())
         // And once it is there, quiet syncs upload nothing.
         assertEquals(0, a.sync().uploaded)
     }
@@ -319,7 +341,7 @@ class SyncEngineTest {
         a.save(Note(id = "n1", title = "Diary", inkData = ink("s1"), locked = true))
         a.sync()
         b.sync()
-        assertEquals(listOf("n1.4enote"), cloudFiles())
+        assertEquals(listOf("n1.aaaaaaaa.4enote"), cloudFiles())
         assertTrue(b.notes.getValue("n1").locked)
         assertEquals(setOf("s1"), b.strokeIds("n1"))
     }
@@ -327,10 +349,10 @@ class SyncEngineTest {
     @Test
     fun lockingASyncedNoteRemovesItsPdfCopy() {
         sharedNote()
-        assertEquals(listOf("Biology (n1).pdf", "n1.4enote"), cloudFiles())
+        assertEquals(listOf("Biology (n1).pdf", "n1.aaaaaaaa.4enote"), cloudFiles())
         a.save(a.notes.getValue("n1").copy(locked = true))
         a.sync()
-        assertEquals(listOf("n1.4enote"), cloudFiles())
+        assertEquals(listOf("n1.aaaaaaaa.4enote"), cloudFiles())
         assertNull(a.notes.getValue("n1").remotePdfId)
         // And the lock reaches the other device.
         b.sync()
@@ -495,7 +517,7 @@ class SyncEngineTest {
         assertTrue(cloudFiles().contains("lock.json"))
         assertTrue(cloudFiles().contains("n1~photo.jpg.4el"))
         assertTrue(cloudFiles().none { it == "n1~photo.jpg" || it.endsWith(".pdf") })
-        assertTrue(!cloudText("n1.4enote").contains("Diary") && !cloudText("n1.4enote").contains("secret"))
+        assertTrue(!cloudText("n1.aaaaaaaa.4enote").contains("Diary") && !cloudText("n1.aaaaaaaa.4enote").contains("secret"))
         assertTrue(!cloudText("n1~photo.jpg.4el").contains("PHOTO"))
 
         // Without the password, B leaves it alone.
@@ -503,7 +525,7 @@ class SyncEngineTest {
         assertEquals(1, result.needPassword)
         assertNull(b.notes["n1"])
         assertEquals(com.gerko.fourenote.data.security.NotesKeyring.State.NEEDS_PASSWORD, b.keys.state.value)
-        assertTrue(cloudFiles().contains("n1.4enote"))
+        assertTrue(cloudFiles().contains("n1.aaaaaaaa.4enote"))
 
         assertTrue(b.keys.unlockWith(password))
         assertEquals(0, b.sync().needPassword)
@@ -518,7 +540,7 @@ class SyncEngineTest {
         assertEquals(1, b.sync().merged)
         a.sync()
         assertEquals(setOf("secret", "fromA", "fromB"), a.strokeIds("n1"))
-        assertTrue(!cloudText("n1.4enote").contains("fromA"))
+        assertTrue(!cloudText("n1.aaaaaaaa.4enote").contains("fromA"))
     }
 
     @Test
@@ -526,10 +548,10 @@ class SyncEngineTest {
         a.save(Note(id = "n1", title = "Diary", inkData = ink("s1"), locked = true))
         a.addPicture("n1", "photo.jpg", "PHOTO")
         a.sync()
-        assertTrue(cloudText("n1.4enote").contains("Diary"))
+        assertTrue(cloudText("n1.aaaaaaaa.4enote").contains("Diary"))
         a.keys.passwordSet(password)
         a.sync()
-        assertTrue(!cloudText("n1.4enote").contains("Diary"))
+        assertTrue(!cloudText("n1.aaaaaaaa.4enote").contains("Diary"))
         assertTrue(cloudFiles().contains("n1~photo.jpg.4el") && !cloudFiles().contains("n1~photo.jpg"))
         // Nothing more to do on the next sync.
         assertEquals(0, a.sync().uploaded)
@@ -543,7 +565,7 @@ class SyncEngineTest {
         a.sync()
         a.save(a.notes.getValue("n1").copy(locked = false))
         a.sync()
-        assertTrue(cloudText("n1.4enote").contains("Diary"))
+        assertTrue(cloudText("n1.aaaaaaaa.4enote").contains("Diary"))
         assertTrue(cloudFiles().contains("n1~photo.jpg") && !cloudFiles().contains("n1~photo.jpg.4el"))
     }
 
@@ -560,7 +582,7 @@ class SyncEngineTest {
         b.addStrokes("n1", "fromB")
         b.sync()
         assertTrue(cloudFiles().contains("n1~photo.jpg.4el") && !cloudFiles().contains("n1~photo.jpg"))
-        assertTrue(!cloudText("n1.4enote").contains("Biology"))
+        assertTrue(!cloudText("n1.aaaaaaaa.4enote").contains("Biology"))
         assertTrue(b.notes.getValue("n1").dirty)
     }
 
@@ -571,7 +593,7 @@ class SyncEngineTest {
         a.sync()
         b.keys.reconcile(cloudText("lock.json"))
         b.keys.unlockWith(password)
-        java.io.File(cloudDir, "n1.4enote").copyTo(java.io.File(cloudDir, "n2.4enote"))
+        java.io.File(cloudDir, "n1.aaaaaaaa.4enote").copyTo(java.io.File(cloudDir, "n2.aaaaaaaa.4enote"))
         val result = b.sync()
         assertNull(b.notes["n2"])
         assertEquals(1, result.errors.size)
@@ -615,6 +637,126 @@ class SyncEngineTest {
         assertEquals(b.notes.getValue("n1").title, a.notes.getValue("n1").title)
         assertEquals(b.notes.getValue("n1").locked, a.notes.getValue("n1").locked)
         return a.doc("n1")
+    }
+
+    @Test
+    fun devicesSyncingAtTheSameMomentKeepBothOfflineEdits() {
+        sharedNote()
+        a.addStrokes("n1", "fromA")
+        b.addStrokes("n1", "fromB")
+        // Both come back online together: B has already looked at the cloud when A uploads.
+        b.beforeUpload = { a.sync() }
+        b.sync()
+        a.sync()
+        b.sync()
+        a.sync()
+        assertEquals(setOf("s1", "s2", "fromA", "fromB"), a.strokeIds("n1"))
+        assertEquals(setOf("s1", "s2", "fromA", "fromB"), b.strokeIds("n1"))
+    }
+
+    @Test
+    fun threeDevicesSyncingAtTheSameMomentKeepEveryEditAndThenSettle() {
+        val c = Device("cccccccc")
+        sharedNote()
+        c.sync()
+        a.addStrokes("n1", "fromA")
+        b.addStrokes("n1", "fromB")
+        c.addStrokes("n1", "fromC")
+        // C looks at the cloud, then B and A upload, then C uploads.
+        c.beforeUpload = { b.beforeUpload = { a.sync() }; b.sync() }
+        c.sync()
+        repeat(2) { for (d in listOf(a, b, c)) d.sync() }
+        val all = setOf("s1", "s2", "fromA", "fromB", "fromC")
+        for (d in listOf(a, b, c)) assertEquals(all, d.strokeIds("n1"))
+        // Nothing left to send: no device keeps uploading the note to the others.
+        for (d in listOf(a, b, c)) {
+            val result = d.sync()
+            assertEquals(0, result.uploaded + result.merged + result.downloaded)
+        }
+        assertEquals(listOf("n1.aaaaaaaa.4enote", "n1.bbbbbbbb.4enote", "n1.cccccccc.4enote"), cloudFiles().filter { it.endsWith(".4enote") })
+    }
+
+    @Test
+    fun pageOrderIsTheSameOnEveryDeviceAfterSyncingAtOnce() {
+        sharedNote()
+        a.addPage("n1", "pageA")
+        b.addPage("n1", "pageB")
+        b.beforeUpload = { a.sync() }
+        b.sync()
+        a.sync()
+        b.sync()
+        assertEquals(listOf("p1", "pageA", "pageB"), a.pageIds("n1"))
+        assertEquals(a.pageIds("n1"), b.pageIds("n1"))
+    }
+
+    @Test
+    fun strokeErasedOnOneDeviceStaysErasedEverywhereAndForADeviceJoiningLater() {
+        sharedNote()
+        b.addStrokes("n1", "fromB")
+        b.sync()
+        a.sync()
+        a.removeStroke("n1", "fromB")
+        a.removeStroke("n1", "s1")
+        a.sync()
+        b.sync()
+        a.sync()
+        assertEquals(setOf("s2"), b.strokeIds("n1"))
+        // A new device reads every device's file: none brings the erased strokes back.
+        val d = Device("dddddddd")
+        d.sync()
+        assertEquals(setOf("s2"), d.strokeIds("n1"))
+        a.sync()
+        assertEquals(setOf("s2"), a.strokeIds("n1"))
+    }
+
+    @Test
+    fun aDeviceJoiningLaterIsNotGivenStrokesErasedSinceAnOfflineDevicesLastSync() {
+        sharedNote()
+        b.addStrokes("n1", "fromB")
+        b.sync()
+        a.sync()
+        a.removeStroke("n1", "fromB")
+        a.removeStroke("n1", "s1")
+        a.sync()
+        // B stays offline: its file in the cloud still holds s1 and fromB.
+        val d = Device("dddddddd")
+        d.sync()
+        assertEquals(setOf("s2"), d.strokeIds("n1"))
+    }
+
+    @Test
+    fun deletingANoteRemovesEveryDevicesFile() {
+        sharedNote()
+        b.addStrokes("n1", "fromB")
+        b.sync()
+        a.sync()
+        a.delete("n1")
+        a.sync()
+        assertTrue(cloudFiles().none { it.endsWith(".4enote") })
+        b.sync()
+        assertFalse("n1" in b.notes)
+    }
+
+    @Test
+    fun notesFromTheOneSharedFileOfOlderVersionsMoveOverWithoutLosingEdits() {
+        // Both devices last synced the note through "n1.4enote", as versions before device files did.
+        val base = Note(id = "n1", title = "Biology", inkData = ink("s1", "s2"), updatedAt = 5)
+        val legacy = java.io.File(cloudDir, "n1.4enote").apply { writeBytes(NoteFile.toCloud(base, null)) }
+        val version = runBlocking { LocalFolderCloudProvider(cloudDir).listFiles() }.single().version
+        for (d in listOf(a, b)) {
+            d.notes["n1"] = base.copy(remoteId = legacy.name, remoteVersion = version, lastSyncedAt = 6, dirty = false,
+                syncedSnapshot = NoteFile.encode(base, null))
+        }
+        a.addStrokes("n1", "fromA")
+        b.removeStroke("n1", "s1")
+        b.beforeUpload = { a.sync() }
+        b.sync()
+        a.sync()
+        b.sync()
+        assertEquals(setOf("s2", "fromA"), a.strokeIds("n1"))
+        assertEquals(setOf("s2", "fromA"), b.strokeIds("n1"))
+        // The old file is only read, never written.
+        assertTrue(legacy.readBytes().contentEquals(NoteFile.toCloud(base, null)))
     }
 
     @Test

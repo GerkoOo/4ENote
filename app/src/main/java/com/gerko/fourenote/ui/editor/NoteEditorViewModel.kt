@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.gerko.fourenote.data.Note
+import com.gerko.fourenote.data.isInCloud
 import com.gerko.fourenote.data.NoteRepository
 import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.recognition.HandwritingRecognizer
@@ -54,6 +55,11 @@ class NoteEditorViewModel(
     internal val onClosed: () -> Unit,
     /** Asks for a sync now (or once online), e.g. after a photo frame is created. */
     internal val requestSync: () -> Unit = {},
+    /**
+     * The layer this device writes on in every note (see DeviceIdentity): added to a note when it
+     * opens here, so ink from different devices stays apart.
+     */
+    internal val deviceLayer: InkLayer = InkLayer.BASE,
 ) : ViewModel() {
     internal var note: Note? = null
 
@@ -220,12 +226,20 @@ class NoteEditorViewModel(
             pages.addAll(doc.pages.map(PageState::of))
             layers.clear()
             layers.addAll(doc.layers)
-            activeLayerId = doc.layers.last().id
+            // Saved with the next edit, so only opening a note doesn't change it.
+            if (layers.none { it.id == deviceLayer.id }) layers.add(deviceLayer)
+            activeLayerId = deviceLayer.id
             loaded = true
         }
     }
 
     internal fun page(pageId: String) = pages.firstOrNull { it.id == pageId }
+
+    /**
+     * Ink the lasso and the erasers act on: every layer that is shown, whichever is active, so ink
+     * written on another device (its own layer) can be selected and erased like any other.
+     */
+    internal fun isReachable(stroke: InkStroke) = layers.firstOrNull { it.id == stroke.layerId }?.visible ?: true
 
     /** Restores the last pen setup, then saves every later change so the next note starts the same. */
     internal fun restoreTools() {
@@ -373,7 +387,7 @@ class NoteEditorViewModel(
     fun addStroke(pageId: String, stroke: InkStroke, held: Boolean = false) {
         val strokes = page(pageId)?.strokes ?: return
         if (scribbleToErase && !stroke.highlighter && Scribble.isScribble(stroke)) {
-            val erased = Scribble.erasedBy(stroke, strokes.filter { it.layerId == activeLayerId }, ERASER_RADIUS_DP / 2)
+            val erased = Scribble.erasedBy(stroke, strokes.filter(::isReachable), ERASER_RADIUS_DP / 2)
             if (erased.isNotEmpty()) {
                 recordUndo()
                 val gone = erased.toSet()
@@ -387,7 +401,7 @@ class NoteEditorViewModel(
         // A line through the middle of words and straight back over them strikes them out.
         val strike = if (scribbleToErase && !stroke.highlighter) StrikeOut.backAndForth(stroke) else null
         if (strike != null) {
-            val struck = StrikeOut.struckBy(strike, strokes.filter { it.layerId == activeLayerId })
+            val struck = StrikeOut.struckBy(strike, strokes.filter(::isReachable))
             if (struck.isNotEmpty()) {
                 recordUndo()
                 val gone = struck.toSet()
@@ -422,14 +436,14 @@ class NoteEditorViewModel(
         val page = page(pageId) ?: return
         val strokes = page.strokes
         if (eraseWholeStrokes) {
-            strokes.removeAll { it.layerId == activeLayerId && it.isHitBy(x, y, ERASER_RADIUS_DP) }
+            strokes.removeAll { isReachable(it) && it.isHitBy(x, y, ERASER_RADIUS_DP) }
             return
         }
         // A stroke rubbed through becomes pieces with new ids; links on it move to the pieces.
         val newIds = HashMap<String, List<String>>()
         var i = 0
         while (i < strokes.size) {
-            val pieces = if (strokes[i].layerId == activeLayerId) strokes[i].erasedAround(x, y, ERASER_RADIUS_DP) else null
+            val pieces = if (isReachable(strokes[i])) strokes[i].erasedAround(x, y, ERASER_RADIUS_DP) else null
             if (pieces == null) {
                 i++
             } else {
@@ -582,7 +596,7 @@ class NoteEditorViewModel(
         CoroutineScope(Dispatchers.Default + NonCancellable).launch {
             writePendingSave()
             repository.markClosed(noteId)
-            if (leftBlank) repository.getById(noteId)?.takeIf { it.remoteId == null }?.let { repository.delete(it) }
+            if (leftBlank) repository.getById(noteId)?.takeIf { !it.isInCloud }?.let { repository.delete(it) }
             withContext(Dispatchers.Main) { onClosed() }
         }
     }
@@ -594,10 +608,11 @@ class NoteEditorViewModel(
         private val toolPreferences: ToolPreferences,
         private val onClosed: () -> Unit,
         private val requestSync: () -> Unit = {},
+        private val deviceLayer: InkLayer = InkLayer.BASE,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            NoteEditorViewModel(noteId, repository, attachments, toolPreferences, onClosed, requestSync) as T
+            NoteEditorViewModel(noteId, repository, attachments, toolPreferences, onClosed, requestSync, deviceLayer) as T
     }
 
     internal companion object {

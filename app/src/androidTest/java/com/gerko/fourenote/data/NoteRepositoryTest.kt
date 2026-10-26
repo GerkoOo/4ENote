@@ -99,7 +99,7 @@ class NoteRepositoryTest {
     fun aLockFromTheCloudReachesANoteAlreadyHere() = runBlocking {
         val repository = repository()
         val note = Note(id = "lockme", title = "Diary", inkData = InkSerializer.encode(InkDocument()), updatedAt = 1_000)
-        repository.insertFromCloud(note, ByteArray(0))
+        repository.insertFromCloud(note)
         assertTrue(repository.replaceIfUnchanged(note.copy(locked = true, updatedAt = 2_000), expectedUpdatedAt = 1_000, dirty = false))
         assertTrue(dao.getById("lockme")!!.locked)
         assertTrue(repository.replaceIfUnchanged(note.copy(locked = false, updatedAt = 3_000), expectedUpdatedAt = 2_000, dirty = false))

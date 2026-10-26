@@ -189,7 +189,7 @@ class NoteRepository(
      * tombstone stays so the deletion reaches the cloud; sync removes it afterwards.
      */
     suspend fun delete(note: Note) {
-        if (note.remoteId == null) purge(note.id) else dao.markDeleted(note.id, System.currentTimeMillis())
+        if (!note.isInCloud) purge(note.id) else dao.markDeleted(note.id, System.currentTimeMillis())
     }
 
     /** A new note with the same pages, ink and pictures, titled as a copy. Uploads on the next sync. */
@@ -306,6 +306,26 @@ class NoteRepository(
 
     override suspend fun syncedSnapshot(note: Note): String = ink.readSnapshot(note.id).orEmpty()
 
+    override suspend fun peerVersions(noteId: String): Map<String, String> = ink.peerVersions(noteId)
+
+    override suspend fun peerSnapshot(noteId: String, deviceId: String): String? = ink.readPeer(noteId, deviceId)
+
+    override suspend fun savePeer(noteId: String, deviceId: String, version: String, compressed: ByteArray) =
+        ink.writePeer(noteId, deviceId, version, compressed)
+
+    /**
+     * Another cloud was chosen. Its notes have nothing to do with what was synced before: without
+     * this, notes missing there would count as deleted on another device and be removed here.
+     */
+    suspend fun forgetCloud() {
+        dao.forgetCloud()
+        for (note in dao.getAllForSync()) ink.forgetSync(note.id)
+    }
+
+    override suspend fun forgetPeer(noteId: String, deviceId: String) {
+        ink.forgetPeer(noteId, deviceId)
+    }
+
     override fun isOpen(noteId: String): Boolean = noteId in openNotes
 
     /** Photo frames filled elsewhere for notes open in the editor: note id and the filled frames. */
@@ -332,11 +352,10 @@ class NoteRepository(
         attachments.saveDownloaded(noteId, name, content)
     }
 
-    override suspend fun insertFromCloud(note: Note, snapshot: ByteArray) {
+    override suspend fun insertFromCloud(note: Note) {
         // Sealed before the first byte is written, if it comes locked.
         seal(note.id, note.locked)
         ink.save(note.id, InkSerializer.decode(note.inkData))
-        ink.writeCompressedSnapshot(note.id, snapshot)
         dao.upsert(note.copy(inkData = "", syncedSnapshot = ""))
     }
 

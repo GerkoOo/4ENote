@@ -3,6 +3,7 @@ package com.gerko.fourenote.data.sync
 import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.Note
+import com.gerko.fourenote.data.isInCloud
 import com.gerko.fourenote.data.scan.ScanInbox
 import com.gerko.fourenote.data.security.LockFile
 import com.gerko.fourenote.data.security.LockedNoteFile
@@ -19,10 +20,22 @@ interface SyncStore {
     suspend fun withContent(note: Note): Note = note
 
     /**
-     * The note as of the last sync, the base for merging; empty if there is none. Read only when
-     * a merge needs it: for a long note it is as big as the note.
+     * The note as this device last uploaded it (its own cloud file); empty if there is none. Read
+     * only when needed: for a long note it is as big as the note.
      */
     suspend fun syncedSnapshot(note: Note): String = note.syncedSnapshot
+
+    /** Other devices' files of the note as last merged here: device id to cloud version. */
+    suspend fun peerVersions(noteId: String): Map<String, String> = emptyMap()
+
+    /** Another device's file of the note as last merged here, the base for merging its next version; null if none. */
+    suspend fun peerSnapshot(noteId: String, deviceId: String): String? = null
+
+    /** Records another device's file (gzip-compressed, as it came) as merged here at [version]. */
+    suspend fun savePeer(noteId: String, deviceId: String, version: String, compressed: ByteArray) {}
+
+    /** The other device's file is gone from the cloud. */
+    suspend fun forgetPeer(noteId: String, deviceId: String) {}
 
     /** The note's pictures and PDF pages on this device: file name to file. They never change once written. */
     fun attachments(noteId: String): Map<String, File> = emptyMap()
@@ -51,8 +64,8 @@ interface SyncStore {
     /** True while the note is open in the editor; sync leaves it alone until it closes. */
     fun isOpen(noteId: String): Boolean
 
-    /** [snapshot] is the note file as it came, gzip-compressed (see [NoteFile.toCloud]): the base for merging. */
-    suspend fun insertFromCloud(note: Note, snapshot: ByteArray)
+    /** A note new to this device, put together from the other devices' files (recorded with [savePeer]). */
+    suspend fun insertFromCloud(note: Note)
 
     /** Replaces content unless the user edited the note after [expectedUpdatedAt]. */
     suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean
@@ -61,7 +74,7 @@ interface SyncStore {
         noteId: String,
         file: RemoteFile,
         pdfId: String?,
-        /** The note file as uploaded or downloaded, gzip-compressed: the base for the next merge. */
+        /** This device's file as uploaded, gzip-compressed. */
         snapshot: ByteArray,
         expectedUpdatedAt: Long,
     )
@@ -82,18 +95,17 @@ data class SyncResult(
 )
 
 /**
- * Two-way sync between the local notes and one cloud folder: an edit on any
- * device reaches all of them. For each note it compares the local "dirty" flag
- * with whether the cloud file's version moved since the last sync:
+ * Two-way sync between the local notes and one cloud folder: an edit on any device reaches all of
+ * them. Every device writes only its own file of a note (see [NoteFile]); cloud services replace a
+ * file whole, so two devices sharing one file would overwrite each other when they sync at the
+ * same moment. For each note:
+ *  - every other device's file whose version moved since it was last merged here is merged in
+ *    ([NoteMerger], with that file as last merged here as the base);
+ *  - this device's file is uploaded when the note was edited here, or a merge changed it from
+ *    what was last uploaded (so each device's file keeps up with the note).
  *
- * | changed here | changed in cloud | action                         |
- * |--------------|------------------|--------------------------------|
- * | no           | no               | nothing                        |
- * | yes          | no               | upload                         |
- * | no           | yes              | download                       |
- * | yes          | yes              | merge ([NoteMerger]), upload   |
- *
- * Deletions travel as tombstones locally and as missing files in the cloud.
+ * Deletions travel as tombstones locally and as missing files in the cloud: deleting a note
+ * removes every device's file of it.
  * Each note also gets a PDF copy when [pdfExporter] is set, so notes can be
  * opened from any computer.
  */
@@ -103,6 +115,8 @@ class SyncEngine(
     /** Writes the note's PDF copy to a temporary file (deleted after upload), or returns null to skip it. */
     private val pdfExporter: ((Note) -> File?)? = null,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** This device's id (see [DeviceIdentity]): it writes only the cloud files named after it. */
+    private val deviceId: String,
     /** Scans waiting for their photo frame, kept in the cloud too so any device can place them. */
     private val inbox: ScanInbox? = null,
     /** Encrypts locked notes and their pictures; without it they sync readable, as before encryption. */
@@ -132,32 +146,34 @@ class SyncEngine(
         val listed = provider.listFiles()
         // The lock file goes first: whether locked notes may be encrypted (or read) depends on it.
         keys?.let { syncLockFile(it, listed) }
-        val cloudNotes = listed
-            .mapNotNull { file -> NoteFile.noteIdOf(file.name)?.let { it to file } }
-            .toMap()
+        val cloudNotes = HashMap<String, CloudFiles>()
+        for (file in listed) {
+            val (noteId, device) = NoteFile.noteFileOf(file.name) ?: continue
+            val files = cloudNotes.getOrPut(noteId) { CloudFiles() }
+            if (device == deviceId) files.own = file else files.peers[device] = file
+        }
         val localNotes = store.notesForSync()
 
         // Filled photo frames for open notes, handed over once their photos have downloaded.
         val fills = mutableListOf<Pair<String, List<PageImage>>>()
         for (note in localNotes) {
             if (store.isOpen(note.id)) {
-                val cloud = cloudNotes[note.id]
+                val files = cloudNotes[note.id]
+                val changed = runCatching { files?.let { changedPeers(note, it) }.orEmpty() }.getOrDefault(emptyMap())
                 // An open note can still be uploaded (that only reads it), so a frame set on the tablet
                 // reaches the phone at once. Anything that would change it here waits until it is closed,
                 // except photos for its frames, which the editor takes in itself.
-                val uploadOnly = !note.deleted && note.dirty &&
-                    (if (cloud == null) note.remoteId == null else cloud.version == note.remoteVersion)
+                val uploadOnly = !note.deleted && note.dirty && changed.isEmpty() && !(files == null && wasSynced(note))
                 if (uploadOnly) {
-                    runCatching { syncNote(note, cloud) }
+                    runCatching { syncNote(note, files) }
                         .onFailure { errors += "${note.title.ifBlank { "Untitled" }}: ${it.message}" }
                     unsettled += note.id
                     continue
                 }
                 unsettled += note.id
                 skippedOpen++
-                if (cloud != null && cloud.version != note.remoteVersion) {
-                    runCatching { filledFrames(cloud, note.id) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { fills += note.id to it }
-                }
+                val filled = changed.values.flatMap { file -> runCatching { filledFrames(file, note.id) }.getOrDefault(emptyList()) }
+                if (filled.isNotEmpty()) fills += note.id to filled
                 continue
             }
             runCatching { syncNote(note, cloudNotes[note.id]) }
@@ -168,10 +184,10 @@ class SyncEngine(
         }
 
         val localIds = localNotes.mapTo(HashSet()) { it.id }
-        for ((id, file) in cloudNotes) {
+        for ((id, files) in cloudNotes) {
             if (id in localIds) continue
-            runCatching { downloadNew(file) }
-                .onFailure { errors += "${file.name}: ${it.message}" }
+            runCatching { downloadNew(id, files) }
+                .onFailure { errors += "${NoteFile.fileName(id, deviceId)}: ${it.message}" }
         }
 
         runCatching { syncAttachments() }.onFailure { errors += "Pictures: ${it.message}" }
@@ -191,8 +207,35 @@ class SyncEngine(
         keys.uploaded(upload)
     }
 
-    /** A note from the cloud, and its file compressed, kept as the base for the next merge. */
-    private class CloudNote(val note: Note, val snapshot: ByteArray)
+    /**
+     * A note from the cloud, its file compressed (kept as the base for the next merge), and the
+     * other devices' files that went into it (device id to version).
+     */
+    private class CloudNote(val note: Note, val snapshot: ByteArray, val seen: Map<String, String>)
+
+    /** One note's files in the cloud: this device's own, and the other devices' by device id. */
+    private class CloudFiles(var own: RemoteFile? = null, val peers: MutableMap<String, RemoteFile> = HashMap())
+
+    // Synced before: a note whose files have all gone from the cloud was deleted on another device.
+    private fun wasSynced(note: Note) = note.isInCloud
+
+    /** The other devices' files of [note] not merged here at their current version. */
+    private suspend fun changedPeers(note: Note, files: CloudFiles): Map<String, RemoteFile> {
+        if (files.peers.isEmpty()) return emptyMap()
+        val seen = store.peerVersions(note.id).toMutableMap()
+        // A note last synced with the one shared file of older versions: that file, as it was then,
+        // is the base for what other devices write into it later.
+        val legacy = files.peers[NoteFile.LEGACY_DEVICE]
+        if (legacy != null && NoteFile.LEGACY_DEVICE !in seen && note.remoteId == legacy.id && note.remoteVersion != null) {
+            val snapshot = store.syncedSnapshot(note)
+            if (snapshot.isNotEmpty()) {
+                store.savePeer(note.id, NoteFile.LEGACY_DEVICE, note.remoteVersion, NoteFile.toCloud(snapshot))
+                seen[NoteFile.LEGACY_DEVICE] = note.remoteVersion
+            }
+        }
+        for (device in seen.keys - files.peers.keys) store.forgetPeer(note.id, device)
+        return files.peers.filter { (device, file) -> seen[device] != file.version }
+    }
 
     /**
      * The note in [cloud], or null when it is encrypted with a key this device lacks (the note is
@@ -211,13 +254,13 @@ class SyncEngine(
             }
             compressed = LockedNoteFile.decrypt(text, key)
             text = NoteFile.fromCloud(compressed)
-            keys.encryptedVersion(noteId, cloud.version)
         }
-        val note = NoteFile.decode(text)
+        val seen = HashMap<String, String>()
+        val note = NoteFile.decode(text, seen)
         // The id inside is the one the file was written (or encrypted) for; a file copied over another note's name is refused.
         require(note.id == noteId) { "Note file under the wrong name" }
         // Files from older versions aren't compressed yet.
-        return CloudNote(note, if (NoteFile.isGzip(compressed)) compressed else NoteFile.toCloud(text))
+        return CloudNote(note, if (NoteFile.isGzip(compressed)) compressed else NoteFile.toCloud(text), seen)
     }
 
     /**
@@ -352,52 +395,100 @@ class SyncEngine(
         return InkSerializer.decode(note.inkData).pages.flatMap { page -> page.images.filter { it.requested && it.file.isNotEmpty() } }
     }
 
-    private suspend fun syncNote(note: Note, cloud: RemoteFile?) {
+    private suspend fun syncNote(note: Note, files: CloudFiles?) {
         when {
             note.deleted -> {
-                note.remoteId?.let { provider.delete(it) }
+                val ids = files?.let { listOfNotNull(it.own) + it.peers.values }.orEmpty().map { it.id }
+                for (id in (ids + listOfNotNull(note.remoteId)).toSet()) provider.delete(id)
                 note.remotePdfId?.let { provider.delete(it) }
                 store.purge(note.id)
-                if (note.remoteId != null) deletedInCloud++
+                if (ids.isNotEmpty()) deletedInCloud++
             }
 
-            cloud == null && note.remoteId != null && !note.dirty -> {
+            files == null && wasSynced(note) && !note.dirty -> {
                 // Deleted on another device, and not edited here since.
                 store.purge(note.id)
                 deletedHere++
             }
 
             // New note, or deleted elsewhere but edited here: the edit wins and it uploads again.
-            cloud == null -> if (upload(note, remoteId = null)) uploaded++
+            files == null -> if (upload(note, remoteId = null)) uploaded++
 
-            // Unchanged in the cloud: upload local edits, add a PDF copy the note is still missing
-            // (for instance one skipped by an older version of the app), or encrypt a locked note
-            // that went up readable before the 4ENote password was set.
-            cloud.version == note.remoteVersion -> if (note.dirty || (pdfExporter != null && note.remotePdfId == null && !note.locked) || needsSealing(note, cloud)) {
-                if (upload(note, cloud.id)) uploaded++
-            }
-
-            !note.dirty -> {
-                val read = readNote(cloud, note.id) ?: return
-                // The trash is local: keep it, so a sync never brings a trashed note back.
-                val fromCloud = read.note.copy(trashedAt = note.trashedAt)
-                if (store.replaceIfUnchanged(fromCloud, note.updatedAt, dirty = false)) {
-                    store.markSynced(note.id, cloud, fromCloud.remotePdfId, read.snapshot, fromCloud.updatedAt)
-                    downloaded++
-                }
-            }
-
-            else -> {
-                val fromCloud = readNote(cloud, note.id)?.note ?: return
-                val note = store.withContent(note)
-                val base = store.syncedSnapshot(note).takeIf { it.isNotEmpty() }?.let(NoteFile::decode)
-                val result = NoteMerger.merge(base, note, fromCloud)
-                    .copy(remotePdfId = note.remotePdfId ?: fromCloud.remotePdfId, trashedAt = note.trashedAt)
-                if (store.replaceIfUnchanged(result, note.updatedAt, dirty = true)) {
-                    if (upload(result, cloud.id)) merged++
-                }
-            }
+            else -> settle(note, files)
         }
+    }
+
+    /** Merges in what other devices changed, then uploads this device's file if it is behind. */
+    private suspend fun settle(note: Note, files: CloudFiles) {
+        val own = files.own
+        val changed = changedPeers(note, files)
+        // Up to date with every device: upload only an edit made here, or catch up on a PDF copy the
+        // note is still missing (for instance one skipped by an older version of the app), or
+        // encrypt a locked note that went up readable before the 4ENote password was set.
+        if (changed.isEmpty()) {
+            val catchUp = own != null && ((pdfExporter != null && note.remotePdfId == null && !note.locked) || needsSealing(note, own))
+            if ((note.dirty || catchUp) && upload(note, own?.id)) uploaded++
+            return
+        }
+
+        var result = store.withContent(note)
+        val merges = mutableListOf<Triple<String, String, ByteArray>>()
+        for ((device, file) in changed) {
+            val read = readNote(file, note.id) ?: return
+            val base = commonBase(note, device, read.seen)
+            result = NoteMerger.merge(base, result, read.note, remoteFirst = device < deviceId)
+                .copy(remotePdfId = result.remotePdfId ?: read.note.remotePdfId, trashedAt = note.trashedAt)
+            merges += Triple(device, file.version, read.snapshot)
+        }
+        // The note is stored before the other devices' files are recorded as merged: if anything
+        // stops in between, the same files are merged again next time, which changes nothing.
+        if (!store.replaceIfUnchanged(result, note.updatedAt, dirty = note.dirty)) return
+        for ((device, version, snapshot) in merges) store.savePeer(note.id, device, version, snapshot)
+        if (note.dirty) merged++ else downloaded++
+
+        // This device's file keeps up with the note, so a device joining later reads no stale
+        // copy. A device that never wrote the note has no file of it and stays a reader.
+        val behind = when {
+            note.dirty -> true
+            own == null -> false
+            own.version != note.remoteVersion -> true
+            else -> !sameContent(store.syncedSnapshot(note), result)
+        }
+        if (behind) upload(result, own?.id)
+    }
+
+    /**
+     * The base for merging [device]'s file of the note: everything both sides had already merged,
+     * found from the file's record of what went into it ([seen]): that device's previous file,
+     * this device's own last upload if it was seen at that version, and other devices' files it saw
+     * at the version stored here. Something in there that one side no longer has was removed on
+     * that side. Where they differ, this device's upload counts first for single values (a title,
+     * a picture's place), then that device's previous file. Without any, the merge keeps all.
+     */
+    private suspend fun commonBase(note: Note, device: String, seen: Map<String, String>): Note? {
+        var base: Note? = null
+        fun add(text: String?) {
+            if (text.isNullOrEmpty()) return
+            val next = NoteFile.decode(text)
+            base = base?.let { NoteMerger.union(it, next) } ?: next
+        }
+        if (note.remoteVersion != null && seen[deviceId] == note.remoteVersion) add(store.syncedSnapshot(note))
+        add(store.peerSnapshot(note.id, device))
+        val versions = store.peerVersions(note.id)
+        for ((other, version) in seen) {
+            if (other != deviceId && other != device && versions[other] == version) add(store.peerSnapshot(note.id, other))
+        }
+        return base
+    }
+
+    // Whether the note last uploaded from here ([uploaded], plain file text) already holds [note].
+    // Merges order things the same way on every device, so once a merge brings nothing new the two
+    // match and devices stop sending each other the same note back and forth.
+    private fun sameContent(uploaded: String, note: Note): Boolean {
+        if (uploaded.isEmpty()) return false
+        val last = NoteFile.decode(uploaded)
+        return last.title == note.title && last.locked == note.locked && last.folderId == note.folderId &&
+            InkSerializer.encode(InkSerializer.decode(last.inkData)) == InkSerializer.encode(InkSerializer.decode(note.inkData))
     }
 
     // A locked note in the cloud not yet encrypted with this device's key.
@@ -434,12 +525,12 @@ class SyncEngine(
         }
         val key = (sealing as? Sealing.With)?.key
         // Written straight into the compressed file: the whole text never exists at once.
-        val compressed = NoteFile.toCloud(note, pdfId)
+        val compressed = NoteFile.toCloud(note, pdfId, seen = store.peerVersions(note.id))
         val file = if (key != null) {
             val sealed = LockedNoteFile.encode(note.id, compressed, key)
-            provider.upload(NoteFile.fileName(note.id), NoteFile.MIME_TYPE, UploadContent.of(sealed.encodeToByteArray()), remoteId)
+            provider.upload(NoteFile.fileName(note.id, deviceId), NoteFile.MIME_TYPE, UploadContent.of(sealed.encodeToByteArray()), remoteId)
         } else {
-            provider.upload(NoteFile.fileName(note.id), NoteFile.CLOUD_MIME_TYPE, UploadContent.of(compressed), remoteId)
+            provider.upload(NoteFile.fileName(note.id, deviceId), NoteFile.CLOUD_MIME_TYPE, UploadContent.of(compressed), remoteId)
         }
         if (key != null) keys?.encryptedVersion(note.id, file.version)
         // The snapshot kept here (the base for merging) is the plain note file, compressed.
@@ -447,20 +538,39 @@ class SyncEngine(
         return true
     }
 
-    private suspend fun downloadNew(file: RemoteFile) {
-        val noteId = NoteFile.noteIdOf(file.name) ?: return
-        val read = readNote(file, noteId) ?: return
+    /** A note this device doesn't have yet: put together from every device's file of it. */
+    private suspend fun downloadNew(noteId: String, files: CloudFiles) {
+        var result: Note? = null
+        val reads = mutableListOf<Triple<String, String, ByteArray>>()
+        val done = mutableListOf<Triple<String, String, CloudNote>>()
+        // In device id order, the order every device's merges agree on.
+        val all = (files.peers + listOfNotNull(files.own?.let { deviceId to it })).toSortedMap()
+        for ((device, file) in all) {
+            val read = readNote(file, noteId) ?: return
+            // As in commonBase: files already put in that this one saw, and this one if one of them saw it.
+            var base: Note? = null
+            for ((other, version, earlier) in done) {
+                if (read.seen[other] == version) base = base?.let { NoteMerger.union(it, earlier.note) } ?: earlier.note
+                if (earlier.seen[device] == file.version) base = base?.let { NoteMerger.union(it, read.note) } ?: read.note
+            }
+            result = result?.let {
+                NoteMerger.merge(base, it, read.note).copy(remotePdfId = it.remotePdfId ?: read.note.remotePdfId)
+            } ?: read.note
+            done += Triple(device, file.version, read)
+            if (device != deviceId) reads += Triple(device, file.version, read.snapshot)
+        }
         store.insertFromCloud(
-            read.note.copy(
-                remoteId = file.id,
-                remoteVersion = file.version,
+            result!!.copy(
+                // This device's own file, if one was left from before (it is behind now and goes up next time).
+                remoteId = files.own?.id,
+                remoteVersion = null,
                 lastSyncedAt = clock(),
                 dirty = false,
                 // A note that was trashed here and deleted in the cloud comes back untrashed.
                 trashedAt = null,
             ),
-            read.snapshot,
         )
+        for ((device, version, snapshot) in reads) store.savePeer(noteId, device, version, snapshot)
         downloaded++
     }
 

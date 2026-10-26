@@ -143,7 +143,11 @@ class SyncManager(
         _choice.value = choice
         prefs.edit().putString(KEY_CHOICE, choice.name).apply()
         _status.value = SyncStatus.Idle
-        requestSync()
+        // Not while a sync with the old cloud is still running; it waits for this in turn.
+        scope.launch {
+            mutex.withLock { repository.forgetCloud() }
+            requestSync()
+        }
     }
 
     /**
@@ -165,7 +169,7 @@ class SyncManager(
         return mutex.withLock {
             _status.value = SyncStatus.Syncing
             try {
-                val engine = SyncEngine(repository, provider, ::exportPdf, inbox = inbox, keys = keys)
+                val engine = SyncEngine(repository, provider, ::exportPdf, deviceId = DeviceIdentity.id(context), inbox = inbox, keys = keys)
                 var result = engine.sync()
                 // Scans that found their frame make notes to upload (and scans to remove from the cloud).
                 if (repository.placeInboxScans(inbox) > 0) result = engine.sync()

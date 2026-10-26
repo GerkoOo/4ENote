@@ -46,3 +46,9 @@ data class Note(
      */
     @ColumnInfo(defaultValue = "0") val locked: Boolean = false,
 )
+
+/**
+ * The note has files in the cloud: this device uploaded it ([Note.remoteId]), or got it from
+ * other devices' files (a device that only reads a note has no file of its own).
+ */
+val Note.isInCloud: Boolean get() = remoteId != null || lastSyncedAt != null

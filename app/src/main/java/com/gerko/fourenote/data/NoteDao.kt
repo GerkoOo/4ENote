@@ -107,6 +107,10 @@ interface NoteDao {
      * Records a successful sync. The note stays dirty if it was edited while
      * the upload was in flight, so the next sync picks up that edit.
      */
+    /** Another cloud was chosen: every note starts unsynced there, and uploads. */
+    @Query("UPDATE notes SET driveFileId = NULL, remoteVersion = NULL, remotePdfId = NULL, lastSyncedAt = NULL, dirty = 1")
+    suspend fun forgetCloud()
+
     @Query(
         """UPDATE notes SET driveFileId = :remoteId, remotePdfId = :remotePdfId,
            remoteVersion = :remoteVersion, lastSyncedAt = :syncedAt,

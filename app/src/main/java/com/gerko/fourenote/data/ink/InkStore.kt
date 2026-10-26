@@ -43,6 +43,9 @@ class InkStore(val root: File, private val sealing: FileSealing? = null) {
     private fun pagesDir(noteId: String) = File(dir(noteId), "pages")
     private fun pageFile(noteId: String, pageId: String) = File(pagesDir(noteId), "${SafeName.require(pageId, "page id")}.ink")
     private fun snapshotFile(noteId: String) = File(dir(noteId), "synced.4enote.gz")
+    private fun peersDir(noteId: String) = File(dir(noteId), "peers")
+    private fun peerFile(noteId: String, deviceId: String) = File(peersDir(noteId), "${SafeName.require(deviceId, "device id")}.4enote.gz")
+    private fun peerVersionFile(noteId: String, deviceId: String) = File(peersDir(noteId), "${SafeName.require(deviceId, "device id")}.version")
     private fun sealedMarker(noteId: String) = File(dir(noteId), SEALED_MARKER)
 
     private suspend fun <T> locked(noteId: String, block: suspend () -> T): T =
@@ -121,12 +124,48 @@ class InkStore(val root: File, private val sealing: FileSealing? = null) {
         writeNoteFile(noteId, snapshotFile(noteId)) { it.write(compressed) }
     }
 
+    /** Other devices' files of the note as last merged here: device id to cloud version. */
+    suspend fun peerVersions(noteId: String): Map<String, String> = locked(noteId) {
+        peersDir(noteId).listFiles().orEmpty()
+            .filter { it.isFile && it.name.endsWith(".version") }
+            .associate { it.name.removeSuffix(".version") to it.readText() }
+    }
+
+    /** Another device's file of the note as last merged here (plain text): the base for merging its next version. */
+    suspend fun readPeer(noteId: String, deviceId: String): String? = locked(noteId) {
+        peerFile(noteId, deviceId).takeIf { it.isFile }?.let { file ->
+            GZIPInputStream(openNoteFile(noteId, file)).bufferedReader().use { it.readText() }
+        }
+    }
+
+    /**
+     * Records another device's file as merged here. The file goes first: if the version can't be
+     * written after it, the same version is merged again next time, which changes nothing.
+     */
+    suspend fun writePeer(noteId: String, deviceId: String, version: String, compressed: ByteArray) = locked(noteId) {
+        peersDir(noteId).mkdirs()
+        writeNoteFile(noteId, peerFile(noteId, deviceId)) { it.write(compressed) }
+        writeAtomically(peerVersionFile(noteId, deviceId)) { it.write(version.encodeToByteArray()) }
+    }
+
+    /** Drops the note's sync bases (its own last upload, other devices' files): another cloud was chosen. */
+    suspend fun forgetSync(noteId: String) = locked(noteId) {
+        snapshotFile(noteId).delete()
+        peersDir(noteId).deleteRecursively()
+    }
+
+    suspend fun forgetPeer(noteId: String, deviceId: String) = locked(noteId) {
+        peerVersionFile(noteId, deviceId).delete()
+        peerFile(noteId, deviceId).delete()
+    }
+
     suspend fun copy(fromNoteId: String, toNoteId: String) = locked(fromNoteId) {
         val from = dir(fromNoteId)
         if (from.isDirectory) {
             from.copyRecursively(dir(toNoteId), overwrite = true)
             // A copy starts unsynced.
             snapshotFile(toNoteId).delete()
+            peersDir(toNoteId).deleteRecursively()
         }
     }
 
@@ -181,7 +220,8 @@ class InkStore(val root: File, private val sealing: FileSealing? = null) {
 
     private fun noteFiles(noteId: String): List<File> =
         listOf(manifest(noteId), snapshotFile(noteId)).filter { it.isFile } +
-            pagesDir(noteId).listFiles().orEmpty().filter { it.isFile && it.name.endsWith(".ink") }
+            pagesDir(noteId).listFiles().orEmpty().filter { it.isFile && it.name.endsWith(".ink") } +
+            peersDir(noteId).listFiles().orEmpty().filter { it.isFile && it.name.endsWith(".4enote.gz") }
 
     // The name a sealed file is bound to: its path inside the note's folder, so a copied note
     // (same names) still opens, while a file swapped for another one doesn't.

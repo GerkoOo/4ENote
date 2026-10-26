@@ -40,7 +40,7 @@ fun NoteEditorViewModel.loopToSelection(pageId: String) {
 fun NoteEditorViewModel.selectWithLasso(pageId: String, polygon: FloatArray) {
     selectedImage = null
     val strokes = page(pageId)?.strokes ?: return
-    selection = strokes.filter { it.layerId == activeLayerId && it.isInsideLasso(polygon) }.toSet()
+    selection = strokes.filter { isReachable(it) && it.isInsideLasso(polygon) }.toSet()
     selectionPageId = pageId.takeIf { selection.isNotEmpty() }
 }
 
