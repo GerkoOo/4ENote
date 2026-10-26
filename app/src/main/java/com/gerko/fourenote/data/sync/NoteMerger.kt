@@ -17,7 +17,7 @@ import com.gerko.fourenote.data.ink.withoutDeadLinks
  *  - anything that was in [base] but is gone on either side is removed
  *    (a stroke erased, moved or recolored there arrives again as an add).
  * Title and paper are single values: a side that changed them wins, and if
- * both changed them the more recent edit wins.
+ * both changed them the later edit by edit counter ([Note.rev]) wins.
  */
 object NoteMerger {
     /**
@@ -28,6 +28,10 @@ object NoteMerger {
         val baseDoc = base?.let { InkSerializer.decode(it.inkData) }
         val localDoc = InkSerializer.decode(local.inkData)
         val remoteDoc = InkSerializer.decode(remote.inkData)
+
+        // Of two changes to one value, the later one by edit counter wins (see Note.rev); a tie
+        // (made without seeing each other) goes the same way on every device.
+        val localIsNewer = local.rev > remote.rev || (local.rev == remote.rev && !remoteFirst)
 
         val basePages = baseDoc?.pages.orEmpty().associateBy { it.id }
         val localPages = localDoc.pages.associateBy { it.id }
@@ -42,9 +46,11 @@ object NoteMerger {
                     val basePage = basePages[page.id]
                     val localPage = localPages.getValue(page.id)
                     val remotePage = remotePages.getValue(page.id)
-                    val localIsNewer = local.updatedAt >= remote.updatedAt
                     page.copy(
-                        strokes = mergeById(remoteFirst, basePage?.strokes.orEmpty(), localPage.strokes, remotePage.strokes, InkStroke::id),
+                        strokes = oneEditPerStroke(
+                            mergeById(remoteFirst, basePage?.strokes.orEmpty(), localPage.strokes, remotePage.strokes, InkStroke::id),
+                            basePage?.strokes.orEmpty(), localPage.strokes, remotePage.strokes, localIsNewer,
+                        ),
                         // Pictures can be moved/resized in place, so for one edited on both sides pick per picture.
                         images = mergeById(remoteFirst, basePage?.images.orEmpty(), localPage.images, remotePage.images) { it.id }
                             .map { image ->
@@ -98,10 +104,9 @@ object NoteMerger {
                 val base = baseDoc?.layers?.firstOrNull { it.id == layer.id }
                 val l = localDoc.layers.firstOrNull { it.id == layer.id } ?: layer
                 val r = remoteDoc.layers.firstOrNull { it.id == layer.id } ?: layer
-                pick(base, l, r, local.updatedAt >= remote.updatedAt)
+                pick(base, l, r, localIsNewer)
             }
 
-        val localIsNewer = local.updatedAt >= remote.updatedAt
         val paper = pick(baseDoc?.paper, localDoc.paper, remoteDoc.paper, localIsNewer)
         val title = pick(base?.title, local.title, remote.title, localIsNewer)
 
@@ -116,6 +121,7 @@ object NoteMerger {
             ),
             createdAt = minOf(local.createdAt, remote.createdAt),
             updatedAt = maxOf(local.updatedAt, remote.updatedAt),
+            rev = maxOf(local.rev, remote.rev),
         )
     }
 
@@ -127,7 +133,10 @@ object NoteMerger {
     private fun mergeSticky(base: StickyNote?, local: StickyNote, remote: StickyNote, localIsNewer: Boolean, remoteFirst: Boolean): StickyNote {
         val frame = pick(base?.withoutContent(), local.withoutContent(), remote.withoutContent(), localIsNewer)
         return frame.copy(
-            strokes = mergeById(remoteFirst, base?.strokes.orEmpty(), local.strokes, remote.strokes, InkStroke::id),
+            strokes = oneEditPerStroke(
+                mergeById(remoteFirst, base?.strokes.orEmpty(), local.strokes, remote.strokes, InkStroke::id),
+                base?.strokes.orEmpty(), local.strokes, remote.strokes, localIsNewer,
+            ),
             texts = mergeById(remoteFirst, base?.texts.orEmpty(), local.texts, remote.texts) { it.id }
                 .map { text ->
                     pick(
@@ -141,6 +150,37 @@ object NoteMerger {
     }
 
     private fun StickyNote.withoutContent() = copy(strokes = emptyList(), texts = emptyList())
+
+    /**
+     * A stroke edited on both sides (moved here, recoloured there) is replaced by new strokes on
+     * each, and [merged] holds both: it would show twice. Like any single value, the newer side's
+     * edit is kept and the other side's replacement strokes go. A copy (the stroke is still there
+     * on its side) is not a replacement and always stays.
+     */
+    private fun oneEditPerStroke(
+        merged: List<InkStroke>,
+        base: List<InkStroke>,
+        local: List<InkStroke>,
+        remote: List<InkStroke>,
+        localIsNewer: Boolean,
+    ): List<InkStroke> {
+        val baseIds = base.mapTo(HashSet()) { it.id }
+        fun replacements(side: List<InkStroke>, other: List<InkStroke>): Map<String, List<InkStroke>> {
+            val sideIds = side.mapTo(HashSet()) { it.id }
+            val otherIds = other.mapTo(HashSet()) { it.id }
+            return side.filter { s ->
+                val original = s.replaces
+                original != null && original in baseIds && original !in sideIds && s.id !in baseIds && s.id !in otherIds
+            }.groupBy { it.replaces!! }
+        }
+        val fromLocal = replacements(local, remote)
+        val fromRemote = replacements(remote, local)
+        val both = fromLocal.keys intersect fromRemote.keys
+        if (both.isEmpty()) return merged
+        val losing = if (localIsNewer) fromRemote else fromLocal
+        val drop = both.flatMap { losing.getValue(it) }.mapTo(HashSet()) { it.id }
+        return merged.filter { it.id !in drop }
+    }
 
     /**
      * The items kept on both sides, in the order of the side that rearranged them (or, if neither
@@ -196,7 +236,7 @@ object NoteMerger {
      */
     fun union(first: Note, second: Note): Note =
         // With no base, every single value goes to the newer side: [first] is made the newer.
-        merge(null, first.copy(updatedAt = Long.MAX_VALUE), second).copy(updatedAt = maxOf(first.updatedAt, second.updatedAt))
+        merge(null, first.copy(rev = Long.MAX_VALUE), second).copy(rev = maxOf(first.rev, second.rev))
 
     private fun <T> pick(base: T?, local: T, remote: T, localIsNewer: Boolean): T = when {
         local == remote -> local

@@ -80,6 +80,7 @@ fun NoteEditorViewModel.mergeLayers(layerIds: Set<String>) {
             if (stroke.layerId in merged) {
                 page.strokes[i] = InkStroke(
                     stroke.color, stroke.width, stroke.highlighter, stroke.points, stroke.widths, target.id, stroke.id, stroke.nibAngle, stroke.squareEnds,
+                    stroke.replaces,
                 )
             }
         }

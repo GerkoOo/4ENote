@@ -1,12 +1,10 @@
 package com.gerko.fourenote.data.sync
 
 import android.content.Context
-import android.os.Build
 import java.security.SecureRandom
 
 /**
- * This installation's id: its own note files in the cloud (see [NoteFile]) and its own layer in
- * each note are named after it. Random, so two devices set up at the same moment never pick the
+ * This installation's id: its own note files in the cloud (see [NoteFile]) are named after it. Random, so two devices set up at the same moment never pick the
  * same one; kept out of backups and device transfers, so a restored copy gets an id of its own.
  */
 object DeviceIdentity {
@@ -27,16 +25,8 @@ object DeviceIdentity {
         }
     }
 
-    /** What the device's layer is called, like "Xiaomi 23043RP34G". */
-    fun name(): String =
-        listOf(Build.MANUFACTURER, Build.MODEL).filterNot { it.isNullOrBlank() }.joinToString(" ")
-            .replaceFirstChar { it.uppercase() }.ifBlank { "This device" }
-
     fun newId(random: SecureRandom = SecureRandom()): String =
         String(CharArray(LENGTH) { ALPHABET[random.nextInt(ALPHABET.length)] })
 
     fun isValid(id: String) = id.length == LENGTH && id.all { it in ALPHABET }
-
-    /** The layer a device draws on in every note. */
-    fun layerId(deviceId: String) = "device-$deviceId"
 }

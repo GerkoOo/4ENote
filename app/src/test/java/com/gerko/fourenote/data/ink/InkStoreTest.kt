@@ -74,6 +74,37 @@ class InkStoreTest {
     }
 
     @Test
+    fun keepsTheLastThreeUploadsOfANote() = runBlocking {
+        fun gz(text: String) = java.io.ByteArrayOutputStream().also { out ->
+            java.util.zip.GZIPOutputStream(out).use { it.write(text.encodeToByteArray()) }
+        }.toByteArray()
+        store.save("note", InkDocument())
+        for (v in listOf("v1", "v2/with:odd\"chars", "v3", "v4")) store.recordSent("note", v, gz("text $v"))
+        assertNull(store.readSent("note", "v1"))
+        assertEquals("text v2/with:odd\"chars", store.readSent("note", "v2/with:odd\"chars"))
+        assertEquals("text v4", store.readSent("note", "v4"))
+        // Recording one again makes it the newest: then the oldest other one goes.
+        store.recordSent("note", "v2/with:odd\"chars", gz("text v2/with:odd\"chars"))
+        store.recordSent("note", "v5", gz("text v5"))
+        assertNull(store.readSent("note", "v3"))
+        assertEquals("text v2/with:odd\"chars", store.readSent("note", "v2/with:odd\"chars"))
+    }
+
+    @Test
+    fun anEditedStrokeKeepsWhatItReplacesInBothFormats() {
+        val original = InkStroke(color = 1, width = 2f, highlighter = false, points = floatArrayOf(0f, 0f, 5f, 5f), id = "orig")
+        val moved = original.transformed(10f, 0f, 1f, 1f, 0f, 0f)
+        val copy = original.transformed(10f, 0f, 1f, 1f, 0f, 0f, replacing = false)
+        assertEquals("orig", moved.replaces)
+        assertEquals(null, copy.replaces)
+        assertEquals("orig", original.withColor(7).replaces)
+        val binary = InkPageCodec.decode(InkPageCodec.encode(listOf(moved, copy)))
+        assertEquals(listOf("orig", null), binary.map { it.replaces })
+        val json = InkSerializer.decode(InkSerializer.encode(InkDocument(listOf(InkPage(strokes = listOf(moved, copy))))))
+        assertEquals(listOf("orig", null), json.pages.single().strokes.map { it.replaces })
+    }
+
+    @Test
     fun savesAndLoadsAWholeNote() = runBlocking {
         val doc = InkDocument(
             pages = listOf(densePage("a", 50, 1), densePage("b", 50, 2).copy(background = PageBackground.PdfPage("x.pdf", 3))),

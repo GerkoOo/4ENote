@@ -25,6 +25,10 @@ interface SyncStore {
      */
     suspend fun syncedSnapshot(note: Note): String = note.syncedSnapshot
 
+    /** This device's upload of the note at [version] (plain text), if kept; one of its last few. */
+    suspend fun sentSnapshot(note: Note, version: String): String? =
+        if (version == note.remoteVersion) syncedSnapshot(note).takeIf { it.isNotEmpty() } else null
+
     /** Other devices' files of the note as last merged here: device id to cloud version. */
     suspend fun peerVersions(noteId: String): Map<String, String> = emptyMap()
 
@@ -77,6 +81,8 @@ interface SyncStore {
         /** This device's file as uploaded, gzip-compressed. */
         snapshot: ByteArray,
         expectedUpdatedAt: Long,
+        /** The edit counter the file went up with (see [Note.rev]). */
+        rev: Long,
     )
 
     suspend fun purge(noteId: String)
@@ -432,12 +438,18 @@ class SyncEngine(
         }
 
         var result = store.withContent(note)
+        // Edits not uploaded yet will go up one above what this device has seen: they count as that.
+        val unsent = if (note.dirty) 1 else 0
         val merges = mutableListOf<Triple<String, String, ByteArray>>()
         for ((device, file) in changed) {
             val read = readNote(file, note.id) ?: return
             val base = commonBase(note, device, read.seen)
-            result = NoteMerger.merge(base, result, read.note, remoteFirst = device < deviceId)
-                .copy(remotePdfId = result.remotePdfId ?: read.note.remotePdfId, trashedAt = note.trashedAt)
+            result = NoteMerger.merge(base, result.copy(rev = result.rev + unsent), read.note, remoteFirst = device < deviceId)
+                .copy(
+                    remotePdfId = result.remotePdfId ?: read.note.remotePdfId,
+                    trashedAt = note.trashedAt,
+                    rev = maxOf(result.rev, read.note.rev),
+                )
             merges += Triple(device, file.version, read.snapshot)
         }
         // The note is stored before the other devices' files are recorded as merged: if anything
@@ -460,7 +472,7 @@ class SyncEngine(
     /**
      * The base for merging [device]'s file of the note: everything both sides had already merged,
      * found from the file's record of what went into it ([seen]): that device's previous file,
-     * this device's own last upload if it was seen at that version, and other devices' files it saw
+     * this device's upload it saw (if still kept), and other devices' files it saw
      * at the version stored here. Something in there that one side no longer has was removed on
      * that side. Where they differ, this device's upload counts first for single values (a title,
      * a picture's place), then that device's previous file. Without any, the merge keeps all.
@@ -472,7 +484,8 @@ class SyncEngine(
             val next = NoteFile.decode(text)
             base = base?.let { NoteMerger.union(it, next) } ?: next
         }
-        if (note.remoteVersion != null && seen[deviceId] == note.remoteVersion) add(store.syncedSnapshot(note))
+        // This device's upload that one saw: not always the latest (both may have synced since).
+        seen[deviceId]?.let { add(store.sentSnapshot(note, it)) }
         add(store.peerSnapshot(note.id, device))
         val versions = store.peerVersions(note.id)
         for ((other, version) in seen) {
@@ -506,8 +519,10 @@ class SyncEngine(
             unsettled += listed.id
             return false
         }
-        // A merged note already carries its ink; one listed for sync doesn't yet.
-        val note = if (listed.inkData.isEmpty()) store.withContent(listed) else listed
+        // A merged note already carries its ink; one listed for sync doesn't yet. Edits made here go
+        // up one above every version seen (see Note.rev).
+        val note = (if (listed.inkData.isEmpty()) store.withContent(listed) else listed)
+            .let { if (it.dirty) it.copy(rev = it.rev + 1) else it }
         // A locked note gets no readable copy in the cloud; one left from before it was locked goes.
         val pdfId = if (note.locked) {
             note.remotePdfId?.let { provider.delete(it) }
@@ -534,7 +549,7 @@ class SyncEngine(
         }
         if (key != null) keys?.encryptedVersion(note.id, file.version)
         // The snapshot kept here (the base for merging) is the plain note file, compressed.
-        store.markSynced(note.id, file, pdfId, compressed, expectedUpdatedAt = note.updatedAt)
+        store.markSynced(note.id, file, pdfId, compressed, expectedUpdatedAt = note.updatedAt, rev = note.rev)
         return true
     }
 

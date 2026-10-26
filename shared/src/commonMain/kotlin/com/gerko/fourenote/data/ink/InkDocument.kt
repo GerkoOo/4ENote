@@ -55,6 +55,11 @@ class InkStroke(
     val nibAngle: Float? = null,
     /** Variable-width strokes only: cut straight off at both ends (the pointed pen) instead of rounded. */
     val squareEnds: Boolean = false,
+    /**
+     * The stroke this one was made from by an edit (moved, resized, recoloured, partly erased).
+     * When two devices edit the same stroke, sync keeps one side's result instead of both.
+     */
+    val replaces: String? = null,
 )
 
 fun newStrokeId(): String = newId()
@@ -71,6 +76,8 @@ fun InkStroke.transformed(
     scaleY: Float,
     pivotX: Float,
     pivotY: Float,
+    /** False for a copy, which leaves this stroke where it is. */
+    replacing: Boolean = true,
 ) = InkStroke(
     color = color,
     width = width * sqrt(scaleX * scaleY),
@@ -83,10 +90,11 @@ fun InkStroke.transformed(
     layerId = layerId,
     nibAngle = nibAngle,
     squareEnds = squareEnds,
+    replaces = if (replacing) id else null,
 )
 
 fun InkStroke.withColor(newColor: Int) =
-    InkStroke(newColor, width, highlighter, points, widths, layerId, nibAngle = nibAngle, squareEnds = squareEnds)
+    InkStroke(newColor, width, highlighter, points, widths, layerId, nibAngle = nibAngle, squareEnds = squareEnds, replaces = id)
 
 /** True if most of this stroke's points fall inside the lasso [polygon] (packed x, y pairs). */
 fun InkStroke.isInsideLasso(polygon: FloatArray): Boolean {
@@ -580,6 +588,7 @@ object InkSerializer {
         stroke.nibAngle?.let { w.key("nib").num(it) }
         if (stroke.squareEnds) w.key("sq").bool(true)
         stroke.widths?.let { widths -> w.key("pw").nums(widths) { (it * 100).roundToInt() / 100f } }
+        stroke.replaces?.let { w.key("rp").str(it) }
     }
 
     private fun writeText(w: Writer, t: PageText) {
@@ -779,6 +788,7 @@ object InkSerializer {
             var layer = ""
             var nib: Float? = null
             var square = false
+            var replaces: String? = null
             reader.obj { key ->
                 when (key) {
                     "p" -> points = reader.floats()
@@ -793,6 +803,7 @@ object InkSerializer {
                             "l" -> layer = v?.contentOrNull.orEmpty()
                             "nib" -> nib = v?.doubleOrNull?.toFloat() ?: 0f
                             "sq" -> square = v?.booleanOrNull ?: false
+                            "rp" -> replaces = v?.contentOrNull
                         }
                     }
                 }
@@ -808,6 +819,7 @@ object InkSerializer {
                 squareEnds = square,
                 // Version 1 notes predate stroke ids.
                 id = id.ifEmpty { newStrokeId() },
+                replaces = replaces,
             )
         }
         return strokes

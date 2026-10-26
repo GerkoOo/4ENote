@@ -306,6 +306,9 @@ class NoteRepository(
 
     override suspend fun syncedSnapshot(note: Note): String = ink.readSnapshot(note.id).orEmpty()
 
+    override suspend fun sentSnapshot(note: Note, version: String): String? =
+        if (version == note.remoteVersion) syncedSnapshot(note).takeIf { it.isNotEmpty() } else ink.readSent(note.id, version)
+
     override suspend fun peerVersions(noteId: String): Map<String, String> = ink.peerVersions(noteId)
 
     override suspend fun peerSnapshot(noteId: String, deviceId: String): String? = ink.readPeer(noteId, deviceId)
@@ -371,6 +374,7 @@ class NoteRepository(
             expectedUpdatedAt = expectedUpdatedAt,
             folderId = note.folderId,
             locked = note.locked,
+            rev = note.rev,
         ) > 0
         if (replaced) {
             seal(note.id, note.locked)
@@ -386,8 +390,10 @@ class NoteRepository(
         pdfId: String?,
         snapshot: ByteArray,
         expectedUpdatedAt: Long,
+        rev: Long,
     ) {
         ink.writeCompressedSnapshot(noteId, snapshot)
+        ink.recordSent(noteId, file.version, snapshot)
         dao.markSynced(
             id = noteId,
             remoteId = file.id,
@@ -395,6 +401,7 @@ class NoteRepository(
             remoteVersion = file.version,
             syncedAt = System.currentTimeMillis(),
             expectedUpdatedAt = expectedUpdatedAt,
+            rev = rev,
         )
     }
 

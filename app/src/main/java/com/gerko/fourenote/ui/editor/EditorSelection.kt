@@ -40,7 +40,7 @@ fun NoteEditorViewModel.loopToSelection(pageId: String) {
 fun NoteEditorViewModel.selectWithLasso(pageId: String, polygon: FloatArray) {
     selectedImage = null
     val strokes = page(pageId)?.strokes ?: return
-    selection = strokes.filter { isReachable(it) && it.isInsideLasso(polygon) }.toSet()
+    selection = strokes.filter { it.layerId == activeLayerId && it.isInsideLasso(polygon) }.toSet()
     selectionPageId = pageId.takeIf { selection.isNotEmpty() }
 }
 
@@ -79,7 +79,7 @@ fun NoteEditorViewModel.duplicateSelection() {
     val strokes = selectionPageId?.let(::page)?.strokes ?: return
     recordUndo()
     val copies = strokes.filter { it in selection }
-        .map { it.transformed(NoteEditorViewModel.DUPLICATE_OFFSET, NoteEditorViewModel.DUPLICATE_OFFSET, 1f, 1f, 0f, 0f) }
+        .map { it.transformed(NoteEditorViewModel.DUPLICATE_OFFSET, NoteEditorViewModel.DUPLICATE_OFFSET, 1f, 1f, 0f, 0f, replacing = false) }
     strokes.addAll(copies)
     selection = copies.toSet()
     persist()

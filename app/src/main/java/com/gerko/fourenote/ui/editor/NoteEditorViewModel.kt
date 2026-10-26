@@ -55,11 +55,6 @@ class NoteEditorViewModel(
     internal val onClosed: () -> Unit,
     /** Asks for a sync now (or once online), e.g. after a photo frame is created. */
     internal val requestSync: () -> Unit = {},
-    /**
-     * The layer this device writes on in every note (see DeviceIdentity): added to a note when it
-     * opens here, so ink from different devices stays apart.
-     */
-    internal val deviceLayer: InkLayer = InkLayer.BASE,
 ) : ViewModel() {
     internal var note: Note? = null
 
@@ -175,6 +170,9 @@ class NoteEditorViewModel(
 
     internal var eraseSnapshot: Snapshot? = null
 
+    // Pieces cut during the current rub: cutting one again still replaces the original stroke.
+    private val cutThisRub = HashSet<String>()
+
     /** The picture selected with the Select tool, as (page id, image id). */
     var selectedImage by mutableStateOf<Pair<String, String>?>(null)
         internal set
@@ -226,20 +224,12 @@ class NoteEditorViewModel(
             pages.addAll(doc.pages.map(PageState::of))
             layers.clear()
             layers.addAll(doc.layers)
-            // Saved with the next edit, so only opening a note doesn't change it.
-            if (layers.none { it.id == deviceLayer.id }) layers.add(deviceLayer)
-            activeLayerId = deviceLayer.id
+            activeLayerId = doc.layers.last().id
             loaded = true
         }
     }
 
     internal fun page(pageId: String) = pages.firstOrNull { it.id == pageId }
-
-    /**
-     * Ink the lasso and the erasers act on: every layer that is shown, whichever is active, so ink
-     * written on another device (its own layer) can be selected and erased like any other.
-     */
-    internal fun isReachable(stroke: InkStroke) = layers.firstOrNull { it.id == stroke.layerId }?.visible ?: true
 
     /** Restores the last pen setup, then saves every later change so the next note starts the same. */
     internal fun restoreTools() {
@@ -387,7 +377,7 @@ class NoteEditorViewModel(
     fun addStroke(pageId: String, stroke: InkStroke, held: Boolean = false) {
         val strokes = page(pageId)?.strokes ?: return
         if (scribbleToErase && !stroke.highlighter && Scribble.isScribble(stroke)) {
-            val erased = Scribble.erasedBy(stroke, strokes.filter(::isReachable), ERASER_RADIUS_DP / 2)
+            val erased = Scribble.erasedBy(stroke, strokes.filter { it.layerId == activeLayerId }, ERASER_RADIUS_DP / 2)
             if (erased.isNotEmpty()) {
                 recordUndo()
                 val gone = erased.toSet()
@@ -401,7 +391,7 @@ class NoteEditorViewModel(
         // A line through the middle of words and straight back over them strikes them out.
         val strike = if (scribbleToErase && !stroke.highlighter) StrikeOut.backAndForth(stroke) else null
         if (strike != null) {
-            val struck = StrikeOut.struckBy(strike, strokes.filter(::isReachable))
+            val struck = StrikeOut.struckBy(strike, strokes.filter { it.layerId == activeLayerId })
             if (struck.isNotEmpty()) {
                 recordUndo()
                 val gone = struck.toSet()
@@ -430,24 +420,28 @@ class NoteEditorViewModel(
     /** Moves the ink of the given layers onto the lowest of them and removes the rest. One undo step. */
     fun beginErase() {
         eraseSnapshot = snapshot()
+        cutThisRub.clear()
     }
 
     fun eraseAt(pageId: String, x: Float, y: Float) {
         val page = page(pageId) ?: return
         val strokes = page.strokes
         if (eraseWholeStrokes) {
-            strokes.removeAll { isReachable(it) && it.isHitBy(x, y, ERASER_RADIUS_DP) }
+            strokes.removeAll { it.layerId == activeLayerId && it.isHitBy(x, y, ERASER_RADIUS_DP) }
             return
         }
         // A stroke rubbed through becomes pieces with new ids; links on it move to the pieces.
         val newIds = HashMap<String, List<String>>()
         var i = 0
         while (i < strokes.size) {
-            val pieces = if (isReachable(strokes[i])) strokes[i].erasedAround(x, y, ERASER_RADIUS_DP) else null
+            val stroke = strokes[i]
+            val replacing = if (stroke.id in cutThisRub) stroke.replaces else stroke.id
+            val pieces = if (stroke.layerId == activeLayerId) stroke.erasedAround(x, y, ERASER_RADIUS_DP, replacing) else null
             if (pieces == null) {
                 i++
             } else {
-                newIds[strokes[i].id] = pieces.map { it.id }
+                newIds[stroke.id] = pieces.map { it.id }
+                pieces.mapTo(cutThisRub) { it.id }
                 strokes.removeAt(i)
                 strokes.addAll(i, pieces)
                 i += pieces.size
@@ -608,11 +602,10 @@ class NoteEditorViewModel(
         private val toolPreferences: ToolPreferences,
         private val onClosed: () -> Unit,
         private val requestSync: () -> Unit = {},
-        private val deviceLayer: InkLayer = InkLayer.BASE,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            NoteEditorViewModel(noteId, repository, attachments, toolPreferences, onClosed, requestSync, deviceLayer) as T
+            NoteEditorViewModel(noteId, repository, attachments, toolPreferences, onClosed, requestSync) as T
     }
 
     internal companion object {

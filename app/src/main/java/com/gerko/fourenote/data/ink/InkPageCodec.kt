@@ -19,12 +19,14 @@ import kotlin.math.roundToInt
  */
 object InkPageCodec {
     private const val MAGIC = 0x34455031 // "4EP1"
-    private const val VERSION = 1
+    // 2: strokes can carry what they replace (see InkStroke.replaces).
+    private const val VERSION = 2
 
     private const val HIGHLIGHTER = 1
     private const val HAS_WIDTHS = 2
     private const val HAS_NIB = 4
     private const val SQUARE_ENDS = 8
+    private const val HAS_REPLACES = 16
 
     fun encode(strokes: List<InkStroke>): ByteArray {
         val bytes = ByteArrayOutputStream()
@@ -47,13 +49,16 @@ object InkPageCodec {
                     writeFloat(stroke.width)
                     val widths = stroke.widths
                     val nib = stroke.nibAngle
+                    val replaces = stroke.replaces
                     writeByte(
                         (if (stroke.highlighter) HIGHLIGHTER else 0) or
                             (if (widths != null) HAS_WIDTHS else 0) or
                             (if (nib != null) HAS_NIB else 0) or
-                            (if (stroke.squareEnds) SQUARE_ENDS else 0),
+                            (if (stroke.squareEnds) SQUARE_ENDS else 0) or
+                            (if (replaces != null) HAS_REPLACES else 0),
                     )
                     if (nib != null) writeFloat(nib)
+                    if (replaces != null) writeUTF(replaces)
                     val n = stroke.points.size / 2
                     writeVarInt(n)
                     var lastX = 0
@@ -94,6 +99,7 @@ object InkPageCodec {
                 val width = readFloat()
                 val flags = readByte().toInt()
                 val nib = if (flags and HAS_NIB != 0) readFloat() else null
+                val replaces = if (flags and HAS_REPLACES != 0) readUTF() else null
                 val n = readVarInt()
                 val points = FloatArray(2 * n)
                 var x = 0
@@ -105,7 +111,7 @@ object InkPageCodec {
                     points[2 * i + 1] = y / 10f
                 }
                 val widths = if (flags and HAS_WIDTHS != 0) FloatArray(readVarInt()) { readVarInt() / 100f } else null
-                InkStroke(color, width, flags and HIGHLIGHTER != 0, points, widths, layerId, id, nib, flags and SQUARE_ENDS != 0)
+                InkStroke(color, width, flags and HIGHLIGHTER != 0, points, widths, layerId, id, nib, flags and SQUARE_ENDS != 0, replaces)
             }
         }
 

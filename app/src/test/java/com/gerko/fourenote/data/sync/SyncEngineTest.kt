@@ -10,6 +10,8 @@ import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.ink.PageLink
 import com.gerko.fourenote.data.ink.PageText
 import com.gerko.fourenote.data.ink.StickyNote
+import com.gerko.fourenote.data.ink.transformed
+import com.gerko.fourenote.data.ink.withColor
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -84,6 +86,10 @@ class SyncEngineTest {
             notes[note.id] = note.copy(syncedSnapshot = "")
         }
 
+        /** This device's uploads: note id to version to text. */
+        val sent = mutableMapOf<String, MutableMap<String, String>>()
+        override suspend fun sentSnapshot(note: Note, version: String) = sent[note.id]?.get(version)
+
         /** Other devices' files as last merged: note id to device id to (version, text). */
         val peers = mutableMapOf<String, MutableMap<String, Pair<String, String>>>()
         override suspend fun peerVersions(noteId: String) = peers[noteId].orEmpty().mapValues { it.value.first }
@@ -100,16 +106,17 @@ class SyncEngineTest {
             if (current.updatedAt != expectedUpdatedAt) return false
             notes[note.id] = current.copy(
                 title = note.title, inkData = note.inkData, createdAt = note.createdAt,
-                updatedAt = note.updatedAt, dirty = dirty, locked = note.locked,
+                updatedAt = note.updatedAt, dirty = dirty, locked = note.locked, rev = note.rev,
             )
             return true
         }
 
-        override suspend fun markSynced(noteId: String, file: RemoteFile, pdfId: String?, snapshot: ByteArray, expectedUpdatedAt: Long) {
+        override suspend fun markSynced(noteId: String, file: RemoteFile, pdfId: String?, snapshot: ByteArray, expectedUpdatedAt: Long, rev: Long) {
             val current = notes[noteId] ?: return
+            sent.getOrPut(noteId) { mutableMapOf() }[file.version] = NoteFile.fromCloud(snapshot)
             notes[noteId] = current.copy(
                 remoteId = file.id, remotePdfId = pdfId, remoteVersion = file.version,
-                syncedSnapshot = NoteFile.fromCloud(snapshot), lastSyncedAt = clock(),
+                syncedSnapshot = NoteFile.fromCloud(snapshot), lastSyncedAt = clock(), rev = rev,
                 dirty = current.updatedAt != expectedUpdatedAt,
             )
         }
@@ -244,15 +251,15 @@ class SyncEngineTest {
     }
 
     @Test
-    fun renameOnBothDevicesKeepsTheNewestTitle() {
+    fun renameOnBothDevicesKeepsOneTitleOnBoth() {
         sharedNote()
         a.save(a.notes.getValue("n1").copy(title = "Bio (A)"))
         b.save(b.notes.getValue("n1").copy(title = "Bio (B)"))
         a.sync()
         b.sync()
         a.sync()
-        assertEquals("Bio (B)", a.notes.getValue("n1").title)
-        assertEquals("Bio (B)", b.notes.getValue("n1").title)
+        assertEquals("Bio (A)", a.notes.getValue("n1").title)
+        assertEquals("Bio (A)", b.notes.getValue("n1").title)
     }
 
     @Test
@@ -724,6 +731,60 @@ class SyncEngineTest {
         assertEquals(setOf("s2"), d.strokeIds("n1"))
     }
 
+    private fun Device.editStroke(noteId: String, id: String, change: (InkStroke) -> List<InkStroke>) =
+        edit(noteId) { doc -> doc.copy(pages = doc.pages.map { p -> p.copy(strokes = p.strokes.flatMap { if (it.id == id) change(it) else listOf(it) }) }) }
+
+    @Test
+    fun oneStrokeMovedOnOneDeviceAndRecolouredOnTheOtherShowsOnce() {
+        sharedNote()
+        a.editStroke("n1", "s1") { listOf(it.transformed(50f, 0f, 1f, 1f, 0f, 0f)) }
+        b.editStroke("n1", "s1") { listOf(it.withColor(0xFFFF0000.toInt())) }
+        b.beforeUpload = { a.sync() }
+        b.sync()
+        a.sync()
+        b.sync()
+        for (d in listOf(a, b)) {
+            val strokes = d.doc("n1").pages.single().strokes
+            // s2 and one edited s1: A's move (the tie goes to A on both devices).
+            assertEquals(2, strokes.size)
+            val edited = strokes.single { it.replaces == "s1" }
+            assertEquals(50f, edited.points[0])
+            assertEquals(0, edited.color)
+        }
+    }
+
+    @Test
+    fun aCopyOfAStrokeStaysWhenTheOtherDeviceMovesTheOriginal() {
+        sharedNote()
+        a.editStroke("n1", "s1") { listOf(it, it.transformed(20f, 20f, 1f, 1f, 0f, 0f, replacing = false)) }
+        b.editStroke("n1", "s1") { listOf(it.transformed(50f, 0f, 1f, 1f, 0f, 0f)) }
+        a.sync()
+        b.sync()
+        a.sync()
+        // The moved s1, the copy and s2.
+        assertEquals(3, a.strokeIds("n1").size)
+        assertEquals(a.strokeIds("n1"), b.strokeIds("n1"))
+    }
+
+    @Test
+    fun aStrokeCutByTheEraserOnOneDeviceAndMovedOnTheOtherIsNotDoubled() {
+        sharedNote()
+        // A's rub cuts s1 in two, then cuts one piece again: all pieces replace s1.
+        a.editStroke("n1", "s1") { s ->
+            val left = InkStroke(s.color, s.width, false, floatArrayOf(0f, 0f, 3f, 3f), replaces = "s1")
+            val right = InkStroke(s.color, s.width, false, floatArrayOf(7f, 7f, 10f, 10f), replaces = "s1")
+            listOf(left, right)
+        }
+        b.editStroke("n1", "s1") { listOf(it.transformed(50f, 0f, 1f, 1f, 0f, 0f)) }
+        a.sync()
+        b.sync()
+        a.sync()
+        val strokes = a.doc("n1").pages.single().strokes
+        // A's cut wins (tie goes to A): s2 and the two pieces, not the moved whole stroke too.
+        assertEquals(3, strokes.size)
+        assertEquals(a.strokeIds("n1"), b.strokeIds("n1"))
+    }
+
     @Test
     fun deletingANoteRemovesEveryDevicesFile() {
         sharedNote()
@@ -787,22 +848,22 @@ class SyncEngineTest {
     }
 
     @Test
-    fun offlineEditsOfTheSameTextBoxKeepTheNewerOne() {
+    fun offlineEditsOfTheSameTextBoxKeepOneOnEveryDevice() {
         richNote()
-        a.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t1") t.copy(text = "older, A") else t }) } }
-        // B edits after A (the shared clock moves on), so B's is newer.
-        b.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t1") t.copy(text = "newer, B") else t }) } }
-        assertEquals("newer, B", syncBoth().pages.first().texts.first { it.id == "t1" }.text)
+        a.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t1") t.copy(text = "from A") else t }) } }
+        // B's is later by the clock, but neither side saw the other's: device order decides.
+        b.edit("n1") { it.editPage("p1") { p -> p.copy(texts = p.texts.map { t -> if (t.id == "t1") t.copy(text = "from B") else t }) } }
+        assertEquals("from A", syncBoth().pages.first().texts.first { it.id == "t1" }.text)
     }
 
     @Test
-    fun offlinePicturesMovedOnBothKeepTheNewerPlaceAndAddedOnesAreKept() {
+    fun offlinePicturesMovedOnBothKeepOnePlaceAndAddedOnesAreKept() {
         richNote()
         a.edit("n1") { it.editPage("p1") { p -> p.copy(images = p.images.map { i -> i.copy(x = 111f) } + PageImage(id = "iA", file = "b.png", x = 1f, y = 1f, width = 10f, height = 10f)) } }
         b.edit("n1") { it.editPage("p1") { p -> p.copy(images = p.images.map { i -> i.copy(x = 222f) } + PageImage(id = "iB", file = "c.png", x = 1f, y = 1f, width = 10f, height = 10f)) } }
         val images = syncBoth().pages.first().images
         assertEquals(setOf("i1", "iA", "iB"), images.map { it.id }.toSet())
-        assertEquals(222f, images.first { it.id == "i1" }.x)
+        assertEquals(111f, images.first { it.id == "i1" }.x)
     }
 
     @Test
@@ -832,15 +893,15 @@ class SyncEngineTest {
     }
 
     @Test
-    fun offlineStickyMovedOnOneAndFoldedOnTheOtherTakesTheNewerFrame() {
+    fun offlineStickyMovedOnOneAndFoldedOnTheOtherTakesOneFrameWhole() {
         richNote()
         a.edit("n1") { it.editPage("p1") { p -> p.copy(stickies = p.stickies.map { st -> st.copy(x = 50f, strokes = st.strokes + stroke("inkA")) }) } }
         b.edit("n1") { it.editPage("p1") { p -> p.copy(stickies = p.stickies.map { st -> st.copy(folded = true) }) } }
         val sticky = syncBoth().pages.first().stickies.single()
-        // Position, size, colour and folding are one value: the newer side's (B) wins whole,
-        // so A's move is lost, but A's ink inside the sticky is kept.
-        assertTrue(sticky.folded)
-        assertEquals(300f, sticky.x)
+        // Position, size, colour and folding are one value: made without seeing each other, the
+        // tie goes to A on both devices (device order), so B's folding is lost but A's ink is kept.
+        assertFalse(sticky.folded)
+        assertEquals(50f, sticky.x)
         assertEquals(setOf("inkA"), sticky.strokes.map { it.id }.toSet())
     }
 
@@ -855,12 +916,32 @@ class SyncEngineTest {
     }
 
     @Test
-    fun offlineTitleChangedOnBothKeepsTheNewer() {
+    fun offlineTitleChangedOnBothKeepsOneOnEveryDevice() {
         richNote()
-        a.save(a.notes.getValue("n1").copy(title = "Older title"))
-        b.save(b.notes.getValue("n1").copy(title = "Newer title"))
+        a.save(a.notes.getValue("n1").copy(title = "Title A"))
+        b.save(b.notes.getValue("n1").copy(title = "Title B"))
         syncBoth()
-        assertEquals("Newer title", a.notes.getValue("n1").title)
+        assertEquals("Title A", a.notes.getValue("n1").title)
+    }
+
+    @Test
+    fun aChangeMadeAfterSeeingTheOtherWinsEvenAgainstAClockThatIsAhead() {
+        sharedNote()
+        // B's clock is years ahead.
+        b.notes["n1"] = b.notes.getValue("n1").copy(title = "From B", updatedAt = 99_999_999_999L, dirty = true)
+        b.sync()
+        a.sync()
+        assertEquals("From B", a.notes.getValue("n1").title)
+        // A renames it after seeing B's title; B meanwhile writes on the page.
+        a.save(a.notes.getValue("n1").copy(title = "From A, later"))
+        b.addStrokes("n1", "fromB")
+        b.notes["n1"] = b.notes.getValue("n1").copy(updatedAt = 99_999_999_999L + 1)
+        a.sync()
+        b.sync()
+        a.sync()
+        assertEquals("From A, later", a.notes.getValue("n1").title)
+        assertEquals("From A, later", b.notes.getValue("n1").title)
+        assertTrue("fromB" in a.strokeIds("n1"))
     }
 
     @Test

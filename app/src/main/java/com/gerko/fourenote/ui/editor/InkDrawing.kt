@@ -270,7 +270,13 @@ fun InkStroke.isHitBy(x: Float, y: Float, radius: Float): Boolean {
  * Segments near the eraser are subdivided so the cut follows the eraser's
  * edge; segments far from it are kept as they are.
  */
-fun InkStroke.erasedAround(x: Float, y: Float, radius: Float): List<InkStroke>? {
+fun InkStroke.erasedAround(
+    x: Float,
+    y: Float,
+    radius: Float,
+    /** What the pieces replace (see [InkStroke.replaces]): this stroke, or what it was cut from earlier in the same rub. */
+    replacing: String? = id,
+): List<InkStroke>? {
     if (!isHitBy(x, y, radius)) return null
     val reach = radius + width / 2
     val step = maxOf(0.5f, radius / 4)
@@ -283,7 +289,7 @@ fun InkStroke.erasedAround(x: Float, y: Float, radius: Float): List<InkStroke>? 
         // A piece needs at least two points to draw as a line.
         if (run.size >= 4) {
             pieces.add(
-                InkStroke(color, width, highlighter, run.toFloatArray(), factors?.let { runWidths.toFloatArray() }, layerId, nibAngle = nibAngle, squareEnds = squareEnds),
+                InkStroke(color, width, highlighter, run.toFloatArray(), factors?.let { runWidths.toFloatArray() }, layerId, nibAngle = nibAngle, squareEnds = squareEnds, replaces = replacing),
             )
         }
         run = ArrayList()

@@ -86,6 +86,7 @@ object NoteFile {
         key("folder"); if (note.folderId == null) out.append("null") else JsonReader.quote(note.folderId, out)
         // Left out when false, so files of unlocked notes stay as they were.
         if (note.locked) { key("locked"); out.append("true") }
+        key("rev"); out.append(note.rev.toString())
         // The other devices' files (device id to version) merged into this one: lets a device
         // reading it for the first time find the state both started from (see SyncEngine).
         if (seen.isNotEmpty()) {
@@ -132,6 +133,7 @@ object NoteFile {
             remotePdfId = string("pdf")?.takeIf { it.isNotEmpty() },
             folderId = string("folder")?.takeIf { it.isNotEmpty() },
             locked = fields["locked"]?.booleanOrNull ?: false,
+            rev = fields["rev"]?.longOrNull?.coerceAtLeast(0) ?: 0,
         )
     }
 

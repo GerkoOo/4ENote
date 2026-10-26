@@ -45,6 +45,12 @@ data class Note(
      * device is locked on all of them; the unlock itself is only remembered for this session.
      */
     @ColumnInfo(defaultValue = "0") val locked: Boolean = false,
+    /**
+     * Edit counter for sync, instead of the clock (a device whose clock is off would otherwise
+     * always win): a device uploading its own edits sets it one above every version it has seen,
+     * so of two changes to the same title or picture, the one made after seeing the other wins.
+     */
+    @ColumnInfo(defaultValue = "0") val rev: Long = 0,
 )
 
 /**

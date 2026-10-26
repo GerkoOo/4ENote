@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
  */
 private const val META =
     "id, title, '' AS inkData, createdAt, updatedAt, driveFileId, lastSyncedAt, deleted, dirty, " +
-        "remoteVersion, remotePdfId, '' AS syncedSnapshot, folderId, trashedAt, locked"
+        "remoteVersion, remotePdfId, '' AS syncedSnapshot, folderId, trashedAt, locked, rev"
 
 @Dao
 interface NoteDao {
@@ -70,7 +70,7 @@ interface NoteDao {
      */
     @Query(
         """UPDATE notes SET title = :title, createdAt = :createdAt,
-           updatedAt = :updatedAt, dirty = :dirty, folderId = :folderId, locked = :locked
+           updatedAt = :updatedAt, dirty = :dirty, folderId = :folderId, locked = :locked, rev = :rev
            WHERE id = :id AND updatedAt = :expectedUpdatedAt""",
     )
     suspend fun replaceContentIfUnchanged(
@@ -82,6 +82,7 @@ interface NoteDao {
         expectedUpdatedAt: Long,
         folderId: String?,
         locked: Boolean,
+        rev: Long,
     ): Int
 
     /**
@@ -113,7 +114,7 @@ interface NoteDao {
 
     @Query(
         """UPDATE notes SET driveFileId = :remoteId, remotePdfId = :remotePdfId,
-           remoteVersion = :remoteVersion, lastSyncedAt = :syncedAt,
+           remoteVersion = :remoteVersion, lastSyncedAt = :syncedAt, rev = :rev,
            dirty = CASE WHEN updatedAt = :expectedUpdatedAt THEN 0 ELSE 1 END
            WHERE id = :id""",
     )
@@ -124,5 +125,6 @@ interface NoteDao {
         remoteVersion: String,
         syncedAt: Long,
         expectedUpdatedAt: Long,
+        rev: Long,
     )
 }
