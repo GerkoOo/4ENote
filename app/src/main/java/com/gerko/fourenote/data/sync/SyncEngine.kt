@@ -86,6 +86,12 @@ interface SyncStore {
     )
 
     suspend fun purge(noteId: String)
+
+    /** Purges the note unless it was edited after [expectedUpdatedAt] (or is waiting to upload); true if purged. */
+    suspend fun purgeIfUnchanged(noteId: String, expectedUpdatedAt: Long): Boolean {
+        purge(noteId)
+        return true
+    }
 }
 
 data class SyncResult(
@@ -412,9 +418,9 @@ class SyncEngine(
             }
 
             files == null && wasSynced(note) && !note.dirty -> {
-                // Deleted on another device, and not edited here since.
-                store.purge(note.id)
-                deletedHere++
+                // Deleted on another device, and not edited here since (also not while this sync
+                // ran: if it was, the edit wins and the note uploads again next time).
+                if (store.purgeIfUnchanged(note.id, note.updatedAt)) deletedHere++
             }
 
             // New note, or deleted elsewhere but edited here: the edit wins and it uploads again.
@@ -432,7 +438,8 @@ class SyncEngine(
         // note is still missing (for instance one skipped by an older version of the app), or
         // encrypt a locked note that went up readable before the 4ENote password was set.
         if (changed.isEmpty()) {
-            val catchUp = own != null && ((pdfExporter != null && note.remotePdfId == null && !note.locked) || needsSealing(note, own))
+            val pdfMissing = pdfExporter != null && note.remotePdfId == null && !note.locked && pdfFailed[note.id] != note.updatedAt
+            val catchUp = own != null && (pdfMissing || needsSealing(note, own))
             if ((note.dirty || catchUp) && upload(note, own?.id)) uploaded++
             return
         }
@@ -452,12 +459,6 @@ class SyncEngine(
                 )
             merges += Triple(device, file.version, read.snapshot)
         }
-        // The note is stored before the other devices' files are recorded as merged: if anything
-        // stops in between, the same files are merged again next time, which changes nothing.
-        if (!store.replaceIfUnchanged(result, note.updatedAt, dirty = note.dirty)) return
-        for ((device, version, snapshot) in merges) store.savePeer(note.id, device, version, snapshot)
-        if (note.dirty) merged++ else downloaded++
-
         // This device's file keeps up with the note, so a device joining later reads no stale
         // copy. A device that never wrote the note has no file of it and stays a reader.
         val behind = when {
@@ -466,7 +467,13 @@ class SyncEngine(
             own.version != note.remoteVersion -> true
             else -> !sameContent(store.syncedSnapshot(note), result)
         }
-        if (behind) upload(result, own?.id)
+        // The note is stored before the other devices' files are recorded as merged: if anything
+        // stops in between, the same files are merged again next time, which changes nothing. Kept
+        // as waiting to upload while this device's file is behind, so a failed upload is retried.
+        if (!store.replaceIfUnchanged(result, note.updatedAt, dirty = behind)) return
+        for ((device, version, snapshot) in merges) store.savePeer(note.id, device, version, snapshot)
+        if (note.dirty) merged++ else downloaded++
+        if (behind) upload(result.copy(dirty = true), own?.id)
     }
 
     /**
@@ -488,7 +495,8 @@ class SyncEngine(
         seen[deviceId]?.let { add(store.sentSnapshot(note, it)) }
         add(store.peerSnapshot(note.id, device))
         val versions = store.peerVersions(note.id)
-        for ((other, version) in seen) {
+        // In device order, so every device builds the same base.
+        for ((other, version) in seen.toSortedMap()) {
             if (other != deviceId && other != device && versions[other] == version) add(store.peerSnapshot(note.id, other))
         }
         return base
@@ -529,11 +537,15 @@ class SyncEngine(
             null
         } else {
             pdfExporter?.let { export ->
-                export(note)?.let { pdf ->
+                val pdf = export(note)
+                // Not tried again for this version of the note while the app runs: every sync
+                // would otherwise upload the note again only to fail the same way.
+                if (pdf == null) pdfFailed[note.id] = note.updatedAt
+                pdf?.let {
                     try {
-                        provider.upload(pdfName(note), PDF_MIME_TYPE, UploadContent.of(pdf), note.remotePdfId).id
+                        provider.upload(pdfName(note), PDF_MIME_TYPE, UploadContent.of(it), note.remotePdfId).id
                     } finally {
-                        pdf.delete()
+                        it.delete()
                     }
                 }
             } ?: note.remotePdfId
@@ -590,6 +602,12 @@ class SyncEngine(
     }
 
     companion object {
+        /** Notes whose PDF copy failed, with the note's updatedAt then (see [upload]). */
+        private val pdfFailed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+        /** Forgets failed PDF copies, as a restart of the app does. */
+        internal fun forgetPdfFailures() = pdfFailed.clear()
+
         const val PDF_MIME_TYPE = "application/pdf"
         /** Added to the cloud name of a locked note's picture or PDF page once it is encrypted. */
         const val ENCRYPTED_SUFFIX = ".4el"

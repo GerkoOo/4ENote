@@ -70,7 +70,8 @@ interface NoteDao {
      */
     @Query(
         """UPDATE notes SET title = :title, createdAt = :createdAt,
-           updatedAt = :updatedAt, dirty = :dirty, folderId = :folderId, locked = :locked, rev = :rev
+           updatedAt = :updatedAt, dirty = :dirty, folderId = :folderId, locked = :locked, rev = :rev,
+           remotePdfId = COALESCE(remotePdfId, :remotePdfId)
            WHERE id = :id AND updatedAt = :expectedUpdatedAt""",
     )
     suspend fun replaceContentIfUnchanged(
@@ -83,6 +84,8 @@ interface NoteDao {
         folderId: String?,
         locked: Boolean,
         rev: Long,
+        /** A PDF copy another device made, kept if this device has none yet. */
+        remotePdfId: String?,
     ): Int
 
     /**

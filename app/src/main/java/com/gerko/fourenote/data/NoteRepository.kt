@@ -13,6 +13,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Notes: their details in Room, their ink in files ([InkStore]). Ink saved in the database by
@@ -172,12 +174,22 @@ class NoteRepository(
         return ink.loadFirstPage(noteId)
     }
 
+    // One writer at a time per note between reading its ink and stamping the edit: sync's merge,
+    // a photo put into a frame from the home page, an editor save. Otherwise one could write over
+    // what another just wrote (sync's check on updatedAt only sees an edit once it is stamped).
+    private val noteLocks = ConcurrentHashMap<String, Mutex>()
+
+    private suspend fun <T> withNoteLock(noteId: String, block: suspend () -> T): T =
+        noteLocks.getOrPut(noteId) { Mutex() }.withLock { block() }
+
     /** Saves an edit from the editor; it will upload on the next sync. */
     suspend fun saveDocument(noteId: String, title: String, doc: InkDocument) {
         legacyMoved.await()
-        ink.save(noteId, doc)
-        if (dao.markEdited(noteId, title, System.currentTimeMillis()) == 0) {
-            dao.upsert(Note(id = noteId, title = title))
+        withNoteLock(noteId) {
+            ink.save(noteId, doc)
+            if (dao.markEdited(noteId, title, System.currentTimeMillis()) == 0) {
+                dao.upsert(Note(id = noteId, title = title))
+            }
         }
     }
 
@@ -189,7 +201,9 @@ class NoteRepository(
      * tombstone stays so the deletion reaches the cloud; sync removes it afterwards.
      */
     suspend fun delete(note: Note) {
-        if (!note.isInCloud) purge(note.id) else dao.markDeleted(note.id, System.currentTimeMillis())
+        // Decided on the note as stored now: the caller's copy may be from before a sync uploaded it.
+        val current = dao.getById(note.id) ?: return
+        if (!current.isInCloud) purge(note.id) else dao.markDeleted(note.id, System.currentTimeMillis())
     }
 
     /** A new note with the same pages, ink and pictures, titled as a copy. Uploads on the next sync. */
@@ -249,10 +263,13 @@ class NoteRepository(
             frameFills.emit(noteId to listOf(fill(frame)))
             return
         }
-        val doc = ink.load(noteId) ?: return
-        val pages = doc.pages.map { page -> page.copy(images = page.images.map { if (it.id == frameId) fill(it) else it }) }
-        ink.save(noteId, doc.copy(pages = pages))
-        dao.markEdited(noteId, note.title, System.currentTimeMillis())
+        withNoteLock(noteId) {
+            val doc = ink.load(noteId) ?: return@withNoteLock
+            val pages = doc.pages.map { page -> page.copy(images = page.images.map { if (it.id == frameId) fill(it) else it }) }
+            ink.save(noteId, doc.copy(pages = pages))
+            // The title as it is now: it may have been renamed while the photo was stored.
+            dao.markEdited(noteId, dao.getById(noteId)?.title ?: note.title, System.currentTimeMillis())
+        }
     }
 
     /**
@@ -362,7 +379,7 @@ class NoteRepository(
         dao.upsert(note.copy(inkData = "", syncedSnapshot = ""))
     }
 
-    override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean {
+    override suspend fun replaceIfUnchanged(note: Note, expectedUpdatedAt: Long, dirty: Boolean): Boolean = withNoteLock(note.id) {
         // Deleted notes are local to this device: a cloud copy must not bring one back.
         val trashedAt = dao.getById(note.id)?.trashedAt
         val replaced = dao.replaceContentIfUnchanged(
@@ -375,13 +392,21 @@ class NoteRepository(
             folderId = note.folderId,
             locked = note.locked,
             rev = note.rev,
+            remotePdfId = note.remotePdfId,
         ) > 0
         if (replaced) {
             seal(note.id, note.locked)
             ink.save(note.id, InkSerializer.decode(note.inkData))
             if (trashedAt != null) dao.setTrashed(listOf(note.id), trashedAt)
         }
-        return replaced
+        replaced
+    }
+
+    override suspend fun purgeIfUnchanged(noteId: String, expectedUpdatedAt: Long): Boolean = withNoteLock(noteId) {
+        val current = dao.getById(noteId)
+        if (current == null || current.dirty || current.updatedAt != expectedUpdatedAt) return@withNoteLock false
+        purge(noteId)
+        true
     }
 
     override suspend fun markSynced(

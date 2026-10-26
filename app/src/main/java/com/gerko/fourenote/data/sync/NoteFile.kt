@@ -92,7 +92,7 @@ object NoteFile {
         if (seen.isNotEmpty()) {
             key("seen")
             out.append('{')
-            seen.entries.forEachIndexed { i, (device, version) ->
+            seen.toSortedMap().entries.forEachIndexed { i, (device, version) ->
                 if (i > 0) out.append(',')
                 JsonReader.quote(device, out)
                 out.append(':')

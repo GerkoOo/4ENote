@@ -49,10 +49,16 @@ class SyncEngineTest {
         )
         /** Runs once, just before this device's next upload: another device can act in between. */
         var beforeUpload: (() -> Unit)? = null
+        /** The next uploads of note files fail, as with a dropped connection. */
+        var failNoteUploads = 0
         private val folder = LocalFolderCloudProvider(cloudDir)
         val provider = object : CloudProvider by folder {
             override suspend fun upload(name: String, mimeType: String, content: UploadContent, remoteId: String?): RemoteFile {
                 beforeUpload?.also { beforeUpload = null }?.invoke()
+                if (failNoteUploads > 0 && name.endsWith(NoteFile.EXTENSION)) {
+                    failNoteUploads--
+                    throw java.io.IOException("connection dropped")
+                }
                 return folder.upload(name, mimeType, content, remoteId)
             }
         }
@@ -121,6 +127,13 @@ class SyncEngineTest {
             )
         }
 
+        override suspend fun purgeIfUnchanged(noteId: String, expectedUpdatedAt: Long): Boolean {
+            val current = notes[noteId] ?: return false
+            if (current.dirty || current.updatedAt != expectedUpdatedAt) return false
+            purge(noteId)
+            return true
+        }
+
         override suspend fun purge(noteId: String) {
             notes.remove(noteId)
             peers.remove(noteId)
@@ -178,6 +191,7 @@ class SyncEngineTest {
 
     @Before
     fun setUp() {
+        SyncEngine.forgetPdfFailures()
         cloudDir = tmp.newFolder("cloud")
         a = Device("aaaaaaaa")
         b = Device("bbbbbbbb")
@@ -336,6 +350,9 @@ class SyncEngineTest {
         a.save(Note(id = "big", title = "Lecture", inkData = ink("s1")))
         runBlocking { withoutPdf.sync() }
         assertEquals(listOf("big.aaaaaaaa.4enote"), cloudFiles())
+        // A failed copy isn't retried every sync, only after an edit or a restart (an update).
+        assertEquals(0, a.sync().uploaded)
+        SyncEngine.forgetPdfFailures()
         // ...then the next sync, with a working exporter, adds it without any edit.
         assertEquals(1, a.sync().uploaded)
         assertEquals(listOf("Lecture (big).pdf", "big.aaaaaaaa.4enote"), cloudFiles())
@@ -783,6 +800,38 @@ class SyncEngineTest {
         // A's cut wins (tie goes to A): s2 and the two pieces, not the moved whole stroke too.
         assertEquals(3, strokes.size)
         assertEquals(a.strokeIds("n1"), b.strokeIds("n1"))
+    }
+
+    @Test
+    fun aNoteChangedHereWhileTheSyncRunsIsNotRemovedAsDeletedElsewhere() {
+        sharedNote()
+        a.save(Note(id = "n2", title = "Other", inkData = ink("x1")))
+        a.sync()
+        b.sync()
+        b.delete("n1")
+        b.sync()
+        // A edits n2 (it uploads first) and, while that upload runs, moves n1 to a folder.
+        a.notes.remove("n1")?.let { a.notes["n1"] = it }
+        a.addStrokes("n2", "x2")
+        a.beforeUpload = { a.save(a.notes.getValue("n1").copy(folderId = "f1")) }
+        a.sync()
+        assertTrue("n1" in a.notes)
+        // The move wins over the deletion: the note goes up again.
+        a.sync()
+        assertTrue("n1.aaaaaaaa.4enote" in cloudFiles())
+    }
+
+    @Test
+    fun aMergeWhoseUploadFailedIsUploadedNextTime() {
+        sharedNote()
+        b.addStrokes("n1", "fromB")
+        b.sync()
+        a.failNoteUploads = 1
+        a.sync()
+        assertTrue("fromB" in a.strokeIds("n1"))
+        a.sync()
+        val aFile = NoteFile.decode(NoteFile.fromCloud(java.io.File(cloudDir, "n1.aaaaaaaa.4enote").readBytes()))
+        assertTrue("fromB" in InkSerializer.decode(aFile.inkData).pages.flatMap { it.strokes }.map { it.id })
     }
 
     @Test
