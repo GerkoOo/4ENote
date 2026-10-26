@@ -258,6 +258,23 @@ data class PageLink(
 )
 
 /**
+ * A sticky note on a page: a coloured square at (x, y), width x height in page units, holding its
+ * own ink and typed text. Content coordinates are relative to the sticky's top-left corner;
+ * resizing clips the content, it does not scale it. Folded shows only a small icon at (x, y).
+ */
+data class StickyNote(
+    val id: String = newId(),
+    val x: Float,
+    val y: Float,
+    val width: Float = 200f,
+    val height: Float = 200f,
+    val color: Int = 0xFFFFF59D.toInt(),
+    val folded: Boolean = false,
+    val strokes: List<InkStroke> = emptyList(),
+    val texts: List<PageText> = emptyList(),
+)
+
+/**
  * Where a page's background sits: its top-left corner at ([x], [y]) in page
  * units and its size as a multiple ([scale]) of the page. The default fills
  * the page exactly.
@@ -280,6 +297,7 @@ data class InkPage(
     val invertBackground: Boolean = false,
     val texts: List<PageText> = emptyList(),
     val links: List<PageLink> = emptyList(),
+    val stickies: List<StickyNote> = emptyList(),
 ) {
     companion object {
         /** A4 at 96 units per inch. */
@@ -469,20 +487,7 @@ object InkSerializer {
         w.key("id").str(page.id)
         w.key("w").num(page.width)
         w.key("h").num(page.height)
-        w.key("strokes").arr(page.strokes) { stroke ->
-            w.obj {
-                w.key("id").str(stroke.id)
-                w.key("c").raw(stroke.color.toString())
-                w.key("w").num(stroke.width)
-                w.key("h").bool(stroke.highlighter)
-                // One decimal place of a page unit is far below what the eye can see.
-                w.key("p").nums(stroke.points) { (it * 10).roundToInt() / 10f }
-                w.key("l").str(stroke.layerId)
-                stroke.nibAngle?.let { w.key("nib").num(it) }
-                if (stroke.squareEnds) w.key("sq").bool(true)
-                stroke.widths?.let { widths -> w.key("pw").nums(widths) { (it * 100).roundToInt() / 100f } }
-            }
-        }
+        w.key("strokes").arr(page.strokes) { stroke -> writeStroke(w, stroke) }
         if (page.images.isNotEmpty()) {
             w.key("images").arr(page.images) { img ->
                 w.obj {
@@ -522,20 +527,20 @@ object InkSerializer {
             }
         }
         if (page.texts.isNotEmpty()) {
-            w.key("texts").arr(page.texts) { t ->
-                val st = t.style
+            w.key("texts").arr(page.texts) { t -> writeText(w, t) }
+        }
+        if (page.stickies.isNotEmpty()) {
+            w.key("stickies").arr(page.stickies) { sticky ->
                 w.obj {
-                    w.key("id").str(t.id)
-                    w.key("x").num(t.x)
-                    w.key("y").num(t.y)
-                    w.key("w").num(t.width)
-                    w.key("t").str(t.text)
-                    w.key("m").bool(t.autoMath)
-                    w.key("s").num(st.size)
-                    w.key("c").raw(st.color.toString())
-                    w.key("f").str(st.font.name)
-                    if (st.bold) w.key("b").bool(true)
-                    if (st.italic) w.key("i").bool(true)
+                    w.key("id").str(sticky.id)
+                    w.key("x").num(sticky.x)
+                    w.key("y").num(sticky.y)
+                    w.key("w").num(sticky.width)
+                    w.key("h").num(sticky.height)
+                    w.key("c").raw(sticky.color.toString())
+                    if (sticky.folded) w.key("fold").bool(true)
+                    w.key("strokes").arr(sticky.strokes) { stroke -> writeStroke(w, stroke) }
+                    w.key("texts").arr(sticky.texts) { t -> writeText(w, t) }
                 }
             }
         }
@@ -561,6 +566,36 @@ object InkSerializer {
                     w.key("scale").num(p.scale)
                 }
             }
+        }
+    }
+
+    private fun writeStroke(w: Writer, stroke: InkStroke) = w.obj {
+        w.key("id").str(stroke.id)
+        w.key("c").raw(stroke.color.toString())
+        w.key("w").num(stroke.width)
+        w.key("h").bool(stroke.highlighter)
+        // One decimal place of a page unit is far below what the eye can see.
+        w.key("p").nums(stroke.points) { (it * 10).roundToInt() / 10f }
+        w.key("l").str(stroke.layerId)
+        stroke.nibAngle?.let { w.key("nib").num(it) }
+        if (stroke.squareEnds) w.key("sq").bool(true)
+        stroke.widths?.let { widths -> w.key("pw").nums(widths) { (it * 100).roundToInt() / 100f } }
+    }
+
+    private fun writeText(w: Writer, t: PageText) {
+        val st = t.style
+        w.obj {
+            w.key("id").str(t.id)
+            w.key("x").num(t.x)
+            w.key("y").num(t.y)
+            w.key("w").num(t.width)
+            w.key("t").str(t.text)
+            w.key("m").bool(t.autoMath)
+            w.key("s").num(st.size)
+            w.key("c").raw(st.color.toString())
+            w.key("f").str(st.font.name)
+            if (st.bold) w.key("b").bool(true)
+            if (st.italic) w.key("i").bool(true)
         }
     }
 
@@ -674,10 +709,54 @@ object InkSerializer {
         }
         val rest = LinkedHashMap<String, JsonElement>()
         var strokes: List<InkStroke> = emptyList()
+        var stickies: List<StickyNote> = emptyList()
         reader.obj { key ->
-            if (key == "strokes") strokes = readStrokes(reader) else rest[key] = reader.element()
+            when (key) {
+                "strokes" -> strokes = readStrokes(reader)
+                "stickies" -> stickies = readStickies(reader)
+                else -> rest[key] = reader.element()
+            }
         }
-        return decodePage(JsonObject(rest)).copy(strokes = strokes)
+        return decodePage(JsonObject(rest)).copy(strokes = strokes, stickies = stickies)
+    }
+
+    // Sticky notes: their ink read like page ink, the rest as a JsonObject.
+    private fun readStickies(reader: JsonReader): List<StickyNote> {
+        if (reader.peek() != '[') {
+            reader.skip()
+            return emptyList()
+        }
+        val stickies = ArrayList<StickyNote>()
+        reader.arr {
+            // A damaged sticky is skipped; it must not cost the whole note.
+            if (reader.peek() != '{') {
+                reader.skip()
+                return@arr
+            }
+            val rest = LinkedHashMap<String, JsonElement>()
+            var strokes: List<InkStroke> = emptyList()
+            reader.obj { key ->
+                if (key == "strokes") strokes = readStrokes(reader) else rest[key] = reader.element()
+            }
+            val o = JsonObject(rest)
+            val id = o.string("id")
+            // Ids may name things later (link targets); a hostile or damaged one is dropped.
+            if (!SafeName.isSafeFromCloud(id)) return@arr
+            stickies += StickyNote(
+                id = id,
+                x = o.double("x").toFloat(),
+                y = o.double("y").toFloat(),
+                width = o.double("w", 200.0).toFloat(),
+                height = o.double("h", 200.0).toFloat(),
+                color = o.int("c", 0xFFFFF59D.toInt()),
+                folded = o.boolean("fold"),
+                strokes = strokes,
+                texts = (o.array("texts") ?: JsonArray(emptyList())).mapNotNull { t ->
+                    (t as? JsonObject)?.let(::decodeText)
+                },
+            )
+        }
+        return stickies
     }
 
     private fun readStrokes(reader: JsonReader): List<InkStroke> {
@@ -777,24 +856,7 @@ object InkSerializer {
             )
         }
         val textsJson = json.array("texts") ?: JsonArray(emptyList())
-        val texts = textsJson.map { element ->
-            val o = element.jsonObject
-            PageText(
-                id = o.string("id"),
-                x = o.double("x").toFloat(),
-                y = o.double("y").toFloat(),
-                width = o.double("w").toFloat(),
-                text = o.string("t"),
-                autoMath = o.boolean("m", true),
-                style = TextStyleSpec(
-                    size = o.double("s", 16.0).toFloat(),
-                    color = o.int("c", 0xFF000000.toInt()),
-                    bold = o.boolean("b"),
-                    italic = o.boolean("i"),
-                    font = runCatching { TextFont.valueOf(o.string("f")) }.getOrDefault(TextFont.SANS),
-                ),
-            )
-        }
+        val texts = textsJson.map { element -> decodeText(element.jsonObject) }
         val linksJson = json.array("links") ?: JsonArray(emptyList())
         val links = linksJson.mapNotNull { element ->
             // A damaged link is skipped; it must not cost the whole note.
@@ -830,6 +892,22 @@ object InkSerializer {
             background = bg,
         )
     }
+
+    private fun decodeText(o: JsonObject) = PageText(
+        id = o.string("id"),
+        x = o.double("x").toFloat(),
+        y = o.double("y").toFloat(),
+        width = o.double("w").toFloat(),
+        text = o.string("t"),
+        autoMath = o.boolean("m", true),
+        style = TextStyleSpec(
+            size = o.double("s", 16.0).toFloat(),
+            color = o.int("c", 0xFF000000.toInt()),
+            bold = o.boolean("b"),
+            italic = o.boolean("i"),
+            font = runCatching { TextFont.valueOf(o.string("f")) }.getOrDefault(TextFont.SANS),
+        ),
+    )
 
     /**
      * A number as short as it can be written and still read back as exactly the same float:

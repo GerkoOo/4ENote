@@ -6,6 +6,7 @@ import com.gerko.fourenote.data.ink.InkLayer
 import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.InkStroke
+import com.gerko.fourenote.data.ink.StickyNote
 import com.gerko.fourenote.data.ink.withoutDeadLinks
 
 /**
@@ -73,6 +74,15 @@ object NoteMerger {
                                     localIsNewer,
                                 )
                             },
+                        stickies = mergeById(basePage?.stickies.orEmpty(), localPage.stickies, remotePage.stickies) { it.id }
+                            .map { sticky ->
+                                mergeSticky(
+                                    basePage?.stickies?.firstOrNull { it.id == sticky.id },
+                                    localPage.stickies.firstOrNull { it.id == sticky.id } ?: sticky,
+                                    remotePage.stickies.firstOrNull { it.id == sticky.id } ?: sticky,
+                                    localIsNewer,
+                                )
+                            },
                     ).withoutDeadLinks()
                 }
             }
@@ -103,6 +113,29 @@ object NoteMerger {
             updatedAt = maxOf(local.updatedAt, remote.updatedAt),
         )
     }
+
+    /**
+     * A sticky present on both sides: its frame (position, size, colour, folded) is a single value
+     * like the title, while its ink and text merge as sets, so writing in the same sticky on two
+     * devices keeps both.
+     */
+    private fun mergeSticky(base: StickyNote?, local: StickyNote, remote: StickyNote, localIsNewer: Boolean): StickyNote {
+        val frame = pick(base?.withoutContent(), local.withoutContent(), remote.withoutContent(), localIsNewer)
+        return frame.copy(
+            strokes = mergeById(base?.strokes.orEmpty(), local.strokes, remote.strokes, InkStroke::id),
+            texts = mergeById(base?.texts.orEmpty(), local.texts, remote.texts) { it.id }
+                .map { text ->
+                    pick(
+                        base?.texts?.firstOrNull { it.id == text.id },
+                        local.texts.firstOrNull { it.id == text.id } ?: text,
+                        remote.texts.firstOrNull { it.id == text.id } ?: text,
+                        localIsNewer,
+                    )
+                },
+        )
+    }
+
+    private fun StickyNote.withoutContent() = copy(strokes = emptyList(), texts = emptyList())
 
     /** Local order first, then items only the other side added, in its order. */
     private fun <T> mergeById(base: List<T>, local: List<T>, remote: List<T>, id: (T) -> String): List<T> {

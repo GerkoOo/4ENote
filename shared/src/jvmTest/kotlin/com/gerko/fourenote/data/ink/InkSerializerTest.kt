@@ -208,6 +208,48 @@ class PageLinkTest {
     }
 }
 
+class StickyNoteTest {
+    private fun stroke(id: String) =
+        InkStroke(color = 7, width = 3f, highlighter = false, points = floatArrayOf(0f, 0f, 5f, 5f), id = id)
+
+    @Test
+    fun foldedAndUnfoldedStickiesRoundTrip() {
+        val text = PageText(id = "t1", x = 4f, y = 6f, width = 120f, text = "todo", style = TextStyleSpec(size = 12f))
+        val stickies = listOf(
+            StickyNote(id = "s1", x = 10f, y = 20f, strokes = listOf(stroke("a")), texts = listOf(text)),
+            StickyNote(id = "s2", x = 300f, y = 400f, width = 150f, height = 90f, color = 0xFFAABBCC.toInt(),
+                folded = true, strokes = listOf(stroke("b"))),
+        )
+        val doc = InkDocument(listOf(InkPage(id = "p", stickies = stickies)))
+        val read = InkSerializer.decode(InkSerializer.encode(doc)).pages[0].stickies
+        // InkStroke compares by identity, so the ink is checked by id and points.
+        assertEquals(stickies.map { it.copy(strokes = emptyList()) }, read.map { it.copy(strokes = emptyList()) })
+        assertEquals(stickies.map { s -> s.strokes.map { it.id } }, read.map { s -> s.strokes.map { it.id } })
+        assertEquals(
+            stickies.map { s -> s.strokes.map { it.points.toList() } },
+            read.map { s -> s.strokes.map { it.points.toList() } },
+        )
+    }
+
+    @Test
+    fun pagesWithoutStickiesWriteNoStickiesKey() {
+        val doc = InkDocument(listOf(InkPage(id = "p", strokes = listOf(stroke("s1")))))
+        assertFalse(InkSerializer.encode(doc).contains("stickies"))
+    }
+
+    @Test
+    fun damagedStickyIsSkippedAndTheRestOfTheNoteLoads() {
+        val json = """{"v":3,"pages":[{"id":"p","w":794,"h":1123,"strokes":[],"stickies":[""" +
+            """{"id":"ok","x":1,"y":2,"w":100,"h":100,"c":-1,"strokes":[],"texts":[]},""" +
+            """{"x":1,"y":2},""" +
+            """{"id":"../evil","x":1,"y":2},""" +
+            """42""" +
+            """]}]}"""
+        val page = InkSerializer.decode(json).pages[0]
+        assertEquals(listOf("ok"), page.stickies.map { it.id })
+    }
+}
+
 class PageImageTest {
     private val image = PageImage(id = "i", file = "a.png", x = 100f, y = 100f, width = 80f, height = 40f)
 
