@@ -71,10 +71,11 @@ class NoteRepository(
         for (id in noteIds) seal(id, locked)
     }
 
-    /** Encrypts locked notes' ink on this device and decrypts unlocked ones (see InkStore.setSealed). */
+    /** Encrypts locked notes' ink and pictures on this device and decrypts unlocked ones. */
     private suspend fun seal(noteId: String, locked: Boolean) {
         try {
             ink.setSealed(noteId, locked)
+            attachments.setSealed(noteId, locked)
         } catch (e: Exception) {
             // Left as it is; the next start tries again.
             Log.w(TAG, "Couldn't ${if (locked) "encrypt" else "decrypt"} note $noteId", e)
@@ -147,6 +148,7 @@ class NoteRepository(
         saveFolders = { folders?.upsertAll(it) },
         forgetInk = { id -> ink.forget(id) },
         readInk = { id, file -> ink.plainBytes(id, file) },
+        openAttachment = { file -> attachments.openPlain(file) },
         sealInk = { id, locked -> seal(id, locked) },
     )
 
@@ -318,6 +320,13 @@ class NoteRepository(
             // Files being written start with a dot.
             .filter { it.isFile && !it.name.startsWith(".") }
             .associateBy { it.name }
+
+    override fun attachmentBytes(noteId: String, file: java.io.File): ByteArray = attachments.readPlain(file)
+
+    override fun attachmentUpload(noteId: String, file: java.io.File): com.gerko.fourenote.data.sync.UploadContent =
+        // Sealed pictures go up as their plain bytes; the rest (PDFs, unlocked notes) straight from the file.
+        if (attachments.isSealed(noteId)) com.gerko.fourenote.data.sync.UploadContent.of(attachments.readPlain(file))
+        else com.gerko.fourenote.data.sync.UploadContent.of(file)
 
     override suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {
         attachments.saveDownloaded(noteId, name, content)

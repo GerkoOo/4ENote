@@ -109,7 +109,7 @@ object PdfExporter {
                 Matrix(box.width / page.width, 0f, 0f, -box.height / page.height, box.lowerLeftX, box.upperRightY),
             )
             if (copied == null) drawBackground(out, cs, page, doc.paper, noteId, attachments)
-            for (image in page.images) if (!image.waitingForPhoto) drawPicture(out, cs, attachments.file(noteId, image.file), image)
+            for (image in page.images) if (!image.waitingForPhoto) drawPicture(out, cs, attachments, attachments.file(noteId, image.file), image)
             for (stroke in doc.visibleStrokes(page)) drawStroke(cs, stroke)
             for (text in page.texts) if (text.text.isNotBlank()) drawText(out, cs, text)
         }
@@ -146,7 +146,7 @@ object PdfExporter {
         val file = attachments.file(noteId, background.file)
         val image = runCatching {
             when (background) {
-                is PageBackground.Image -> imageFor(out, file)
+                is PageBackground.Image -> imageFor(out, attachments, file)
                 // Only rotated PDF pages get here: draw them as an image at print resolution.
                 is PageBackground.PdfPage -> renderPdfPage(file, background.pageIndex, (page.width * 2).toInt())
                     ?.let { bitmap -> JPEGFactory.createFromImage(out, bitmap, 0.85f).also { bitmap.recycle() } }
@@ -160,28 +160,33 @@ object PdfExporter {
         cs.restoreGraphicsState()
     }
 
-    /** JPEGs are embedded as stored (no decoding); other formats are decoded and compressed losslessly. */
-    private fun imageFor(out: PDDocument, file: File): PDImageXObject? {
+    /**
+     * JPEGs are embedded as stored (no decoding); other formats are decoded and compressed
+     * losslessly. Read through [attachments]: a locked note's pictures are encrypted on the device.
+     */
+    private fun imageFor(out: PDDocument, attachments: AttachmentStore, file: File): PDImageXObject? {
         if (!file.exists()) return null
+        val bytes = attachments.readPlain(file)
         if (file.extension.equals("jpg", true) || file.extension.equals("jpeg", true)) {
-            return file.inputStream().buffered().use { JPEGFactory.createFromStream(out, it) }
+            return JPEGFactory.createFromByteArray(out, bytes)
         }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.path, bounds)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_IMAGE_SIDE) sample *= 2
-        val bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
         return LosslessFactory.createFromImage(out, bitmap).also { bitmap.recycle() }
     }
 
     /** A picture as shown on the page: only its cropped part, with its colours inverted if set. */
-    private fun editedImageFor(out: PDDocument, file: File, image: PageImage): PDImageXObject? {
+    private fun editedImageFor(out: PDDocument, attachments: AttachmentStore, file: File, image: PageImage): PDImageXObject? {
         if (!file.exists()) return null
+        val bytes = attachments.readPlain(file)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.path, bounds)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_IMAGE_SIDE) sample *= 2
-        val full = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        val full = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
         val left = (image.cropLeft * full.width).toInt().coerceIn(0, full.width - 1)
         val top = (image.cropTop * full.height).toInt().coerceIn(0, full.height - 1)
         val width = ((image.cropRight - image.cropLeft) * full.width).toInt().coerceIn(1, full.width - left)
@@ -229,9 +234,9 @@ object PdfExporter {
     }
 
     /** A picture placed on the page, rotated about its center and faded as on screen. */
-    private fun drawPicture(out: PDDocument, cs: PDPageContentStream, file: File, image: PageImage) {
+    private fun drawPicture(out: PDDocument, cs: PDPageContentStream, attachments: AttachmentStore, file: File, image: PageImage) {
         val xObject = runCatching {
-            if (image.cropped || image.inverted || image.negative) editedImageFor(out, file, image) else imageFor(out, file)
+            if (image.cropped || image.inverted || image.negative) editedImageFor(out, attachments, file, image) else imageFor(out, attachments, file)
         }.getOrNull() ?: return
         cs.saveGraphicsState()
         if (image.opacity < 1f) {

@@ -43,6 +43,8 @@ class Backup(
     private val forgetInk: suspend (String) -> Unit,
     /** A note's ink file as plain bytes (a locked note's are encrypted on the device). */
     private val readInk: suspend (noteId: String, file: File) -> ByteArray = { _, file -> file.readBytes() },
+    /** An attachment's plain content (a locked note's pictures are encrypted on the device). */
+    private val openAttachment: (file: File) -> InputStream = { it.inputStream() },
     /** Encrypts a restored note's ink on the device when it is locked, or not. */
     private val sealInk: suspend (noteId: String, locked: Boolean) -> Unit = { _, _ -> },
     private val clock: () -> Long = System::currentTimeMillis,
@@ -79,7 +81,7 @@ class Backup(
             File(ink, "pages").listFiles().orEmpty().filter { it.isFile && it.name.endsWith(".ink") }
                 .forEach { addBytes(zip, "ink/${note.id}/pages/${it.name}", readInk(note.id, it)) }
             File(attachmentsRoot, note.id).listFiles().orEmpty().filter { it.isFile && !it.name.startsWith(".") }
-                .forEach { addFile(zip, "attachments/${note.id}/${it.name}", it) }
+                .forEach { addStream(zip, "attachments/${note.id}/${it.name}", openAttachment(it)) }
         }
         zip.finish()
         zip.flush()
@@ -195,9 +197,9 @@ class Backup(
         zip.closeEntry()
     }
 
-    private fun addFile(zip: ZipOutputStream, name: String, file: File) {
+    private fun addStream(zip: ZipOutputStream, name: String, input: InputStream) {
         zip.putNextEntry(ZipEntry(name))
-        file.inputStream().use { it.copyTo(zip) }
+        input.use { it.copyTo(zip) }
         zip.closeEntry()
     }
 

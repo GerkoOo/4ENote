@@ -58,13 +58,16 @@ fun CropDialog(
     onDone: (Rect) -> Unit,
     onCancel: () -> Unit,
 ) {
+    // Read through the attachment store: a locked note's pictures are encrypted on the device.
+    val attachments = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.gerko.fourenote.FourENoteApp).attachments
     val bitmap by produceState<ImageBitmap?>(null, file) {
         value = withContext(Dispatchers.IO) {
+            val bytes = runCatching { attachments.readPlain(file) }.getOrNull() ?: return@withContext null
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.path, bounds)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             var sample = 1
             while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
-            BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
         }
     }
     // The kept part, as fractions of the picture.

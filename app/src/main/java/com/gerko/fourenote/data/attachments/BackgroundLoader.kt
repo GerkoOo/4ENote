@@ -35,7 +35,7 @@ class BackgroundLoader(private val attachments: AttachmentStore) {
         val bitmap = withContext(Dispatchers.IO) {
             runCatching {
                 when (background) {
-                    is PageBackground.Image -> decodeImage(file.path, width)
+                    is PageBackground.Image -> decodeImage(attachments.readPlain(file), width)
                     is PageBackground.PdfPage -> renderLock.withLock { renderPdfPage(file, background.pageIndex, width) }
                 }
             }.getOrNull()
@@ -44,12 +44,13 @@ class BackgroundLoader(private val attachments: AttachmentStore) {
         return bitmap
     }
 
-    private fun decodeImage(path: String, width: Int): Bitmap? {
+    // From bytes, not the file: a locked note's pictures are encrypted on the device.
+    private fun decodeImage(bytes: ByteArray, width: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= width) sample *= 2
-        return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
     private fun renderPdfPage(file: java.io.File, index: Int, width: Int): Bitmap =

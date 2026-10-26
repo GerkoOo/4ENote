@@ -27,6 +27,12 @@ interface SyncStore {
     /** The note's pictures and PDF pages on this device: file name to file. They never change once written. */
     fun attachments(noteId: String): Map<String, File> = emptyMap()
 
+    /** An attachment's plain content (a locked note's pictures are encrypted on the device). */
+    fun attachmentBytes(noteId: String, file: File): ByteArray = file.readBytes()
+
+    /** An attachment ready to upload as it is; big files (PDFs) are streamed from the file. */
+    fun attachmentUpload(noteId: String, file: File): UploadContent = UploadContent.of(file)
+
     /** Stores a picture or PDF page that came from the cloud. */
     suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {}
 
@@ -261,10 +267,10 @@ class SyncEngine(
                 if (name in wanted || (!settled && name in other)) continue
                 if (key != null) {
                     val cloudName = NoteFile.attachmentName(note.id, name) + ENCRYPTED_SUFFIX
-                    val sealed = key.encrypt(file.readBytes(), cloudName)
+                    val sealed = key.encrypt(store.attachmentBytes(note.id, file), cloudName)
                     provider.upload(cloudName, "application/octet-stream", UploadContent.of(sealed), null)
                 } else {
-                    provider.upload(NoteFile.attachmentName(note.id, name), mimeType(name), UploadContent.of(file), null)
+                    provider.upload(NoteFile.attachmentName(note.id, name), mimeType(name), store.attachmentUpload(note.id, file), null)
                 }
                 other[name]?.let { provider.delete(it.id) }
             }

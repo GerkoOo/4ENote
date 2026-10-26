@@ -20,7 +20,10 @@ class FourENoteApp : Application() {
     /** Lives as long as the app, so a sync finishes even after its screen closes. */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val attachments: AttachmentStore by lazy { AttachmentStore(this) }
+    /** Encrypts locked notes' files on this tablet (ink and pictures). */
+    private val deviceKey by lazy { com.gerko.fourenote.data.security.DeviceKey(this) }
+
+    val attachments: AttachmentStore by lazy { AttachmentStore(this, deviceKey) }
 
     val backgrounds: BackgroundLoader by lazy { BackgroundLoader(attachments) }
 
@@ -28,7 +31,7 @@ class FourENoteApp : Application() {
 
     val repository: NoteRepository by lazy {
         val db = AppDatabase.getInstance(this)
-        NoteRepository(db.noteDao(), attachments, InkStore(java.io.File(filesDir, "ink"), com.gerko.fourenote.data.security.DeviceKey(this)), appScope, db.folderDao())
+        NoteRepository(db.noteDao(), attachments, InkStore(java.io.File(filesDir, "ink"), deviceKey), appScope, db.folderDao())
     }
 
     val googleAuth: GoogleAuth by lazy { GoogleAuth(this) }

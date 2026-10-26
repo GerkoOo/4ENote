@@ -75,7 +75,8 @@ class NoteRepositoryTest {
         assertEquals(0, dao.legacyInkLength("big"))
         assertEquals(0, dao.legacySnapshotLength("big"))
         assertEquals(setOf("Lecture", "Short"), repository.observeAll().first().map { it.title }.toSet())
-        assertEquals("{\"format\":\"4enote\"}", repository.withContent(dao.getById("big")!!).syncedSnapshot)
+        // The sync base moved out of the database too; it is read on its own (see e97cef0).
+        assertEquals("{\"format\":\"4enote\"}", repository.syncedSnapshot(dao.getById("big")!!))
     }
 
     @Test
