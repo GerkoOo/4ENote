@@ -60,16 +60,6 @@ object IosCrypto {
 
 private fun bridge() = checkNotNull(IosCrypto.aesGcm) { "AES-GCM not installed (see FourENoteApp.swift)" }
 
-private inline fun <R> ByteArray.withPointer(block: (CPointer<ByteVar>?) -> R): R =
-    if (isEmpty()) block(null) else usePinned { block(it.addressOf(0)) }
-
-private fun ByteArray.toNSData(): NSData = withPointer { NSData.create(bytes = it, length = size.convert()) }
-
-private fun NSData.toByteArray(): ByteArray {
-    val out = ByteArray(length.toInt())
-    if (out.isNotEmpty()) out.usePinned { memcpy(it.addressOf(0), bytes, length) }
-    return out
-}
 
 actual fun sha256(data: ByteArray): ByteArray {
     val out = ByteArray(32)
