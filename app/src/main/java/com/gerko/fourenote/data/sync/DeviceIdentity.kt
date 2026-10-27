@@ -10,8 +10,6 @@ import java.security.SecureRandom
 object DeviceIdentity {
     private const val PREFS = "device-id"
     private const val KEY = "id"
-    private const val LENGTH = 8
-    private const val ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
     fun id(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -26,7 +24,7 @@ object DeviceIdentity {
     }
 
     fun newId(random: SecureRandom = SecureRandom()): String =
-        String(CharArray(LENGTH) { ALPHABET[random.nextInt(ALPHABET.length)] })
+        String(CharArray(DeviceIds.LENGTH) { DeviceIds.ALPHABET[random.nextInt(DeviceIds.ALPHABET.length)] })
 
-    fun isValid(id: String) = id.length == LENGTH && id.all { it in ALPHABET }
+    fun isValid(id: String) = DeviceIds.isValid(id)
 }
