@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ios.store
 
+import okio.Path.Companion.toOkioPath
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
 import com.gerko.fourenote.data.ink.InkDocument
@@ -22,7 +23,7 @@ class NoteStoreTest {
     val tmp = TemporaryFolder()
 
     private fun store(now: () -> Long = { 1_000L }): NoteStore =
-        NoteStore(NoteFiles(tmp.newFolder()), now)
+        NoteStore(tmp.newFolder().toOkioPath(), now = now)
 
     @Test
     fun createSavesAndReadsBack() {
@@ -89,8 +90,9 @@ class NoteStoreTest {
     @Test
     fun unreadableFileIsSkipped() {
         val folder = tmp.newFolder()
-        File(folder, "broken.json").writeText("not json at all")
-        val store = NoteStore(NoteFiles(folder))
+        File(folder, "notes").mkdirs()
+        File(folder, "notes/broken.json").writeText("not json at all")
+        val store = NoteStore(folder.toOkioPath())
         val good = store.create("Good")
         assertEquals(listOf(good.id), store.all().map { it.id })
     }

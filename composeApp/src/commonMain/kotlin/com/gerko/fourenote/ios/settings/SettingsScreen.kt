@@ -28,11 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.gerko.fourenote.ios.lock.AppLock
+import com.gerko.fourenote.ios.sync.SyncController
 
-/** Settings: what is coming, the Face ID lock, and the version. */
+/** Settings: cloud sync, the Face ID lock, and the version. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(lock: AppLock, onBack: () -> Unit) {
+fun SettingsScreen(lock: AppLock, sync: SyncController, onBack: () -> Unit) {
     var enabled by remember { mutableStateOf(lock.enabled) }
     val available = remember { lock.isAvailable() }
 
@@ -54,10 +55,7 @@ fun SettingsScreen(lock: AppLock, onBack: () -> Unit) {
                 .padding(horizontal = 24.dp, vertical = 16.dp),
         ) {
             Section("Cloud sync")
-            Text(
-                "Google Drive and Nextcloud sync is coming to the iPad app.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            CloudSection(sync)
 
             Spacer(Modifier.padding(top = 24.dp))
             HorizontalDivider()

@@ -9,4 +9,17 @@ object DeviceIds {
     const val ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
     fun isValid(id: String) = id.length == LENGTH && id.all { it in ALPHABET }
+
+    /** A new random id (the iPad's; Android has DeviceIdentity.newId). */
+    fun random(): String {
+        val out = StringBuilder(LENGTH)
+        while (out.length < LENGTH) {
+            for (b in com.gerko.fourenote.platform.secureRandomBytes(LENGTH * 2)) {
+                val v = b.toInt() and 0xff
+                // 252 = 7 x 36: higher bytes are skipped so every character is equally likely.
+                if (v < 252 && out.length < LENGTH) out.append(ALPHABET[v % ALPHABET.length])
+            }
+        }
+        return out.toString()
+    }
 }

@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.gerko.fourenote.ios.PageView
 import com.gerko.fourenote.ios.store.NoteStore
 import com.gerko.fourenote.ios.store.StoredNote
-import com.gerko.fourenote.ios.store.nowMillis
+import com.gerko.fourenote.platform.nowMillis
 
 /**
  * The home screen: a grid of note thumbnails, a button to make a new note, and a way into
@@ -54,10 +54,12 @@ import com.gerko.fourenote.ios.store.nowMillis
 @Composable
 fun HomeScreen(
     store: NoteStore,
+    /** Goes up when sync may have changed notes: the list reloads. */
+    changes: Int = 0,
     onOpen: (String) -> Unit,
     onSettings: () -> Unit,
 ) {
-    var notes by remember { mutableStateOf(store.all()) }
+    var notes by remember(changes) { mutableStateOf(store.all()) }
     var renaming by remember { mutableStateOf<StoredNote?>(null) }
     var deleting by remember { mutableStateOf<StoredNote?>(null) }
 

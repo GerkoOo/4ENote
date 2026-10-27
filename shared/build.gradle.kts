@@ -26,6 +26,10 @@ kotlin {
             api("androidx.room:room-common:2.8.5")
             api("com.squareup.okio:okio:3.9.0")
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+        }
         jvmTest.dependencies {
             implementation("junit:junit:4.13.2")
             implementation(kotlin("test"))

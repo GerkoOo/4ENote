@@ -1,5 +1,6 @@
 package com.gerko.fourenote.ios
 
+import okio.Path.Companion.toOkioPath
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
 import org.jetbrains.skia.EncodedImageFormat
@@ -13,13 +14,13 @@ class AppScreenshotTest {
 
     @Test
     fun rendersAppToPng() {
-        val files = com.gerko.fourenote.ios.store.NoteFiles(tmp.newFolder())
+        val dir = tmp.newFolder().toOkioPath()
         val scene = ImageComposeScene(width = 1366, height = 1024, density = Density(1f)) {
-            App(files = files)
+            App(dir = dir)
         }
         val image = scene.render()
         // The first start adds the sample notes, once.
-        assertTrue(files.list().count { it.endsWith(".json") } == SampleNotes.all.size)
+        assertTrue(okio.FileSystem.SYSTEM.list(dir / "notes").count { it.name.endsWith(".json") } == SampleNotes.all.size)
         val data = image.encodeToData(EncodedImageFormat.PNG)
             ?: error("Skia could not encode the screenshot")
         val out = File("build/screenshots/app.png")

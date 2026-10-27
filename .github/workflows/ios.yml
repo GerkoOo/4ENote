@@ -28,6 +28,9 @@ jobs:
           restore-keys: |
             konan-${{ runner.os }}-
 
+      - name: Shared tests on the iOS simulator
+        run: ./gradlew --no-daemon :shared:iosSimulatorArm64Test
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

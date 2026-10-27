@@ -10,7 +10,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,10 +24,17 @@ import com.gerko.fourenote.ios.home.HomeScreen
 import com.gerko.fourenote.ios.home.LockGate
 import com.gerko.fourenote.ios.lock.AppLock
 import com.gerko.fourenote.ios.settings.SettingsScreen
-import com.gerko.fourenote.ios.store.NoteFiles
 import com.gerko.fourenote.ios.store.NoteStore
 import com.gerko.fourenote.ios.store.StoredNote
-import com.gerko.fourenote.ios.store.nowMillis
+import com.gerko.fourenote.ios.store.appDataDir
+import com.gerko.fourenote.ios.sync.SyncController
+import com.gerko.fourenote.platform.nowMillis
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import okio.FileSystem
+import okio.Path
+import okio.SYSTEM
 
 private sealed interface Screen {
     data object Home : Screen
@@ -36,10 +45,15 @@ private sealed interface Screen {
 /** The iPad app: the lock (if on), then the notes, a note in the editor, or the settings. */
 @Composable
 fun App(
-    files: NoteFiles = remember { NoteFiles() },
+    dir: Path = remember { appDataDir() },
     lock: AppLock = remember { AppLock() },
 ) {
-    val store = remember(files) { NoteStore(files).also { addSamplesOnce(files, it) } }
+    val store = remember(dir) { NoteStore(dir).also { addSamplesOnce(dir, it) } }
+    val sync = remember(dir) {
+        SyncController(store, dir, FileSystem.SYSTEM, CoroutineScope(SupervisorJob() + Dispatchers.Default), ::nowMillis)
+    }
+    LaunchedEffect(sync) { sync.syncNow() }
+    val changes by sync.changes.collectAsState()
     MaterialTheme {
         Surface(Modifier.fillMaxSize()) {
             LockGate(lock) {
@@ -48,11 +62,12 @@ fun App(
                     when (val current = screen) {
                         Screen.Home -> HomeScreen(
                             store = store,
+                            changes = changes,
                             onOpen = { screen = Screen.Editor(it) },
                             onSettings = { screen = Screen.Settings },
                         )
-                        Screen.Settings -> SettingsScreen(lock = lock, onBack = { screen = Screen.Home })
-                        is Screen.Editor -> NoteEditorScreen(store, current.noteId, onBack = { screen = Screen.Home })
+                        Screen.Settings -> SettingsScreen(lock = lock, sync = sync, onBack = { screen = Screen.Home })
+                        is Screen.Editor -> NoteEditorScreen(store, sync, current.noteId, onBack = { screen = Screen.Home })
                     }
                 }
             }
@@ -63,7 +78,15 @@ fun App(
 /** A note open in the editor; every change is saved to the store straight away. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NoteEditorScreen(store: NoteStore, noteId: String, onBack: () -> Unit) {
+private fun NoteEditorScreen(store: NoteStore, sync: SyncController, noteId: String, onBack: () -> Unit) {
+    // Sync leaves an open note alone; closing it sends the edits up.
+    DisposableEffect(noteId) {
+        store.sync.setOpen(noteId, true)
+        onDispose {
+            store.sync.setOpen(noteId, false)
+            sync.syncNow()
+        }
+    }
     val note = remember(noteId) { store.get(noteId) }
     if (note == null) {
         // Deleted meanwhile: back to the list.
@@ -87,12 +110,14 @@ private fun NoteEditorScreen(store: NoteStore, noteId: String, onBack: () -> Uni
 }
 
 /** The sample notes, on the very first start only (deleting them all doesn't bring them back). */
-private fun addSamplesOnce(files: NoteFiles, store: NoteStore) {
-    if (files.read(SAMPLES_ADDED) != null) return
+private fun addSamplesOnce(dir: Path, store: NoteStore) {
+    val marker = dir / SAMPLES_ADDED
+    if (FileSystem.SYSTEM.exists(marker)) return
     if (store.all().isEmpty()) {
         for (sample in SampleNotes.all) store.save(store.create(sample.title).copy(document = sample.document))
     }
-    files.write(SAMPLES_ADDED, "1")
+    FileSystem.SYSTEM.createDirectories(dir)
+    FileSystem.SYSTEM.write(marker) { writeUtf8("1") }
 }
 
 private const val SAMPLES_ADDED = ".samples-added"
