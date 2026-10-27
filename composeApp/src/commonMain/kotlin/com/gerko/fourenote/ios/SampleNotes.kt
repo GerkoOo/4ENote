@@ -54,7 +54,8 @@ object SampleNotes {
             val y = 620f + sin(t * 4f * PI.toFloat()) * 60f
             wavePoints += x
             wavePoints += y
-            waveWidths += 2f + 6f * (0.5f + 0.5f * sin(t * 8f * PI.toFloat()))
+            // Width factors (times the pen width), as InkPen makes them.
+            waveWidths += 0.4f + 1.1f * (0.5f + 0.5f * sin(t * 8f * PI.toFloat()))
         }
         strokes += InkStroke(
             color = BLUE,
