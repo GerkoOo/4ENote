@@ -402,6 +402,13 @@ class NoteRepository(
         replaced
     }
 
+    /** See [InkStore.syncHistoryBytes]. */
+    suspend fun syncHistoryBytes(): Long = ink.syncHistoryBytes()
+
+    override fun reportProblem(noteId: String, message: String) {
+        CrashLog.record("Sync, note ${noteId.take(8)}", IllegalStateException(message))
+    }
+
     override suspend fun purgeIfUnchanged(noteId: String, expectedUpdatedAt: Long): Boolean = withNoteLock(noteId) {
         val current = dao.getById(noteId)
         if (current == null || current.dirty || current.updatedAt != expectedUpdatedAt) return@withNoteLock false

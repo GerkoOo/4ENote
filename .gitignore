@@ -22,3 +22,4 @@ google-services.json
 composeApp/build/
 iosApp/iosApp.xcodeproj/
 iosApp/build/
+.aider*

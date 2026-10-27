@@ -94,8 +94,16 @@ class SyncEngineTest {
 
         /** This device's uploads: note id to version to text. */
         val sent = mutableMapOf<String, MutableMap<String, String>>()
-        // The real store keeps a day's uploads (InkStore.recordSent): all of them in a test.
+        // The real store keeps a day's uploads (InkStore.recordSent): all of them in a test, unless
+        // [onlyLatestSent] says the older ones are gone (as two days later).
+        var onlyLatestSent = false
         override suspend fun sentSnapshot(note: Note, version: String) = sent[note.id]?.get(version)
+            ?.takeIf { !onlyLatestSent || version == note.remoteVersion }
+
+        val problems = mutableListOf<String>()
+        override fun reportProblem(noteId: String, message: String) {
+            problems += message
+        }
 
         /** Other devices' files as last merged: note id to device id to (version, text). */
         val peers = mutableMapOf<String, MutableMap<String, Pair<String, String>>>()
@@ -807,6 +815,54 @@ class SyncEngineTest {
         assertFalse("doomed" in a.strokeIds("n1"))
         assertFalse("doomed" in b.strokeIds("n1"))
         assertTrue("fromB" in a.strokeIds("n1"))
+    }
+
+    @Test
+    fun anUploadRetriedDaysLaterReadsTheOtherDeviceAgainSoAnEraseStaysErased() {
+        sharedNote()
+        a.addStrokes("n1", "doomed")
+        a.sync()
+        b.sync()
+        // B writes, but its upload fails (the tablet goes into a bag).
+        b.addStrokes("n1", "fromB")
+        b.failNoteUploads = 1
+        b.sync()
+        // Meanwhile A erases a stroke and uploads several times; two days later A keeps only its latest upload.
+        a.removeStroke("n1", "doomed")
+        a.sync()
+        repeat(3) { i ->
+            a.addStrokes("n1", "more$i")
+            a.sync()
+        }
+        a.onlyLatestSent = true
+        // B's retry merges A's current file first, so what it uploads says it saw that one.
+        b.sync()
+        a.sync()
+        assertFalse("doomed" in a.strokeIds("n1"))
+        assertFalse("doomed" in b.strokeIds("n1"))
+        assertTrue("fromB" in a.strokeIds("n1"))
+        assertEquals(emptyList<String>(), a.problems + b.problems)
+    }
+
+    @Test
+    fun aMergeWithoutACommonBaseIsWrittenToTheCrashLog() {
+        sharedNote()
+        a.addStrokes("n1", "doomed")
+        a.sync()
+        b.sync()
+        b.addStrokes("n1", "fromB")
+        // A uploads twice during B's sync and keeps only its latest upload: B's file saw neither.
+        b.beforeUpload = {
+            a.removeStroke("n1", "doomed")
+            a.sync()
+            a.addStrokes("n1", "more")
+            a.sync()
+            a.onlyLatestSent = true
+        }
+        b.sync()
+        a.sync()
+        assertEquals(1, a.problems.size)
+        assertTrue(a.problems.single().contains("no common base"))
     }
 
     @Test

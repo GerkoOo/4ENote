@@ -87,6 +87,9 @@ interface SyncStore {
 
     suspend fun purge(noteId: String)
 
+    /** Something went wrong with the note that loses no data now but shouldn't happen; goes into the crash log. */
+    fun reportProblem(noteId: String, message: String) {}
+
     /** Purges the note unless it was edited after [expectedUpdatedAt] (or is waiting to upload); true if purged. */
     suspend fun purgeIfUnchanged(noteId: String, expectedUpdatedAt: Long): Boolean {
         purge(noteId)
@@ -451,6 +454,9 @@ class SyncEngine(
         for ((device, file) in changed) {
             val read = readNote(file, note.id) ?: return
             val base = commonBase(note, device, read.seen)
+            // Without a base the merge keeps everything from both sides, so strokes erased on one
+            // side since can come back. Not expected (see InkStore.recordSent); noted so it shows.
+            if (base == null) store.reportProblem(note.id, "no common base with device $device (it saw ${read.seen}); merged keeping both sides")
             result = NoteMerger.merge(base, result.copy(rev = result.rev + unsent), read.note, remoteFirst = device < deviceId)
                 .copy(
                     remotePdfId = result.remotePdfId ?: read.note.remotePdfId,

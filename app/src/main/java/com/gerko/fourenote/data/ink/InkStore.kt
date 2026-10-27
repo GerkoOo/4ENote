@@ -192,6 +192,17 @@ class InkStore(val root: File, private val sealing: FileSealing? = null) {
         java.security.MessageDigest.getInstance("SHA-256").digest(version.encodeToByteArray())
             .take(12).joinToString("") { "%02x".format(it) }
 
+    /**
+     * Bytes kept for merging, over all notes: this device's last upload and upload history, and
+     * the other devices' files as last merged. Shown in the sync settings.
+     */
+    suspend fun syncHistoryBytes(): Long = withContext(Dispatchers.IO) {
+        root.listFiles().orEmpty().filter { it.isDirectory }.sumOf { note ->
+            File(note, "synced.4enote.gz").length() +
+                listOf(File(note, "sent"), File(note, "peers")).sumOf { dir -> dir.listFiles().orEmpty().sumOf { it.length() } }
+        }
+    }
+
     /** Drops the note's sync bases (its own uploads, other devices' files): another cloud was chosen. */
     suspend fun forgetSync(noteId: String) = locked(noteId) {
         snapshotFile(noteId).delete()

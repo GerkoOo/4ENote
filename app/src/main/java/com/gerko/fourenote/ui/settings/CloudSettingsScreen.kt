@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -207,10 +208,21 @@ fun CloudSettingsScreen(syncManager: SyncManager, onBack: () -> Unit) {
                     ) { Text("Sync now") }
                     Text(statusText(status), style = MaterialTheme.typography.bodyMedium)
                 }
+                // Measured again after each sync.
+                val kept by produceState<Long?>(null, status) { value = syncManager.syncHistoryBytes() }
+                kept?.let {
+                    Text(
+                        "Kept on this device to merge edits from other devices: ${megabytes(it)}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
     }
 }
+
+private fun megabytes(bytes: Long): String =
+    if (bytes < 1024 * 1024) "under 1 MB" else "${(bytes + 512 * 1024) / (1024 * 1024)} MB"
 
 private fun statusText(status: SyncStatus): String = when (status) {
     SyncStatus.Idle -> "Not synced yet"

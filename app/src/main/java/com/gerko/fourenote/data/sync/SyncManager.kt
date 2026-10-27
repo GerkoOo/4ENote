@@ -85,6 +85,9 @@ class SyncManager(
     val webDavAccount: StateFlow<String?> = _webDavAccount
 
     /** Whether [choice] can be picked now: Google Drive once signed in, WebDAV once set up, OneDrive not yet. */
+    /** What sync keeps on this device to merge other devices' edits (see InkStore.syncHistoryBytes). */
+    suspend fun syncHistoryBytes(): Long = repository.syncHistoryBytes()
+
     fun isAvailable(choice: CloudChoice) = when (choice) {
         CloudChoice.GOOGLE_DRIVE -> googleAuth.configured && googleAuth.account.value != null
         CloudChoice.WEBDAV -> webDavCredentials() != null
