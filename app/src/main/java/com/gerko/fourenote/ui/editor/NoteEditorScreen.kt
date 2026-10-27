@@ -696,6 +696,8 @@ private fun PageList(
     var zoomedToPage by remember { mutableStateOf<Int?>(null) }
     // A page picked up in the overview to move: its id, the finger (root pixels) and where on the page it was held.
     var draggingPage by remember { mutableStateOf<String?>(null) }
+    // A sticky note being moved or resized: the page draws it where the finger has it.
+    var liveSticky by remember { mutableStateOf<com.gerko.fourenote.data.ink.StickyNote?>(null) }
     var dragFinger by remember { mutableStateOf(Offset.Zero) }
     var dragGrab by remember { mutableStateOf(Offset.Zero) }
     val pageBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -1214,6 +1216,7 @@ private fun PageList(
                                 if (viewModel.tool == Tool.STICKY) viewModel.placeSticky(page.id, x, y) else viewModel.tapWithText(page.id, x, y)
                             },
                             pointedNib = viewModel.pointedNib,
+                            stickies = page.stickies.map { sticky -> liveSticky?.takeIf { it.id == sticky.id } ?: sticky },
                             modifier = Modifier.matchParentSize(),
                         )
                         TextBoxLayer(
@@ -1237,6 +1240,7 @@ private fun PageList(
                             onChange = { viewModel.updateSticky(page.id, it) },
                             onToggleFold = { viewModel.toggleFold(page.id, it) },
                             onDelete = viewModel::deleteSelectedSticky,
+                            onLive = { liveSticky = it },
                         )
                         // Badges are in the way while arranging pages, which is only for moving them.
                         if (!arrange) {

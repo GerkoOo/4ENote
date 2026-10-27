@@ -172,7 +172,7 @@ class NoteEditorViewModel(
     internal var eraseSnapshot: Snapshot? = null
 
     // Pieces cut during the current rub: cutting one again still replaces the original stroke.
-    private val cutThisRub = HashSet<String>()
+    internal val cutThisRub = HashSet<String>()
 
     /** The picture selected with the Select tool, as (page id, image id). */
     var selectedImage by mutableStateOf<Pair<String, String>?>(null)
@@ -376,6 +376,7 @@ class NoteEditorViewModel(
     /** Adds an offset copy of the selection and selects the copy. */
     /** Adds a drawn stroke, or erases with it: a scrub, or a line held still through words ([held]). */
     fun addStroke(pageId: String, stroke: InkStroke, held: Boolean = false) {
+        if (addToSticky(pageId, stroke)) return
         val strokes = page(pageId)?.strokes ?: return
         if (scribbleToErase && !stroke.highlighter && Scribble.isScribble(stroke)) {
             val erased = Scribble.erasedBy(stroke, strokes.filter { it.layerId == activeLayerId }, ERASER_RADIUS_DP / 2)
@@ -425,6 +426,7 @@ class NoteEditorViewModel(
     }
 
     fun eraseAt(pageId: String, x: Float, y: Float) {
+        if (eraseOnSticky(pageId, x, y)) return
         val page = page(pageId) ?: return
         val strokes = page.strokes
         if (eraseWholeStrokes) {

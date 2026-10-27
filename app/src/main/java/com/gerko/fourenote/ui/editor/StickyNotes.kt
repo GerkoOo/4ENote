@@ -38,10 +38,10 @@ private const val FOLDED_SIZE = 40f
 private const val MIN_STICKY_SIZE = 80f
 
 /** Corner radius of an open sticky note, in page units. */
-private const val STICKY_CORNER = 4f
+internal const val STICKY_CORNER = 4f
 
 /**
- * The sticky notes of one page, over its ink and text. With [interactive] (the Sticky or Select
+ * The controls of one page's sticky notes (the notes themselves are drawn by InkCanvas). With [interactive] (the Sticky or Select
  * tool) a tap selects an open note, dragging its body moves it and the handle at its bottom-right
  * corner resizes it; the change is reported once, when the drag ends. Otherwise the body takes no
  * touches at all, so the pen and fingers draw on the page as usual; only the fold button and a
@@ -59,6 +59,8 @@ fun StickyLayer(
     onChange: (StickyNote) -> Unit,
     onToggleFold: (String) -> Unit,
     onDelete: () -> Unit,
+    /** The note being moved or resized, until the gesture ends (null after); the page draws it. */
+    onLive: (StickyNote?) -> Unit,
 ) {
     for (sticky in stickies) {
         if (sticky.folded) {
@@ -75,6 +77,7 @@ fun StickyLayer(
                 onChange = onChange,
                 onToggleFold = { onToggleFold(sticky.id) },
                 onDelete = onDelete,
+                onLive = onLive,
             )
         }
     }
@@ -116,12 +119,19 @@ private fun OpenSticky(
     onChange: (StickyNote) -> Unit,
     onToggleFold: () -> Unit,
     onDelete: () -> Unit,
+    onLive: (StickyNote?) -> Unit,
 ) {
     val density = LocalDensity.current
     val current by rememberUpdatedState(sticky)
+    val currentOnLive by rememberUpdatedState(onLive)
     val currentOnChange by rememberUpdatedState(onChange)
     // The note as it is being dragged or resized; reported once, when the gesture ends.
     var live by remember(sticky.id) { mutableStateOf<StickyNote?>(null) }
+    // The page draws the note, so it hears of every step of the gesture too.
+    fun setLive(value: StickyNote?) {
+        live = value
+        currentOnLive(value)
+    }
     val shown = live ?: sticky
     val accent = MaterialTheme.colorScheme.primary
     val corner = with(density) { (STICKY_CORNER * pxPerUnit).toDp() }
@@ -134,9 +144,9 @@ private fun OpenSticky(
         Modifier
             .offset { IntOffset((shown.x * pxPerUnit).roundToInt(), (shown.y * pxPerUnit).roundToInt()) }
             .size(width, height)
-            .shadow(3.dp, shape)
+            // The note itself (colour and ink) is drawn by the page's InkCanvas, under the pen's
+            // stroke in progress; this box only holds the buttons and takes moves and resizes.
             .clip(shape)
-            .background(Color(shown.color))
             .then(if (selected) Modifier.border(2.dp, accent, shape) else Modifier)
             // Only the interactive layer takes touches on the body; otherwise they reach the page.
             .then(
@@ -148,16 +158,16 @@ private fun OpenSticky(
                                 onDragStart = { onSelect() },
                                 onDragEnd = {
                                     live?.let { currentOnChange(it) }
-                                    live = null
+                                    setLive(null)
                                 },
-                                onDragCancel = { live = null },
+                                onDragCancel = { setLive(null) },
                             ) { change, drag ->
                                 change.consume()
                                 val from = live ?: current
-                                live = from.copy(
+                                setLive(from.copy(
                                     x = (from.x + drag.x / pxPerUnit).coerceIn(0f, (pageWidth - from.width).coerceAtLeast(0f)),
                                     y = (from.y + drag.y / pxPerUnit).coerceIn(0f, (pageHeight - from.height).coerceAtLeast(0f)),
-                                )
+                                ))
                             }
                         }
                 } else {
@@ -207,18 +217,18 @@ private fun OpenSticky(
                         detectDragGestures(
                             onDragEnd = {
                                 live?.let { currentOnChange(it) }
-                                live = null
+                                setLive(null)
                             },
-                            onDragCancel = { live = null },
+                            onDragCancel = { setLive(null) },
                         ) { change, drag ->
                             change.consume()
                             val from = live ?: current
-                            live = from.copy(
+                            setLive(from.copy(
                                 width = (from.width + drag.x / pxPerUnit)
                                     .coerceIn(MIN_STICKY_SIZE, (pageWidth - from.x).coerceAtLeast(MIN_STICKY_SIZE)),
                                 height = (from.height + drag.y / pxPerUnit)
                                     .coerceIn(MIN_STICKY_SIZE, (pageHeight - from.y).coerceAtLeast(MIN_STICKY_SIZE)),
-                            )
+                            ))
                         }
                     },
             ) {

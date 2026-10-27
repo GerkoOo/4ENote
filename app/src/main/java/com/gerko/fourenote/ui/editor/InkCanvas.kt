@@ -125,6 +125,8 @@ fun InkCanvas(
     /** A two-finger twist: turn the page view by this many degrees (clockwise). */
     onRotate: (degrees: Float) -> Unit = {},
     onTwoFingerHold: (rootPx: Offset) -> Unit,
+    /** The page's sticky notes: drawn over the ink and under the stroke being written. */
+    stickies: List<com.gerko.fourenote.data.ink.StickyNote> = emptyList(),
     modifier: Modifier = Modifier,
     placement: BackgroundPlacement = BackgroundPlacement(),
     adjustingBackground: Boolean = false,
@@ -936,6 +938,23 @@ fun InkCanvas(
         } else {
             drawBase()
             drawStrokes(unselected)
+        }
+
+        // Open sticky notes with their ink, clipped to the note (folded ones are icons, see StickyLayer).
+        for (sticky in stickies) {
+            if (sticky.folded) continue
+            val topLeft = Offset(sticky.x * scale, sticky.y * scale)
+            val box = Size(sticky.width * scale, sticky.height * scale)
+            drawRoundRect(Color.Black.copy(alpha = 0.12f), topLeft + Offset(0f, 2.dp.toPx()), box, CornerRadius(STICKY_CORNER * scale))
+            drawRoundRect(Color(sticky.color), topLeft, box, CornerRadius(STICKY_CORNER * scale))
+            clipRect(topLeft.x, topLeft.y, topLeft.x + box.width, topLeft.y + box.height) {
+                withTransform({
+                    scale(scale, scale, pivot = Offset.Zero)
+                    translate(sticky.x, sticky.y)
+                }) {
+                    for (stroke in sticky.strokes) drawInkStroke(stroke, pathCache.getOrPut(stroke) { stroke.toPath() })
+                }
+            }
         }
 
         if (adjustingBackground && background != null) {

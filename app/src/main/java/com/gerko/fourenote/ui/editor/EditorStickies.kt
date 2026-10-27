@@ -1,6 +1,9 @@
 package com.gerko.fourenote.ui.editor
 
+import com.gerko.fourenote.data.ink.InkLayer
+import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.StickyNote
+import com.gerko.fourenote.data.ink.lineage
 
 // Part of NoteEditorViewModel: Sticky notes: placing, moving, folding, colour.
 // Extension functions, so callers keep writing viewModel.x(); the state stays in the class.
@@ -70,4 +73,53 @@ fun NoteEditorViewModel.changeStickyColor(color: Int) {
     recordUndo()
     page.stickies[index] = page.stickies[index].copy(color = color)
     persist()
+}
+
+/** The open sticky note on top at ([x], [y]) on the page: its index in the page's list, or -1. */
+private fun NoteEditorViewModel.stickyIndexAt(pageId: String, x: Float, y: Float): Int {
+    val stickies = page(pageId)?.stickies ?: return -1
+    return stickies.indexOfLast { !it.folded && x >= it.x && x <= it.x + it.width && y >= it.y && y <= it.y + it.height }
+}
+
+/**
+ * A stroke that starts on an open sticky note belongs to the note: it is kept relative to the
+ * note's corner, so it moves, folds and syncs with it, and the page under it stays untouched.
+ * Returns false when the stroke is for the page.
+ */
+fun NoteEditorViewModel.addToSticky(pageId: String, stroke: InkStroke): Boolean {
+    if (stroke.points.size < 2) return false
+    val index = stickyIndexAt(pageId, stroke.points[0], stroke.points[1])
+    if (index < 0) return false
+    val page = page(pageId) ?: return false
+    val sticky = page.stickies[index]
+    val points = FloatArray(stroke.points.size) { i -> stroke.points[i] - if (i % 2 == 0) sticky.x else sticky.y }
+    recordUndo()
+    val added = InkStroke(
+        stroke.color, stroke.width, stroke.highlighter, points, stroke.widths, InkLayer.BASE_ID, stroke.id, stroke.nibAngle, stroke.squareEnds,
+    )
+    page.stickies[index] = sticky.copy(strokes = sticky.strokes + added)
+    persist()
+    return true
+}
+
+/** The eraser on an open sticky note rubs out the note's ink only. Returns false when not on a note. */
+fun NoteEditorViewModel.eraseOnSticky(pageId: String, x: Float, y: Float): Boolean {
+    val index = stickyIndexAt(pageId, x, y)
+    if (index < 0) return false
+    val page = page(pageId) ?: return false
+    val sticky = page.stickies[index]
+    val localX = x - sticky.x
+    val localY = y - sticky.y
+    val strokes = if (eraseWholeStrokes) {
+        sticky.strokes.filterNot { it.isHitBy(localX, localY, ERASER_RADIUS_DP) }
+    } else {
+        sticky.strokes.flatMap { stroke ->
+            // Pieces cut again in the same rub keep the original stroke as their ancestor (as on the page).
+            val replacing = if (stroke.id in cutThisRub) stroke.replaces else stroke.lineage()
+            stroke.erasedAround(localX, localY, ERASER_RADIUS_DP, replacing)?.also { pieces -> pieces.mapTo(cutThisRub) { it.id } } ?: listOf(stroke)
+        }
+    }
+    // Undo for the whole rub is recorded by endErase (beginErase took the snapshot).
+    if (strokes != sticky.strokes) page.stickies[index] = sticky.copy(strokes = strokes)
+    return true
 }
