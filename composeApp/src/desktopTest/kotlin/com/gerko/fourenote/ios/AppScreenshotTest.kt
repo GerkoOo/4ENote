@@ -8,12 +8,18 @@ import org.junit.Test
 import java.io.File
 
 class AppScreenshotTest {
+    @get:org.junit.Rule
+    val tmp = org.junit.rules.TemporaryFolder()
+
     @Test
     fun rendersAppToPng() {
+        val files = com.gerko.fourenote.ios.store.NoteFiles(tmp.newFolder())
         val scene = ImageComposeScene(width = 1366, height = 1024, density = Density(1f)) {
-            App()
+            App(files = files)
         }
         val image = scene.render()
+        // The first start adds the sample notes, once.
+        assertTrue(files.list().count { it.endsWith(".json") } == SampleNotes.all.size)
         val data = image.encodeToData(EncodedImageFormat.PNG)
             ?: error("Skia could not encode the screenshot")
         val out = File("build/screenshots/app.png")
