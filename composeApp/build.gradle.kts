@@ -21,6 +21,9 @@ kotlin {
 
     jvmToolchain(21)
 
+    // expect/actual classes (NoteFiles, AppLock) are still marked beta.
+    compilerOptions { freeCompilerArgs.add("-Xexpect-actual-classes") }
+
     sourceSets {
         commonMain.dependencies {
             implementation(project(":shared"))

@@ -20,6 +20,8 @@
 	<string>0.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>4ENote uses Face ID to unlock your notes when the app lock is on.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
