@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.sync.google
 
+import com.gerko.fourenote.data.sync.openStream
 import com.gerko.fourenote.data.sync.CloudProvider
 import com.gerko.fourenote.data.sync.RemoteFile
 import com.gerko.fourenote.data.sync.UploadContent
@@ -66,7 +67,7 @@ class GoogleDriveProvider(private val auth: GoogleAuth, private val folderCache:
                 connection.doOutput = true
                 connection.setFixedLengthStreamingMode(content.size)
                 connection.setRequestProperty("Content-Type", mimeType)
-                content.open().use { input -> connection.outputStream.use { input.copyTo(it, 64 * 1024) } }
+                content.openStream().use { input -> connection.outputStream.use { input.copyTo(it, 64 * 1024) } }
                 val text = connection.readBody()
                 JSONObject(text).toRemoteFile()
             } finally {

@@ -50,6 +50,12 @@ actual fun gzip(data: ByteArray): ByteArray {
     return out.toByteArray()
 }
 
+actual fun gzipText(write: (Appendable) -> Unit): ByteArray {
+    val bytes = ByteArrayOutputStream(64 * 1024)
+    java.io.BufferedWriter(java.io.OutputStreamWriter(GZIPOutputStream(bytes, 64 * 1024), Charsets.UTF_8), 64 * 1024).use(write)
+    return bytes.toByteArray()
+}
+
 actual fun gunzip(data: ByteArray, limit: Long): ByteArray {
     val out = ByteArrayOutputStream()
     val buffer = ByteArray(64 * 1024)

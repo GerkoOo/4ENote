@@ -20,6 +20,11 @@ kotlin {
             // Only the JsonElement/JsonObject/buildJsonObject API is used, no compiler plugin (Apache 2.0).
             // api: JsonReader hands out its JsonElement types to the app.
             api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+            // Sync runs in coroutines; Note and Folder carry Room's annotations (only the
+            // annotations: the database stays in each app); okio for files and upload streams.
+            api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+            api("androidx.room:room-common:2.8.5")
+            api("com.squareup.okio:okio:3.9.0")
         }
         jvmTest.dependencies {
             implementation("junit:junit:4.13.2")

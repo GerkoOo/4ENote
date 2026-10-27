@@ -20,7 +20,7 @@ import javax.crypto.spec.GCMParameterSpec
  * comes from the cloud's lock file when the password set on another device is entered here. On the
  * device it is kept encrypted by an Android Keystore key, which never leaves the tablet's hardware.
  */
-class NotesKeyring(private val store: Store, private val sealer: Sealer) {
+class NotesKeyring(private val store: Store, private val sealer: Sealer) : com.gerko.fourenote.data.sync.SyncKeys {
     /** Where the sealed key and the last known lock file live; an interface so this is testable without Android. */
     interface Store {
         var sealedKey: String?
@@ -64,6 +64,8 @@ class NotesKeyring(private val store: Store, private val sealer: Sealer) {
     /** What the privacy screen tells the user about encryption. */
     val state: StateFlow<State> = _state.asStateFlow()
 
+    override val isOff: Boolean get() = state.value == State.OFF
+
     private val _waiting = MutableStateFlow(0)
     /** Locked notes in the cloud the last sync couldn't open, for want of the key. */
     val waiting: StateFlow<Int> = _waiting.asStateFlow()
@@ -78,7 +80,7 @@ class NotesKeyring(private val store: Store, private val sealer: Sealer) {
     }
 
     /** The notes key, or null when this device has none (or its Keystore key is gone, as after a restore). */
-    fun key(): NotesKey? {
+    override fun key(): NotesKey? {
         cached?.let { return it }
         val sealed = store.sealedKey ?: return null
         val raw = runCatching { sealer.open(Base64.getDecoder().decode(sealed)) }.getOrNull() ?: return null
@@ -119,7 +121,7 @@ class NotesKeyring(private val store: Store, private val sealer: Sealer) {
      * Sync found [cloud] as the cloud's lock file (null: there is none). Returns the lock file to
      * upload, if any; call [uploaded] once it is there.
      */
-    fun reconcile(cloud: String?): String? {
+    override fun reconcile(cloud: String?): String? {
         val local = store.lockFile
         val key = key()
         try {
@@ -142,23 +144,23 @@ class NotesKeyring(private val store: Store, private val sealer: Sealer) {
         }
     }
 
-    fun uploaded(text: String) {
+    override fun uploaded(text: String) {
         if (store.lockFile == text) store.lockFileDirty = false
     }
 
     /** Whether this device may encrypt with its key: only once the cloud has that key's lock file. */
-    fun keyForUpload(): NotesKey? = key()?.takeIf { !store.lockFileDirty }
+    override fun keyForUpload(): NotesKey? = key()?.takeIf { !store.lockFileDirty }
 
     /** "keyId:version" of the note's cloud copy last seen encrypted with this device's key. */
-    fun encryptedVersion(noteId: String): String? = store.encryptedVersion(noteId)
+    override fun encryptedVersion(noteId: String): String? = store.encryptedVersion(noteId)
 
     /** The note's cloud copy at [version] is encrypted with this device's key. */
-    fun encryptedVersion(noteId: String, version: String) {
+    override fun encryptedVersion(noteId: String, version: String) {
         val key = key() ?: return
         store.setEncryptedVersion(noteId, "${key.id}:$version")
     }
 
-    fun reportWaiting(count: Int) {
+    override fun reportWaiting(count: Int) {
         _waiting.value = count
     }
 

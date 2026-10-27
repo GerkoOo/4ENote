@@ -1,11 +1,12 @@
 package com.gerko.fourenote.data.sync
 
 import com.gerko.fourenote.data.Note
+import com.gerko.fourenote.platform.gzipText
 
 /**
  * The `.4enote` files a note is stored as in the cloud. The text format itself lives in the
- * shared module ([NoteFileFormat]), so the iPad app reads and writes the same files; this is the
- * Android side of it: the note type, and the gzip wrapping of the cloud file.
+ * shared module ([NoteFileFormat]), so the iPad app reads and writes the same files; this adds
+ * the [Note] type and the gzip wrapping of the cloud file.
  */
 object NoteFile {
     const val EXTENSION = NoteFileFormat.EXTENSION
@@ -67,23 +68,16 @@ object NoteFile {
      * The note file as stored in the cloud: gzip-compressed, often 5 times smaller. Written in
      * pieces, so the text is never copied whole into bytes.
      */
-    fun toCloud(text: String): ByteArray = compressed { it.write(text) }
+    fun toCloud(text: String): ByteArray = compressed { it.append(text) }
 
     /** The note file, written straight into its compressed cloud form. */
     fun toCloud(note: Note, pdfId: String?, seen: Map<String, String> = emptyMap()): ByteArray =
         compressed { NoteFileFormat.encodeTo(note.toContent(), pdfId, it, seen) }
 
-    private fun compressed(write: (java.io.Writer) -> Unit): ByteArray {
-        val bytes = java.io.ByteArrayOutputStream(64 * 1024)
-        java.io.BufferedWriter(java.io.OutputStreamWriter(java.util.zip.GZIPOutputStream(bytes, 64 * 1024), Charsets.UTF_8), 64 * 1024)
-            .use(write)
-        return bytes.toByteArray()
-    }
+    private fun compressed(write: (Appendable) -> Unit): ByteArray = gzipText(write)
 
     /** The text of a cloud note file, compressed (this version) or not (older versions). */
-    fun fromCloud(bytes: ByteArray): String =
-        if (isGzip(bytes)) java.util.zip.GZIPInputStream(bytes.inputStream(), 64 * 1024).readLimited().decodeToString()
-        else bytes.decodeToString()
+    fun fromCloud(bytes: ByteArray): String = NoteGzip.fromCloud(bytes)
 
-    fun isGzip(bytes: ByteArray) = bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()
+    fun isGzip(bytes: ByteArray) = NoteGzip.isGzip(bytes)
 }

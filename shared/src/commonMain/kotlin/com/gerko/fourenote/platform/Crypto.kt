@@ -25,6 +25,9 @@ expect fun pbkdf2Sha256(password: CharArray, salt: ByteArray, iterations: Int, k
 /** A gzip file (one member) holding [data]. */
 expect fun gzip(data: ByteArray): ByteArray
 
+/** Text written by [write] as UTF-8, gzip-compressed; on the JVM without holding the text whole. */
+expect fun gzipText(write: (Appendable) -> Unit): ByteArray
+
 /** The content of a gzip file; throws when it is broken or would be over [limit] bytes. */
 expect fun gunzip(data: ByteArray, limit: Long): ByteArray
 

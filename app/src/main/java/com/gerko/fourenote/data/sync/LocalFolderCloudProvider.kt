@@ -32,7 +32,7 @@ class LocalFolderCloudProvider(private val folder: File) : CloudProvider {
         val file = File(folder, name)
         // Write then rename, so a reader never sees a half-written file.
         val temp = File(folder, ".$name.tmp")
-        content.open().use { input -> temp.outputStream().use { input.copyTo(it) } }
+        content.openStream().use { input -> temp.outputStream().use { input.copyTo(it) } }
         if (!temp.renameTo(file)) {
             file.delete()
             check(temp.renameTo(file)) { "Could not write $name" }

@@ -1,5 +1,7 @@
 package com.gerko.fourenote.data
 
+import okio.Path.Companion.toOkioPath
+import okio.source
 import android.util.Log
 import com.gerko.fourenote.data.attachments.AttachmentStore
 import com.gerko.fourenote.data.diagnostics.CrashLog
@@ -293,7 +295,7 @@ class NoteRepository(
             val request = open.firstOrNull {
                 scan.frame == 0 || com.gerko.fourenote.data.scan.ScanInbox.frameNumber(it.label) == scan.frame
             } ?: continue
-            val bytes = runCatching { scan.file.readBytes() }.getOrNull() ?: continue
+            val bytes = runCatching { scan.file.toFile().readBytes() }.getOrNull() ?: continue
             fillPhotoRequest(request.noteId, request.frameId, bytes)
             inbox.markUsed(scan.name)
             open.remove(request)
@@ -355,18 +357,23 @@ class NoteRepository(
         frameFills.emit(noteId to frames)
     }
 
-    override fun attachments(noteId: String): Map<String, java.io.File> =
+    override fun attachments(noteId: String): Map<String, okio.Path> =
         attachments.dir(noteId).listFiles().orEmpty()
             // Files being written start with a dot.
             .filter { it.isFile && !it.name.startsWith(".") }
-            .associateBy { it.name }
+            .associate { it.name to it.toOkioPath() }
 
-    override fun attachmentBytes(noteId: String, file: java.io.File): ByteArray = attachments.readPlain(file)
+    override fun attachmentBytes(noteId: String, file: okio.Path): ByteArray = attachments.readPlain(file.toFile())
 
-    override fun attachmentUpload(noteId: String, file: java.io.File): com.gerko.fourenote.data.sync.UploadContent =
+    override fun attachmentUpload(noteId: String, file: okio.Path): com.gerko.fourenote.data.sync.UploadContent {
+        val plain = file.toFile()
         // A sealed file goes up as its plain content, streamed (a PDF can be huge).
-        if (attachments.isSealedFile(file)) com.gerko.fourenote.data.sync.UploadContent(attachments.plainLength(file)) { attachments.openPlain(file) }
-        else com.gerko.fourenote.data.sync.UploadContent.of(file)
+        return if (attachments.isSealedFile(plain)) {
+            com.gerko.fourenote.data.sync.UploadContent(attachments.plainLength(plain)) { attachments.openPlain(plain).source() }
+        } else {
+            com.gerko.fourenote.data.sync.UploadContent.of(file)
+        }
+    }
 
     override suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {
         attachments.saveDownloaded(noteId, name, content)

@@ -1,5 +1,6 @@
 package com.gerko.fourenote
 
+import okio.Path.Companion.toOkioPath
 import android.app.Application
 import com.gerko.fourenote.data.AppDatabase
 import com.gerko.fourenote.data.NoteRepository
@@ -64,7 +65,7 @@ class FourENoteApp : Application() {
     val focusTimer: com.gerko.fourenote.data.focus.FocusTimer by lazy { com.gerko.fourenote.data.focus.FocusTimer(this) }
 
     /** Scans taken from the home page, waiting for the note with their photo frame. */
-    val scanInbox: ScanInbox by lazy { ScanInbox(java.io.File(filesDir, "inbox")) }
+    val scanInbox: ScanInbox by lazy { ScanInbox(java.io.File(filesDir, "inbox").toOkioPath()) }
 
     val syncManager: SyncManager by lazy { SyncManager(this, repository, attachments, googleAuth, appScope, scanInbox, notesKeyring) }
 

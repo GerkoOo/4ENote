@@ -1,13 +1,16 @@
 package com.gerko.fourenote.data.sync
 
-import java.io.File
-import java.io.InputStream
+import okio.Buffer
+import okio.FileSystem
+import okio.Path
+import okio.Source
+import okio.SYSTEM
 
 /** Data to upload, read as a stream so big files (like a long note's PDF) never have to fit in memory. */
-class UploadContent(val size: Long, val open: () -> InputStream) {
+class UploadContent(val size: Long, val open: () -> Source) {
     companion object {
-        fun of(bytes: ByteArray) = UploadContent(bytes.size.toLong()) { bytes.inputStream() }
-        fun of(file: File) = UploadContent(file.length()) { file.inputStream() }
+        fun of(bytes: ByteArray) = UploadContent(bytes.size.toLong()) { Buffer().write(bytes) }
+        fun of(file: Path) = UploadContent(FileSystem.SYSTEM.metadata(file).size ?: 0L) { FileSystem.SYSTEM.source(file) }
     }
 }
 
@@ -42,19 +45,4 @@ interface CloudProvider {
 }
 
 /** The largest file a sync reads into memory; a bigger one (hostile or broken server) is refused. */
-const val MAX_DOWNLOAD_BYTES = 256L * 1024 * 1024
-
-/** Reads the whole stream, but stops with an error past [limit] bytes instead of running out of memory. */
-fun InputStream.readLimited(limit: Long = MAX_DOWNLOAD_BYTES): ByteArray {
-    val out = java.io.ByteArrayOutputStream()
-    val buffer = ByteArray(64 * 1024)
-    var total = 0L
-    while (true) {
-        val read = read(buffer)
-        if (read < 0) break
-        total += read
-        if (total > limit) throw java.io.IOException("File too large (over ${limit / (1024 * 1024)} MB)")
-        out.write(buffer, 0, read)
-    }
-    return out.toByteArray()
-}
+const val MAX_DOWNLOAD_BYTES = NoteGzip.MAX_BYTES

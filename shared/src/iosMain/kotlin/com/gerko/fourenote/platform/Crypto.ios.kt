@@ -174,6 +174,9 @@ actual fun gzip(data: ByteArray): ByteArray = memScoped {
     out.bytes()
 }
 
+actual fun gzipText(write: (Appendable) -> Unit): ByteArray =
+    gzip(StringBuilder().also(write).toString().encodeToByteArray())
+
 actual fun gunzip(data: ByteArray, limit: Long): ByteArray = memScoped {
     val stream = alloc<z_stream>()
     stream.zalloc = null

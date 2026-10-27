@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.sync.webdav
 
+import com.gerko.fourenote.data.sync.openStream
 import com.gerko.fourenote.data.sync.CloudProvider
 import com.gerko.fourenote.data.sync.RemoteFile
 import com.gerko.fourenote.data.sync.UploadContent
@@ -55,7 +56,7 @@ class WebDavProvider(
                 connection.setRequestProperty("Content-Type", mimeType)
                 connection.doOutput = true
                 connection.setFixedLengthStreamingMode(content.size)
-                content.open().use { input -> connection.outputStream.use { input.copyTo(it, 64 * 1024) } }
+                content.openStream().use { input -> connection.outputStream.use { input.copyTo(it, 64 * 1024) } }
                 checkResponse(connection)
             } finally {
                 connection.disconnect()

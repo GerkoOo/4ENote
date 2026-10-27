@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalAtomicApi::class)
+
 package com.gerko.fourenote.data.sync
 
+import com.gerko.fourenote.platform.nowMillis
 import com.gerko.fourenote.data.ink.InkSerializer
 import com.gerko.fourenote.data.ink.PageImage
 import com.gerko.fourenote.data.Note
@@ -8,8 +11,11 @@ import com.gerko.fourenote.data.scan.ScanInbox
 import com.gerko.fourenote.data.security.LockFile
 import com.gerko.fourenote.data.security.LockedNoteFile
 import com.gerko.fourenote.data.security.NotesKey
-import com.gerko.fourenote.data.security.NotesKeyring
-import java.io.File
+import okio.FileSystem
+import okio.Path
+import okio.SYSTEM
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /** The local side of sync; implemented over Room by NoteRepository. */
 interface SyncStore {
@@ -42,13 +48,13 @@ interface SyncStore {
     suspend fun forgetPeer(noteId: String, deviceId: String) {}
 
     /** The note's pictures and PDF pages on this device: file name to file. They never change once written. */
-    fun attachments(noteId: String): Map<String, File> = emptyMap()
+    fun attachments(noteId: String): Map<String, Path> = emptyMap()
 
     /** An attachment's plain content (a locked note's pictures are encrypted on the device). */
-    fun attachmentBytes(noteId: String, file: File): ByteArray = file.readBytes()
+    fun attachmentBytes(noteId: String, file: Path): ByteArray = FileSystem.SYSTEM.read(file) { readByteArray() }
 
     /** An attachment ready to upload as it is; big files (PDFs) are streamed from the file. */
-    fun attachmentUpload(noteId: String, file: File): UploadContent = UploadContent.of(file)
+    fun attachmentUpload(noteId: String, file: Path): UploadContent = UploadContent.of(file)
 
     /** Stores a picture or PDF page that came from the cloud. */
     suspend fun saveAttachment(noteId: String, name: String, content: ByteArray) {}
@@ -105,7 +111,7 @@ data class SyncResult(
     val deletedInCloud: Int = 0,
     val skippedOpen: Int = 0,
     val errors: List<String> = emptyList(),
-    /** Locked notes left alone because this device lacks the notes key (see NotesKeyring). */
+    /** Locked notes left alone because this device lacks the notes key (see SyncKeys). */
     val needPassword: Int = 0,
 )
 
@@ -128,14 +134,14 @@ class SyncEngine(
     private val store: SyncStore,
     private val provider: CloudProvider,
     /** Writes the note's PDF copy to a temporary file (deleted after upload), or returns null to skip it. */
-    private val pdfExporter: ((Note) -> File?)? = null,
-    private val clock: () -> Long = System::currentTimeMillis,
+    private val pdfExporter: ((Note) -> Path?)? = null,
+    private val clock: () -> Long = ::nowMillis,
     /** This device's id (see [DeviceIdentity]): it writes only the cloud files named after it. */
     private val deviceId: String,
     /** Scans waiting for their photo frame, kept in the cloud too so any device can place them. */
     private val inbox: ScanInbox? = null,
     /** Encrypts locked notes and their pictures; without it they sync readable, as before encryption. */
-    private val keys: NotesKeyring? = null,
+    private val keys: SyncKeys? = null,
 ) {
     private var uploaded = 0
     private var downloaded = 0
@@ -214,7 +220,7 @@ class SyncEngine(
         return SyncResult(uploaded, downloaded, merged, deletedHere, deletedInCloud, skippedOpen, errors, needKey.size)
     }
 
-    private suspend fun syncLockFile(keys: NotesKeyring, files: List<RemoteFile>) {
+    private suspend fun syncLockFile(keys: SyncKeys, files: List<RemoteFile>) {
         val cloud = files.firstOrNull { it.name == LockFile.NAME }
         val text = cloud?.let { provider.download(it.id).decodeToString() }
         val upload = keys.reconcile(text) ?: return
@@ -291,7 +297,7 @@ class SyncEngine(
     private fun sealingFor(note: Note): Sealing {
         if (!note.locked || keys == null) return Sealing.Plain
         keys.keyForUpload()?.let { return Sealing.With(it) }
-        return if (keys.state.value == NotesKeyring.State.OFF) Sealing.Plain else Sealing.Skip
+        return if (keys.isOff) Sealing.Plain else Sealing.Skip
     }
 
     /**
@@ -441,7 +447,7 @@ class SyncEngine(
         // note is still missing (for instance one skipped by an older version of the app), or
         // encrypt a locked note that went up readable before the 4ENote password was set.
         if (changed.isEmpty()) {
-            val pdfMissing = pdfExporter != null && note.remotePdfId == null && !note.locked && pdfFailed[note.id] != note.updatedAt
+            val pdfMissing = pdfExporter != null && note.remotePdfId == null && !note.locked && pdfFailed.load()[note.id] != note.updatedAt
             val catchUp = own != null && (pdfMissing || needsSealing(note, own))
             if ((note.dirty || catchUp) && upload(note, own?.id)) uploaded++
             return
@@ -502,7 +508,7 @@ class SyncEngine(
         add(store.peerSnapshot(note.id, device))
         val versions = store.peerVersions(note.id)
         // In device order, so every device builds the same base.
-        for ((other, version) in seen.toSortedMap()) {
+        for ((other, version) in seen.entries.sortedBy { it.key }) {
             if (other != deviceId && other != device && versions[other] == version) add(store.peerSnapshot(note.id, other))
         }
         return base
@@ -546,12 +552,12 @@ class SyncEngine(
                 val pdf = export(note)
                 // Not tried again for this version of the note while the app runs: every sync
                 // would otherwise upload the note again only to fail the same way.
-                if (pdf == null) pdfFailed[note.id] = note.updatedAt
+                if (pdf == null) pdfFailed.update { it + (note.id to note.updatedAt) }
                 pdf?.let {
                     try {
                         provider.upload(pdfName(note), PDF_MIME_TYPE, UploadContent.of(it), note.remotePdfId).id
                     } finally {
-                        it.delete()
+                        FileSystem.SYSTEM.delete(it)
                     }
                 }
             } ?: note.remotePdfId
@@ -577,7 +583,7 @@ class SyncEngine(
         val reads = mutableListOf<Triple<String, String, ByteArray>>()
         val done = mutableListOf<Triple<String, String, CloudNote>>()
         // In device id order, the order every device's merges agree on.
-        val all = (files.peers + listOfNotNull(files.own?.let { deviceId to it })).toSortedMap()
+        val all = (files.peers + listOfNotNull(files.own?.let { deviceId to it })).entries.sortedBy { it.key }
         for ((device, file) in all) {
             val read = readNote(file, noteId) ?: return
             // As in commonBase: files already put in that this one saw, and this one if one of them saw it.
@@ -609,10 +615,17 @@ class SyncEngine(
 
     companion object {
         /** Notes whose PDF copy failed, with the note's updatedAt then (see [upload]). */
-        private val pdfFailed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        private val pdfFailed = AtomicReference(emptyMap<String, Long>())
+
+        private inline fun AtomicReference<Map<String, Long>>.update(change: (Map<String, Long>) -> Map<String, Long>) {
+            while (true) {
+                val old = load()
+                if (compareAndSet(old, change(old))) return
+            }
+        }
 
         /** Forgets failed PDF copies, as a restart of the app does. */
-        internal fun forgetPdfFailures() = pdfFailed.clear()
+        fun forgetPdfFailures() = pdfFailed.store(emptyMap())
 
         const val PDF_MIME_TYPE = "application/pdf"
         /** Added to the cloud name of a locked note's picture or PDF page once it is encrypted. */

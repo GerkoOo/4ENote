@@ -3,7 +3,7 @@ package com.gerko.fourenote.data
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import java.util.UUID
+import com.gerko.fourenote.platform.nowMillis
 
 /**
  * Shared contract between the handwriting canvas and cloud sync.
@@ -20,11 +20,11 @@ import java.util.UUID
  */
 @Entity(tableName = "notes")
 data class Note(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    @PrimaryKey val id: String = newId(),
     val title: String = "",
     val inkData: String = "",
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = nowMillis(),
+    val updatedAt: Long = nowMillis(),
     // Column keeps its original name so existing databases need no table rebuild.
     @ColumnInfo(name = "driveFileId") val remoteId: String? = null,
     val lastSyncedAt: Long? = null,

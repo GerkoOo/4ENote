@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.sync
 
+import okio.Path.Companion.toOkioPath
 import com.gerko.fourenote.data.Note
 import com.gerko.fourenote.data.ink.InkDocument
 import com.gerko.fourenote.data.ink.InkPage
@@ -35,7 +36,7 @@ class SyncEngineTest {
 
     /** Mirrors the Room-backed repository: saving marks a note dirty with a fresh timestamp. */
     private inner class Device(val id: String) : SyncStore {
-        val inbox = com.gerko.fourenote.data.scan.ScanInbox(tmp.newFolder())
+        val inbox = com.gerko.fourenote.data.scan.ScanInbox(tmp.newFolder().toOkioPath())
         var folders = listOf<com.gerko.fourenote.data.Folder>()
         override suspend fun foldersForSync() = folders
         override suspend fun saveFoldersFromSync(folders: List<com.gerko.fourenote.data.Folder>) {
@@ -65,7 +66,7 @@ class SyncEngineTest {
         val engine = SyncEngine(
             this,
             provider,
-            pdfExporter = { note -> tmp.newFile().apply { writeText("PDF ${note.title}") } },
+            pdfExporter = { note -> tmp.newFile().apply { writeText("PDF ${note.title}") }.toOkioPath() },
             clock = clock,
             deviceId = id,
             inbox = inbox,
@@ -156,7 +157,7 @@ class SyncEngineTest {
             files.getOrPut(noteId) { mutableMapOf() }[name] = tmp.newFile().apply { writeText(content) }
         }
 
-        override fun attachments(noteId: String): Map<String, java.io.File> = files[noteId].orEmpty()
+        override fun attachments(noteId: String): Map<String, okio.Path> = files[noteId].orEmpty().mapValues { it.value.toOkioPath() }
 
         val delivered = mutableListOf<Pair<String, List<com.gerko.fourenote.data.ink.PageImage>>>()
 
@@ -412,7 +413,7 @@ class SyncEngineTest {
         a.addPicture("n1", "photo.jpg", "JPEG bytes")
         a.sync()
         b.sync()
-        assertEquals("JPEG bytes", b.attachments("n1").getValue("photo.jpg").readText())
+        assertEquals("JPEG bytes", b.attachments("n1").getValue("photo.jpg").toFile().readText())
 
         // A picture added on B reaches A too.
         b.addPicture("n1", "scan.jpg", "scan bytes")
@@ -467,7 +468,7 @@ class SyncEngineTest {
 
         assertEquals("photo.jpg", a.delivered.single().second.single().file)
         // The photo itself arrived too, before the frame was handed over.
-        assertEquals("JPEG", a.attachments("n1").getValue("photo.jpg").readText())
+        assertEquals("JPEG", a.attachments("n1").getValue("photo.jpg").toFile().readText())
     }
 
     @Test
@@ -492,7 +493,7 @@ class SyncEngineTest {
         val arrived = a.inbox.pending().single()
         assertEquals(scan.name, arrived.name)
         assertEquals(2, arrived.frame)
-        assertEquals("JPEG", arrived.file.readText())
+        assertEquals("JPEG", arrived.file.toFile().readText())
 
         // The tablet puts it into its frame: gone from the cloud, then from the phone too.
         a.inbox.markUsed(arrived.name)

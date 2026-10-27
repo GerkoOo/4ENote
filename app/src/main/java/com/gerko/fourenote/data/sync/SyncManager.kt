@@ -1,5 +1,6 @@
 package com.gerko.fourenote.data.sync
 
+import okio.Path.Companion.toOkioPath
 import androidx.work.WorkManager
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.NetworkType
@@ -172,7 +173,7 @@ class SyncManager(
         return mutex.withLock {
             _status.value = SyncStatus.Syncing
             try {
-                val engine = SyncEngine(repository, provider, ::exportPdf, deviceId = DeviceIdentity.id(context), inbox = inbox, keys = keys)
+                val engine = SyncEngine(repository, provider, { exportPdf(it)?.toOkioPath() }, deviceId = DeviceIdentity.id(context), inbox = inbox, keys = keys)
                 var result = engine.sync()
                 // Scans that found their frame make notes to upload (and scans to remove from the cloud).
                 if (repository.placeInboxScans(inbox) > 0) result = engine.sync()
