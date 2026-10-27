@@ -13,6 +13,8 @@ kotlin {
         target.binaries.framework {
             baseName = "FourENote"
             isStatic = true
+            // Swift implements the shared AesGcmBridge (CryptoKit), so it must see the shared types.
+            export(project(":shared"))
         }
     }
     jvm("desktop") {
@@ -26,7 +28,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(project(":shared"))
+            api(project(":shared"))
             implementation("org.jetbrains.compose.runtime:runtime:$composeVersion")
             implementation("org.jetbrains.compose.foundation:foundation:$composeVersion")
             implementation("org.jetbrains.compose.ui:ui:$composeVersion")
