@@ -12,20 +12,32 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import com.gerko.fourenote.data.ink.InkPage
 import com.gerko.fourenote.data.ink.InkStroke
 import com.gerko.fourenote.data.ink.PaperStyle
+import com.gerko.fourenote.data.ink.outline
 
 /**
- * Draws one page of a note: its paper, then its strokes. Everything is scaled by the canvas
- * width over the page width, so a page looks the same at any size.
+ * Draws one page of a note: its paper, then its strokes, then [liveStroke] (the stroke being
+ * written right now, if any). Everything is scaled by the canvas width over the page width, so a
+ * page looks the same at any size.
  */
 @Composable
-fun PageView(page: InkPage, paper: PaperStyle, modifier: Modifier = Modifier) {
+fun PageView(
+    page: InkPage,
+    paper: PaperStyle,
+    modifier: Modifier = Modifier,
+    liveStroke: InkStroke? = null,
+) {
     Canvas(modifier.clipToBounds()) {
         val scale = size.width / page.width
         drawPaper(paper, scale)
-        for (stroke in page.strokes) drawStroke(stroke, scale)
+        // Ink is in page units: drawn through one scale, so positions and widths both follow the page size.
+        scale(scale, scale, pivot = Offset.Zero) {
+            for (stroke in page.strokes) drawStroke(stroke)
+            liveStroke?.let { drawStroke(it) }
+        }
     }
 }
 
@@ -68,19 +80,20 @@ private fun DrawScope.drawPaper(paper: PaperStyle, scale: Float) {
     }
 }
 
-private fun DrawScope.drawStroke(stroke: InkStroke, scale: Float) {
+private fun DrawScope.drawStroke(stroke: InkStroke) {
     val color = Color(stroke.color)
     val blend = if (stroke.highlighter) BlendMode.Multiply else BlendMode.SrcOver
     val points = stroke.points
     val widths = stroke.widths
     if (points.size < 2) return
     if (points.size == 2) {
-        // A single point: draw a dot the size of the pen.
-        val radius = (widths?.firstOrNull() ?: stroke.width) * scale / 2f
+        // A single point: a dot the size of the pen.
+        val radius = stroke.width * (widths?.firstOrNull() ?: 1f) / 2f
         drawCircle(color, radius = radius, center = Offset(points[0], points[1]), blendMode = blend)
         return
     }
-    if (widths == null) {
+    val outline = if (widths != null) stroke.outline() else FloatArray(0)
+    if (outline.size < 6) {
         val path = Path()
         path.moveTo(points[0], points[1])
         var i = 2
@@ -88,31 +101,22 @@ private fun DrawScope.drawStroke(stroke: InkStroke, scale: Float) {
             path.lineTo(points[i], points[i + 1])
             i += 2
         }
-        drawPath(
-            path = path,
-            color = color,
-            style = Stroke(width = stroke.width * scale, cap = StrokeCap.Round, join = StrokeJoin.Round),
-            blendMode = blend,
-        )
-    } else {
-        // Variable width: each segment gets the average of its two point widths.
-        var i = 2
-        var segment = 1
-        while (i < points.size) {
-            val w0 = widths.getOrElse(segment - 1) { stroke.width }
-            val w1 = widths.getOrElse(segment) { stroke.width }
-            drawLine(
-                color = color,
-                start = Offset(points[i - 2], points[i - 1]),
-                end = Offset(points[i], points[i + 1]),
-                strokeWidth = (w0 + w1) / 2f * scale,
-                cap = StrokeCap.Round,
-                blendMode = blend,
-            )
-            i += 2
-            segment++
-        }
+        drawPath(path, color, style = Stroke(width = stroke.width, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend)
+        return
     }
+    // Variable width: the filled outline, with round ends as the outline leaves them open.
+    val path = Path()
+    path.moveTo(outline[0], outline[1])
+    var i = 2
+    while (i < outline.size) {
+        path.lineTo(outline[i], outline[i + 1])
+        i += 2
+    }
+    path.close()
+    drawPath(path, color, blendMode = blend)
+    val last = points.size / 2 - 1
+    drawCircle(color, stroke.width * widths!![0] / 2f, Offset(points[0], points[1]), blendMode = blend)
+    drawCircle(color, stroke.width * widths[minOf(last, widths.lastIndex)] / 2f, Offset(points[2 * last], points[2 * last + 1]), blendMode = blend)
 }
 
 private val PAPER_COLOR = Color(0xFFFFFDF7)
