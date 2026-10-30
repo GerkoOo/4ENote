@@ -69,6 +69,12 @@ and `local.properties` pointing `sdk.dir` at your SDK (not committed).
 No accounts, no tracking, no servers of our own: notes stay on your device and in your own
 cloud. See the [privacy policy](PRIVACY.md).
 
+## Support
+
+4ENote is free, with no ads. If it helps you, you can
+[buy me a coffee on PayPal](https://www.paypal.com/donate/?hosted_button_id=HV9GCS9T75UT8)
+(also in the app: the coffee cup at the top of the notes list). Starring the repo and reporting bugs help too.
+
 ## License
 
 4ENote is licensed under the [GNU General Public License v3.0](LICENSE).

@@ -47,7 +47,7 @@ import com.gerko.fourenote.data.diagnostics.CrashLog
 /** Where the support page's buttons lead. The donation opens PayPal in the browser; nothing is paid inside the app. */
 object SupportLinks {
     /** The PayPal donation link (paypal.me/… or a PayPal donate button link); the button is hidden while empty. */
-    const val PAYPAL = ""
+    const val PAYPAL = "https://www.paypal.com/donate/?hosted_button_id=HV9GCS9T75UT8"
     const val GITHUB = "https://github.com/GerkoOo/4ENote"
     const val ISSUES = "https://github.com/GerkoOo/4ENote/issues"
     const val DOWNLOAD = "https://github.com/GerkoOo/4ENote/releases/latest"
