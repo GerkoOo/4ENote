@@ -28,6 +28,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.gerko.fourenote.data.ink.PageText
 import com.gerko.fourenote.data.ink.StickyNote
 import kotlin.math.roundToInt
 
@@ -45,7 +46,8 @@ internal const val STICKY_CORNER = 4f
  * tool) a tap selects an open note, dragging its body moves it and the handle at its bottom-right
  * corner resizes it; the change is reported once, when the drag ends. Otherwise the body takes no
  * touches at all, so the pen and fingers draw on the page as usual; only the fold button and a
- * folded note's icon stay tappable.
+ * folded note's icon stay tappable. Text boxes typed on a note sit inside it; with [textTool] a tap
+ * on one picks it up for typing.
  */
 @Composable
 fun StickyLayer(
@@ -61,6 +63,12 @@ fun StickyLayer(
     onDelete: () -> Unit,
     /** The note being moved or resized, until the gesture ends (null after); the page draws it. */
     onLive: (StickyNote?) -> Unit,
+    /** The text box being typed in, as (sticky id, text id), or null. */
+    editingText: Pair<String, String>?,
+    textTool: Boolean,
+    onEditText: (stickyId: String, textId: String) -> Unit,
+    onTextChange: (stickyId: String, PageText) -> Unit,
+    onTextDelete: () -> Unit,
 ) {
     for (sticky in stickies) {
         if (sticky.folded) {
@@ -78,6 +86,11 @@ fun StickyLayer(
                 onToggleFold = { onToggleFold(sticky.id) },
                 onDelete = onDelete,
                 onLive = onLive,
+                editingTextId = editingText?.takeIf { it.first == sticky.id }?.second,
+                textTool = textTool,
+                onEditText = { onEditText(sticky.id, it) },
+                onTextChange = { onTextChange(sticky.id, it) },
+                onTextDelete = onTextDelete,
             )
         }
     }
@@ -120,6 +133,11 @@ private fun OpenSticky(
     onToggleFold: () -> Unit,
     onDelete: () -> Unit,
     onLive: (StickyNote?) -> Unit,
+    editingTextId: String?,
+    textTool: Boolean,
+    onEditText: (String) -> Unit,
+    onTextChange: (PageText) -> Unit,
+    onTextDelete: () -> Unit,
 ) {
     val density = LocalDensity.current
     val current by rememberUpdatedState(sticky)
@@ -145,8 +163,9 @@ private fun OpenSticky(
             .offset { IntOffset((shown.x * pxPerUnit).roundToInt(), (shown.y * pxPerUnit).roundToInt()) }
             .size(width, height)
             // The note itself (colour and ink) is drawn by the page's InkCanvas, under the pen's
-            // stroke in progress; this box only holds the buttons and takes moves and resizes.
-            .clip(shape)
+            // stroke in progress; this box holds the text, the buttons, and takes moves and resizes.
+            // While a box is typed in, its handles may stick out of the note, so nothing is clipped.
+            .then(if (editingTextId == null) Modifier.clip(shape) else Modifier)
             .then(if (selected) Modifier.border(2.dp, accent, shape) else Modifier)
             // Only the interactive layer takes touches on the body; otherwise they reach the page.
             .then(
@@ -175,6 +194,15 @@ private fun OpenSticky(
                 },
             ),
     ) {
+        TextBoxLayer(
+            texts = shown.texts,
+            pxPerUnit = pxPerUnit,
+            editingId = editingTextId,
+            textTool = textTool,
+            onEdit = onEditText,
+            onChange = onTextChange,
+            onDelete = onTextDelete,
+        )
         // Fold button at the top-right corner, always tappable.
         Box(
             contentAlignment = Alignment.Center,

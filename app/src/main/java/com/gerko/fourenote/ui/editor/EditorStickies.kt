@@ -49,6 +49,10 @@ fun NoteEditorViewModel.deleteSelectedSticky() {
     val page = page(pageId) ?: return
     if (page.stickies.none { it.id == stickyId }) return
     recordUndo()
+    if (editingSticky == stickyId) {
+        editingText = null
+        editingSticky = null
+    }
     page.stickies.removeAll { it.id == stickyId }
     selectedSticky = null
     persist()
@@ -56,6 +60,8 @@ fun NoteEditorViewModel.deleteSelectedSticky() {
 
 fun NoteEditorViewModel.toggleFold(pageId: String, stickyId: String) {
     val page = page(pageId) ?: return
+    // Folding away the note being typed in ends the typing (and drops a box left blank).
+    if (editingSticky == stickyId) finishTextEditing()
     val index = page.stickies.indexOfFirst { it.id == stickyId }
     if (index < 0) return
     recordUndo()
@@ -76,7 +82,7 @@ fun NoteEditorViewModel.changeStickyColor(color: Int) {
 }
 
 /** The open sticky note on top at ([x], [y]) on the page: its index in the page's list, or -1. */
-private fun NoteEditorViewModel.stickyIndexAt(pageId: String, x: Float, y: Float): Int {
+internal fun NoteEditorViewModel.stickyIndexAt(pageId: String, x: Float, y: Float): Int {
     val stickies = page(pageId)?.stickies ?: return -1
     return stickies.indexOfLast { !it.folded && x >= it.x && x <= it.x + it.width && y >= it.y && y <= it.y + it.height }
 }

@@ -1222,7 +1222,7 @@ private fun PageList(
                         TextBoxLayer(
                             texts = page.texts,
                             pxPerUnit = itemWidthPx / page.width,
-                            editingId = viewModel.editingText?.takeIf { it.first == page.id }?.second,
+                            editingId = viewModel.editingText?.takeIf { it.first == page.id && viewModel.editingSticky == null }?.second,
                             // The Text tool and Select both pick up typed text with a tap.
                             textTool = viewModel.tool == Tool.TEXT || viewModel.tool == Tool.LASSO,
                             onEdit = { viewModel.editText(page.id, it) },
@@ -1241,6 +1241,13 @@ private fun PageList(
                             onToggleFold = { viewModel.toggleFold(page.id, it) },
                             onDelete = viewModel::deleteSelectedSticky,
                             onLive = { liveSticky = it },
+                            editingText = viewModel.editingText
+                                ?.takeIf { it.first == page.id }
+                                ?.let { (_, textId) -> viewModel.editingSticky?.let { it to textId } },
+                            textTool = viewModel.tool == Tool.TEXT || viewModel.tool == Tool.LASSO,
+                            onEditText = { stickyId, textId -> viewModel.editStickyText(page.id, stickyId, textId) },
+                            onTextChange = { stickyId, box -> viewModel.updateStickyText(page.id, stickyId, box) },
+                            onTextDelete = viewModel::deleteEditingText,
                         )
                         // Badges are in the way while arranging pages, which is only for moving them.
                         if (!arrange) {

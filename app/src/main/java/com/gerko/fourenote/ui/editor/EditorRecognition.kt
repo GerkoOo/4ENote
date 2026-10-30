@@ -141,6 +141,7 @@ fun NoteEditorViewModel.placeText(text: String, replace: Boolean) {
     // Open it for typing straight away, like any text box.
     tool = Tool.TEXT
     editingText = page.id to box.id
+    editingSticky = null
 }
 
 fun NoteEditorViewModel.closeRecognition() {

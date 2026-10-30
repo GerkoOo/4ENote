@@ -352,6 +352,10 @@ class NoteEditorViewModel(
     var editingText by mutableStateOf<Pair<String, String>?>(null)
         internal set
 
+    /** The sticky note holding the text box being typed in, or null when the box is on the page. */
+    var editingSticky by mutableStateOf<String?>(null)
+        internal set
+
     /** The look of the text box being edited, and of the next new one. */
     var textStyle by mutableStateOf(TextStyleSpec())
         internal set
@@ -499,6 +503,7 @@ class NoteEditorViewModel(
     fun undo() {
         recentLoop = null
         editingText = null
+        editingSticky = null
         selectedSticky = null
         val previous = undoStack.removeLastOrNull() ?: return
         redoStack.addLast(snapshot())
@@ -508,6 +513,7 @@ class NoteEditorViewModel(
     fun redo() {
         recentLoop = null
         editingText = null
+        editingSticky = null
         selectedSticky = null
         val next = redoStack.removeLastOrNull() ?: return
         undoStack.addLast(snapshot())
